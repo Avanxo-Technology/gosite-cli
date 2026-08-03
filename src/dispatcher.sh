@@ -19,7 +19,8 @@ $(printf "${C_BOLD}USAGE${C_NC}")
   gosite [global flags] <command> [args]
 
 $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
-  create <name>      Scaffold a new project in ${GOSITE_WORKSPACE} (--here for cwd)
+  create <name>      Scaffold a new project in ${GOSITE_WORKSPACE}
+                     flags: --here (cwd), --no-tailwind (plain CSS)
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack
   logs   [name]      Tail a project's logs ([app|cms] [-n N] [--no-follow])

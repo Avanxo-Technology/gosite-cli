@@ -13,6 +13,9 @@
 # Note: __PG_PORT__/__REDIS_PORT__ render to the IN-NETWORK ports (5432/6379),
 # not the host-published ones. Project containers always reach the shared
 # services by container name on gosite-network, never through the host.
+# Set by cmd_create, read by the view writers.
+TAILWIND=1
+
 render_placeholders() {
   local file="$1" tmp
   tmp="$(mktemp)"
@@ -31,17 +34,23 @@ render_placeholders() {
     -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
+    -e "s|__TAILWIND__|${TAILWIND}|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
 }
 
 cmd_create() {
   local PROJECT_NAME="" here=0
+  # Tailwind is on by default; --no-tailwind swaps it for a small stylesheet.
+  # Either way the generated markup is clean: no orphan utility classes.
+  TAILWIND=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --here) here=1; shift ;;
-      -*)     fatal "Unknown flag for 'create': $1 (expected --here)" ;;
-      *)      PROJECT_NAME="$1"; shift ;;
+      --here)         here=1; shift ;;
+      --no-tailwind)  TAILWIND=0; shift ;;
+      --tailwind)     TAILWIND=1; shift ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind)" ;;
+      *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
 
@@ -761,6 +770,10 @@ EOF
 # -----------------------------------------------------------------------------
 # Markup only, one component per file, rendered with the standard library's
 # html/template and embedded with go:embed.
+#
+# The markup differs between the two styling modes on purpose: with Tailwind
+# the components carry utility classes, without it they carry semantic class
+# names styled by static/app.css. Neither mode leaves classes that do nothing.
 _write_views() {
   cat > "$1/views/render.go" <<'EOF'
 // Package views owns every piece of markup and the renderer that turns it into
@@ -825,6 +838,15 @@ func (r *Renderer) Page(w io.Writer, name string, data any) error {
 }
 EOF
 
+  if [[ "${TAILWIND}" -eq 1 ]]; then
+    _write_views_tailwind "$1"
+  else
+    _write_views_plain "$1"
+  fi
+}
+
+# --- Tailwind flavour ---------------------------------------------------------
+_write_views_tailwind() {
   cat > "$1/views/layout.html" <<'EOF'
 {{/*
   Base HTML document: Tailwind CSS, htmx and Alpine.js, and nothing else.
@@ -914,6 +936,187 @@ EOF
 {{define "empty"}}
 <li class="text-slate-500">{{.}}</li>
 {{end}}
+EOF
+}
+
+# --- plain CSS flavour --------------------------------------------------------
+_write_views_plain() {
+  cat > "$1/views/layout.html" <<'EOF'
+{{/*
+  Base HTML document: one stylesheet, htmx and Alpine.js. Every page fills in
+  the "content" block.
+
+  htmx and Alpine are loaded from a CDN to keep local development build-free.
+  Before going to production, vendor them into /static so the site does not
+  depend on third-party uptime and a CSP can be tightened.
+*/}}
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{{.Title}}</title>
+	<link rel="stylesheet" href="/static/app.css">
+	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
+	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
+</head>
+<body>
+	<main class="container">
+		{{template "content" .}}
+	</main>
+</body>
+</html>{{end}}
+EOF
+
+  cat > "$1/views/pages/home.html" <<'EOF'
+{{/* The home page: a header with the purge button, then the article list. */}}
+{{define "content"}}
+<header class="page-header">
+	<h1>{{.Title}}</h1>
+	{{template "purge-button" .}}
+</header>
+
+<ul class="articles" x-data="{ open: null }">
+	{{- range .Articles }}
+	{{template "card" .}}
+	{{- else }}
+	{{template "empty" "No articles published yet."}}
+	{{- end }}
+</ul>
+{{end}}
+EOF
+
+  cat > "$1/views/components/card.html" <<'EOF'
+{{/*
+  A single article card. Expects an Alpine `open` scope from its parent list,
+  which is what lets one card be expanded at a time.
+*/}}
+{{define "card"}}
+<li class="card">
+	<button class="card-toggle" @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
+		<h2>{{.Title}}</h2>
+		<p class="excerpt">{{.Excerpt}}</p>
+	</button>
+
+	<div class="card-body" x-show="open === '{{.ID}}'" x-cloak>
+		<p>{{.Body}}</p>
+		<a href="{{.URL}}">Read more</a>
+	</div>
+</li>
+{{end}}
+EOF
+
+  cat > "$1/views/components/button.html" <<'EOF'
+{{/*
+  Purges the cached page and reloads, so the next render comes from the CMS.
+  htmx posts the request; Alpine only handles the "Purging..." label.
+*/}}
+{{define "purge-button"}}
+<button
+	class="button"
+	x-data="{ busy: false }"
+	x-text="busy ? 'Purging...' : 'Purge cache'"
+	hx-post="/cache/purge"
+	hx-swap="none"
+	@htmx:before-request="busy = true"
+	@htmx:after-request="window.location.reload()"
+>Purge cache</button>
+{{end}}
+EOF
+
+  cat > "$1/views/components/state.html" <<'EOF'
+{{/* Empty state, kept separate so copy changes never touch logic. */}}
+{{define "empty"}}
+<li class="empty">{{.}}</li>
+{{end}}
+EOF
+
+  # Served from /static, so it is cached by the browser and never inlined.
+  cat > "$1/static/app.css" <<'EOF'
+/* __PROJECT__ - plain CSS, no build step.
+   Custom properties first so a restyle is a few values, not a find-replace. */
+:root {
+	--bg: #f8fafc;
+	--surface: #ffffff;
+	--text: #0f172a;
+	--muted: #475569;
+	--border: #e2e8f0;
+	--accent: #2563eb;
+	--radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0f172a;
+		--surface: #1e293b;
+		--text: #e2e8f0;
+		--muted: #94a3b8;
+		--border: #334155;
+		--accent: #60a5fa;
+	}
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[x-cloak] { display: none !important; }
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+.container { max-width: 48rem; margin: 0 auto; padding: 3rem 1.5rem; }
+
+.page-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 2rem;
+}
+.page-header h1 { margin: 0; font-size: 1.875rem; letter-spacing: -0.02em; }
+
+.button {
+	padding: 0.5rem 1rem;
+	border: 0;
+	border-radius: var(--radius);
+	background: var(--text);
+	color: var(--bg);
+	font: inherit;
+	font-size: 0.875rem;
+	cursor: pointer;
+}
+.button:hover { opacity: 0.85; }
+
+.articles { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1.25rem;
+}
+.card-toggle {
+	display: block;
+	width: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.card-toggle h2 { margin: 0; font-size: 1.125rem; }
+.card .excerpt { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.875rem; }
+
+.card-body { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.card-body p { margin: 0; font-size: 0.875rem; color: var(--muted); }
+.card-body a { display: inline-block; margin-top: 0.5rem; color: var(--accent); font-size: 0.875rem; }
+
+.empty { color: var(--muted); }
 EOF
 }
 
@@ -1194,6 +1397,7 @@ GOSITE_PROJECT=__PROJECT__
 GOSITE_MODULE=__MODULE__
 GOSITE_APP_PORT=__APP_PORT__
 GOSITE_CMS_PORT=__CMS_PORT__
+GOSITE_TAILWIND=__TAILWIND__
 GOSITE_APP_DOMAIN=__DOMAIN__
 GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
 GOSITE_NETWORK=__NETWORK__
@@ -1249,7 +1453,7 @@ cms/               The Cockpit API client. The only package that calls the CMS.
 models/            Data shapes. No Redis, no HTTP, no HTML.
 views/             Markup, embedded with go:embed.
   render.go        Parses every template at startup.
-  layout.html      Base document (Tailwind, htmx, Alpine).
+  layout.html      Base document (styles, htmx, Alpine).
   pages/           One file per page.
   components/      Reusable pieces, one per file.
 static/            Assets served at /static.

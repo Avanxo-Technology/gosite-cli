@@ -3,7 +3,7 @@
 A modular Bash CLI that manages local development environments and produces
 Coolify-ready production files for a high-performance monolith:
 
-**Go 1.25+ (Echo v5) + htmx + Alpine.js + Tailwind + Cockpit CMS**, with
+**Go 1.25+ (Echo v5) + htmx + Alpine.js + Cockpit CMS**, Tailwind optional, with
 **Redis cache-aside** in front of the CMS. Server-side HTML uses the standard
 library's `html/template` - no code generation, no build step.
 
@@ -107,6 +107,22 @@ gosite create my-site                        # -> ~/gosites/my-site
 GOSITE_WORKSPACE=~/work gosite create other  # -> ~/work/other
 gosite create scratch --here                 # -> ./scratch
 ```
+
+### Styling
+
+Tailwind CSS is included by default, loaded from a CDN so local development
+needs no build step. `--no-tailwind` swaps it for a small `static/app.css`:
+
+```bash
+gosite create my-site                 # Tailwind utility classes
+gosite create my-site --no-tailwind   # semantic classes + static/app.css
+```
+
+The generated markup differs between the two on purpose. With Tailwind the
+components carry utility classes; without it they carry semantic class names
+(`card`, `articles`, `button`) styled by a stylesheet that uses custom
+properties and supports dark mode. Neither mode leaves classes that do nothing,
+so the output is clean either way. The choice is recorded in `.gosite.env`.
 
 ### Local domains over HTTPS
 
