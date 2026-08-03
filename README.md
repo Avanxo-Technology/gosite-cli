@@ -212,11 +212,20 @@ gosite-cli/
 
 ```
 my-site/
-├── main.go                   # Echo + go-redis v9 cache-aside (10m TTL) + Templ
+├── main.go                   # composition root: Redis + Echo, wires handlers
 ├── go.mod / go.sum
-├── templates/
-│   ├── index.templ           # Layout + Index (hx-get, x-data) + ArticleList fragment
-│   └── models.go             # Article type shared with main
+├── models/                   # DATA: structs mapping Cockpit JSON, no I/O
+│   └── articulo.go
+├── views/                    # MARKUP: one component per file
+│   ├── layout.templ          # base document (Tailwind, htmx, Alpine)
+│   ├── inicio.templ          # home page shell
+│   ├── articulos.templ       # htmx fragment, composes components
+│   └── components/
+│       ├── tarjeta.templ     # a single article card
+│       ├── boton.templ       # htmx reload button
+│       └── estado.templ      # loading indicator + empty state
+├── handlers/                 # LOGIC: routing, cache-aside, CMS access
+│   └── articulos.go
 ├── static/
 ├── .air.toml                 # hot reload: templ generate + rebuild on .go/.templ
 ├── Dockerfile                # PROD multi-stage: templ generate -> static binary -> alpine
@@ -240,13 +249,22 @@ my-site/
 | Domains | `<name>.test` via local Traefik | `SERVICE_FQDN_*` via Coolify's Traefik |
 | TLS | mkcert, trusted locally | Let's Encrypt via `certresolver` |
 
+### Layered layout
+
+Generated projects separate concerns strictly, which keeps server logic and
+markup from bleeding into each other: `handlers` imports `views` and `models`,
+`views` imports `models`, `models` imports nothing. Each view component lives
+in its own file, so a card can be restyled without touching the list that
+composes it.
+
 ### Cache-aside flow
 
-`GET /articulos` (htmx target) reads `<project>:articles:v1` from Redis.
-On a hit it decodes and renders in microseconds; on a miss it queries Cockpit,
-`SET`s the JSON with a 10-minute TTL, and renders the same Templ component.
+`GET /articulos` (htmx target) reads `articulos_html` from Redis. The cached
+value is the rendered HTML fragment, so a hit skips both the CMS call and the
+template render; on a miss it queries Cockpit, renders the Templ component into
+a buffer, and `SET`s those exact bytes with a 10-minute TTL.
 Redis failures are never fatal — the CMS is queried directly, just slower.
 The `X-Cache` header reports `HIT`/`MISS`. `POST /cache/purge` (guarded by
 `X-Api-Key: $COCKPIT_API_TOKEN`) lets Cockpit invalidate on publish.
 
-Measured on the generated project: **MISS 406ms → HIT 328µs**.
+Measured on the generated project: **MISS 403ms → HIT 188µs**.
