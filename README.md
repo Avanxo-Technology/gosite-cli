@@ -209,7 +209,7 @@ gosite-cli/
     │   ├── helpers.sh            # logging, validation, registry, docker helpers, dep checks
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     └── commands/
-        ├── cmd_create.sh         # project scaffolding (Go, Templ, Docker, compose, env)
+        ├── cmd_create.sh         # project scaffolding (Go, templates, Docker, compose)
         ├── cmd_infra.sh          # shared Traefik + Postgres + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
@@ -224,21 +224,23 @@ gosite-cli/
 
 ```
 my-site/
-├── main.go                   # composition root: Redis + Echo, wires handlers
+├── main.go                   # startup: config, dependencies, server
+├── app.go                    # Config + App: every dependency, built once
+├── router.go                 # every route and middleware, one screen
+├── handlers.go               # what each route does
+├── cache.go                  # cache-aside over Redis, written once
+├── cms.go                    # the Cockpit API client
 ├── go.mod / go.sum
-├── models/                   # DATA: structs mapping Cockpit JSON, no I/O
-│   └── articulo.go
-├── views/                    # MARKUP: html/template, embedded with go:embed
-│   ├── render.go             # echo.Renderer; parses every template at startup
+├── models/                   # data shapes: no Redis, no HTTP, no HTML
+│   └── article.go
+├── views/                    # markup, embedded with go:embed
+│   ├── render.go             # parses every template at startup
 │   ├── layout.html           # base document (Tailwind, htmx, Alpine)
-│   ├── inicio.html           # home page shell
-│   ├── articulos.html        # htmx fragment, composes components
-│   └── components/
-│       ├── tarjeta.html      # a single article card
-│       ├── boton.html        # htmx reload button
-│       └── estado.html       # loading indicator + empty state
-├── handlers/                 # LOGIC: routing, cache-aside, CMS access
-│   └── articulos.go
+│   ├── pages/home.html       # one file per page
+│   └── components/           # reusable pieces, one per file
+│       ├── card.html
+│       ├── button.html
+│       └── state.html
 ├── static/
 ├── .air.toml                 # hot reload: rebuild on .go/.html changes
 ├── Dockerfile                # PROD multi-stage: static binary -> alpine
@@ -250,25 +252,17 @@ my-site/
 ├── Makefile, README.md, .gitignore, .dockerignore
 ```
 
-### Strict environment separation
+### Layout
 
-| | `docker-compose.yml` (local) | `docker-compose.prod.yml` (Coolify) |
-| --- | --- | --- |
-| Build | `Dockerfile.dev` (air) | `Dockerfile` (multi-stage, static binary on alpine) |
-| Ports | mapped to localhost | none — Traefik routes by label |
-| Source | bind-mounted, hot reload | baked into the image |
-| Config | `.env` file | env vars set in the Coolify UI |
-| Datastores | shared `gosite-network` containers | `REDIS_URL` / `DATABASE_URL` from Coolify |
-| Domains | `<name>.test` via local Traefik | `SERVICE_FQDN_*` via Coolify's Traefik |
-| TLS | mkcert, trusted locally | Let's Encrypt via `certresolver` |
+One file per responsibility, read in the order `main.go` -> `app.go` ->
+`router.go` -> `handlers.go`. `router.go` is the single source of truth for the
+HTTP surface: nothing registers routes anywhere else. Data flows one way -
+`cms.go` fetches from the Cockpit API into `models`, the handler hands those to
+`views`, and the rendered HTML goes into the cache. Adding a page is one
+template in `views/pages/`, one handler and one line in `router.go`.
 
-### Layered layout
-
-Generated projects separate concerns strictly, which keeps server logic and
-markup from bleeding into each other: `handlers` imports `views` and `models`,
-`views` imports `models`, `models` imports nothing. Each view component lives
-in its own file, so a card can be restyled without touching the list that
-composes it.
+The example ships two routes, `/` and `POST /cache/purge`, which is enough to
+show the whole pattern without any code to delete.
 
 ### Pinned versions
 
@@ -292,12 +286,14 @@ a container in a restart loop.
 
 ### Cache-aside flow
 
-`GET /articulos` (htmx target) reads `articulos_html` from Redis. The cached
-value is the rendered HTML fragment, so a hit skips both the CMS call and the
-template render; on a miss it queries Cockpit, renders the fragment into a
-buffer, and `SET`s those exact bytes with a 10-minute TTL.
-Redis failures are never fatal — the CMS is queried directly, just slower.
+`GET /` reads `<project>:index_html` from Redis. The cached value is the fully
+rendered page, so a hit skips the CMS call and the template render entirely; on
+a miss it queries the Cockpit API, renders into a buffer, and `SET`s those exact
+bytes with a 10-minute TTL. The mechanics live in one `Cache.HTML(key, render)`
+helper, so caching another page is a single call rather than another copy of
+the same Get/Set dance.
+Redis failures are never fatal — the page still renders, just slower.
 The `X-Cache` header reports `HIT`/`MISS`. `POST /cache/purge` (guarded by
 `X-Api-Key: $COCKPIT_API_TOKEN`) lets Cockpit invalidate on publish.
 
-Measured on the generated project: **MISS 403ms → HIT 301µs**.
+Measured on the generated project: **cache hit 111µs vs 5.2ms miss**.
