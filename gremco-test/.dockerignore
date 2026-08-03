@@ -1,0 +1,11 @@
+.git
+.gitignore
+tmp/
+cockpit-storage/
+*_templ.go
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+Dockerfile.dev
+README.md

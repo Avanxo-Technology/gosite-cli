@@ -82,11 +82,51 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 gosite doctor                 # verify go, templ, air, docker, docker compose
 gosite infra up               # create gosite-network + shared Postgres/Redis
 gosite create my-site         # scaffold ./my-site
-cd my-site && gosite start    # app (air hot reload) + Cockpit
-gosite list                   # projects, ports, container status
-gosite stop / gosite remove [--purge]
+gosite start my-site          # app (air hot reload) + Cockpit
+gosite logs my-site           # follow the logs
+gosite list                   # projects, ports, container status, paths
+gosite stop my-site
+gosite remove my-site [--purge]
 gosite infra down
 ```
+
+Every project command takes an optional project name. Omit it to act on the
+project in the current directory; pass it to act on any project from anywhere.
+
+### Logs
+
+```bash
+gosite logs                   # current project, app + cms, follows
+gosite logs my-site app       # only the Go container
+gosite logs my-site cms -n 50 # last 50 lines of Cockpit
+gosite logs my-site --no-follow
+```
+
+### Jumping into a project
+
+A child process cannot change its parent shell's directory, so `gosite cd`
+needs a small shell function. Enable it once:
+
+```bash
+echo 'eval "$(gosite shell-init)"' >> ~/.zshrc   # or ~/.bashrc
+```
+
+```bash
+gosite cd my-site             # jumps into the project directory
+gosite path my-site           # prints the absolute path (scriptable)
+```
+
+Without the shell integration, `gosite cd` explains the setup and prints the
+path; `cd "$(gosite path my-site)"` always works.
+
+### Project registry
+
+Projects are indexed in `~/.gosite/projects.tsv` (`<name>\t<path>`) when they
+are created or started, which is how `cd`, `logs`, `start`, `stop` and `remove`
+resolve a project by name from any directory. The index is self-healing:
+entries whose directory no longer exists are dropped on read, and `gosite list`
+picks up any unindexed project below the current directory (a fresh clone, for
+example).
 
 ## Repository layout
 
@@ -98,13 +138,15 @@ gosite-cli/
     ├── main.sh                   # global entrypoint: symlink resolution, colors, flags
     ├── dispatcher.sh             # command router (case statement), usage text
     ├── lib/
-    │   ├── config.sh             # network, ports, shared service names (env-overridable)
-    │   └── helpers.sh            # logging, validation, docker/compose helpers, dep checks
+    │   ├── config.sh             # network, ports, registry, service names (env-overridable)
+    │   └── helpers.sh            # logging, validation, registry, docker helpers, dep checks
     └── commands/
         ├── cmd_create.sh         # project scaffolding (Go, Templ, Docker, compose, env)
         ├── cmd_infra.sh          # shared Postgres + Redis lifecycle
         ├── cmd_start.sh          # bring a project up with air hot reload
         ├── cmd_stop.sh           # stop a project's containers
+        ├── cmd_logs.sh           # tail project logs (app/cms, follow, tail size)
+        ├── cmd_cd.sh             # cd/path/shell-init - jump into a project
         ├── cmd_remove.sh         # full teardown (+ optional --purge of the source)
         └── cmd_list.sh           # project inventory and status
 ```

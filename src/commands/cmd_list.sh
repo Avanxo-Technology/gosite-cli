@@ -9,27 +9,33 @@
 cmd_list() {
   require_dependencies
 
-  local root="${GOSITE_WORKSPACE:-${PWD}}"
-  info "Projects under ${root}"
-
-  printf "\n${C_BOLD}%-22s %-8s %-8s %-12s %-12s${C_NC}\n" "PROJECT" "APP" "CMS" "APP STATUS" "CMS STATUS"
-  printf "%s\n" "--------------------------------------------------------------------"
-
-  local found=0 marker dir
+  # Pick up any project below the cwd that is not indexed yet (a fresh clone,
+  # for example), then list everything from the registry.
+  local marker
   while IFS= read -r marker; do
-    dir="$(dirname "${marker}")"
+    registry_register "$(cd "$(dirname "${marker}")" && pwd)"
+  done < <(find "${GOSITE_WORKSPACE:-${PWD}}" -maxdepth 3 -name "${GOSITE_MARKER}" -type f 2>/dev/null)
+
+  info "Registered projects"
+
+  printf "\n${C_BOLD}%-20s %-7s %-7s %-11s %-11s %s${C_NC}\n" \
+    "PROJECT" "APP" "CMS" "APP" "CMS" "PATH"
+  printf "%s\n" "---------------------------------------------------------------------------"
+
+  local found=0 name dir
+  while IFS=$'\t' read -r name dir; do
+    [[ -n "${name}" ]] || continue
     (
       # Subshell so one project's marker never leaks into the next.
       # shellcheck source=/dev/null
-      source "${marker}"
-      local app_status cms_status
-      app_status="$(_status_of "${GOSITE_PROJECT}-app")"
-      cms_status="$(_status_of "${GOSITE_PROJECT}-cms")"
-      printf "%-22s %-8s %-8s %-12s %-12s\n" \
-        "${GOSITE_PROJECT}" "${GOSITE_APP_PORT}" "${GOSITE_CMS_PORT}" "${app_status}" "${cms_status}"
+      source "${dir}/${GOSITE_MARKER}"
+      printf "%-20s %-7s %-7s %-11s %-11s %s\n" \
+        "${GOSITE_PROJECT}" "${GOSITE_APP_PORT}" "${GOSITE_CMS_PORT}" \
+        "$(_status_of "${GOSITE_PROJECT}-app")" "$(_status_of "${GOSITE_PROJECT}-cms")" \
+        "$(_short_path "${dir}")"
     )
     found=$(( found + 1 ))
-  done < <(find "${root}" -maxdepth 3 -name "${GOSITE_MARKER}" -type f 2>/dev/null | sort)
+  done < <(registry_entries)
 
   if [[ "${found}" -eq 0 ]]; then
     printf "${C_DIM}No projects found. Create one with 'gosite create <name>'.${C_NC}\n"
@@ -39,6 +45,9 @@ cmd_list() {
   printf "\n"
   cmd_infra_status_hint
 }
+
+# Keeps the PATH column readable by collapsing $HOME to ~.
+_short_path() { printf '%s' "${1/#${HOME}/\~}"; }
 
 _status_of() {
   if container_running "$1"; then

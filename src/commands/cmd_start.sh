@@ -22,6 +22,7 @@ cmd_start() {
   # shellcheck source=/dev/null
   source "${dir}/${GOSITE_MARKER}"
 
+  registry_register "${dir}"
   ensure_network
   container_running "${GOSITE_REDIS_HOST}" || warn "Redis is not running. Run 'gosite infra up' or the app will fail to boot."
 

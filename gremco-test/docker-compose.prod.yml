@@ -1,0 +1,64 @@
+# Production stack for gremco-test, in Coolify's native compose format.
+#
+# No host ports are published: Coolify's Traefik proxy routes to the container
+# port declared in the labels below. Every value comes from the environment,
+# so it is configured from the Coolify UI (or a .env at the service level).
+#
+# Required variables in Coolify:
+#   SERVICE_FQDN_APP        e.g. https://gremco-test.example.com
+#   SERVICE_FQDN_CMS        e.g. https://cms.gremco-test.example.com
+#   REDIS_URL               redis://<redis-service>:6379/0
+#   DATABASE_URL            postgres://user:pass@<pg-service>:5432/gremco-test
+#   COCKPIT_API_TOKEN       shared token between the app and Cockpit
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - APP_ENV=production
+      - PORT=8080
+      - SERVICE_FQDN_APP
+      - REDIS_URL=${REDIS_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - COCKPIT_URL=${COCKPIT_URL:-http://cms:80}
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+    labels:
+      # Tells Coolify this service is built from the repository Dockerfile.
+      - coolify.managed=true
+      - coolify.image=true
+      - traefik.enable=true
+      - traefik.http.routers.gremco-test-app.rule=Host(`${SERVICE_FQDN_APP}`)
+      - traefik.http.routers.gremco-test-app.entrypoints=https
+      - traefik.http.routers.gremco-test-app.tls=true
+      - traefik.http.routers.gremco-test-app.tls.certresolver=letsencrypt
+      - traefik.http.services.gremco-test-app.loadbalancer.server.port=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - cms
+
+  cms:
+    image: cockpithq/cockpit:core-2.14.0
+    restart: unless-stopped
+    environment:
+      - COCKPIT_DATABASE_SERVER=${COCKPIT_DATABASE_SERVER:-mongolite://storage/data}
+      - COCKPIT_SESSION_NAME=gremco-test
+    volumes:
+      - cockpit-storage:/var/www/html/storage
+    labels:
+      - coolify.managed=true
+      - traefik.enable=true
+      - traefik.http.routers.gremco-test-cms.rule=Host(`${SERVICE_FQDN_CMS}`)
+      - traefik.http.routers.gremco-test-cms.entrypoints=https
+      - traefik.http.routers.gremco-test-cms.tls=true
+      - traefik.http.routers.gremco-test-cms.tls.certresolver=letsencrypt
+      - traefik.http.services.gremco-test-cms.loadbalancer.server.port=80
+
+volumes:
+  cockpit-storage:

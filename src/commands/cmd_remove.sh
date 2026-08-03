@@ -34,6 +34,7 @@ cmd_remove() {
     # Cockpit writes storage as root, so the bind mount may need elevation.
     info "Deleting ${dir}"
     rm -rf "${dir}" 2>/dev/null || sudo rm -rf "${dir}"
+    registry_forget "${GOSITE_PROJECT}"
     ok "Directory deleted."
   else
     printf "${C_DIM}Source kept at %s (pass --purge to delete it).${C_NC}\n" "${dir}"

@@ -73,6 +73,9 @@ cmd_create() {
   # GOFLAGS and refuses to compile without verified module checksums.
   _resolve_dependencies "${PROJECT_DIR}"
 
+  # Index the project so it can be reached by name from any directory.
+  registry_register "${PROJECT_DIR}"
+
   ok "Project scaffolded at ./${PROJECT_NAME}"
   cat <<EOF
 

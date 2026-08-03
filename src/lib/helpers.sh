@@ -30,13 +30,68 @@ validate_project_name() {
 
 is_gosite_project() { [[ -f "${1:-.}/${GOSITE_MARKER}" ]]; }
 
-# Resolve a project directory from an optional name argument, falling back to
-# the current directory when it is already a gosite project.
+# --- project registry --------------------------------------------------------
+# A flat "<name>\t<path>" index so projects can be resolved by name from any
+# directory. Written on create/start, self-healing on read.
+
+registry_register() {
+  local dir="$1" name
+  is_gosite_project "${dir}" || return 0
+  name="$(basename "${dir}")"
+  mkdir -p "$(dirname "${GOSITE_REGISTRY}")"
+  touch "${GOSITE_REGISTRY}"
+  # Drop any previous entry for this name, then append the current path.
+  local tmp; tmp="$(mktemp)"
+  grep -v -e "^${name}	" "${GOSITE_REGISTRY}" > "${tmp}" 2>/dev/null || true
+  printf '%s\t%s\n' "${name}" "${dir}" >> "${tmp}"
+  sort -o "${tmp}" "${tmp}"
+  mv "${tmp}" "${GOSITE_REGISTRY}"
+}
+
+registry_forget() {
+  [[ -f "${GOSITE_REGISTRY}" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  grep -v -e "^$1	" "${GOSITE_REGISTRY}" > "${tmp}" 2>/dev/null || true
+  mv "${tmp}" "${GOSITE_REGISTRY}"
+}
+
+# Prints "<name>\t<path>" for every registered project that still exists,
+# rewriting the registry to drop entries whose directory is gone.
+registry_entries() {
+  [[ -f "${GOSITE_REGISTRY}" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  local name path
+  while IFS=$'\t' read -r name path; do
+    [[ -n "${name}" ]] || continue
+    if is_gosite_project "${path}"; then
+      printf '%s\t%s\n' "${name}" "${path}" >> "${tmp}"
+    fi
+  done < "${GOSITE_REGISTRY}"
+  mv "${tmp}" "${GOSITE_REGISTRY}"
+  cat "${GOSITE_REGISTRY}"
+}
+
+registry_lookup() {
+  registry_entries | awk -F'\t' -v n="$1" '$1 == n { print $2; exit }'
+}
+
+# Resolve a project directory. Resolution order:
+#   1. an explicit ./<name> directory below the cwd
+#   2. the registry, so any project can be reached by name from anywhere
+#   3. the current directory, when it is itself a project
 resolve_project_dir() {
   local name="${1:-}"
   if [[ -n "${name}" ]]; then
-    [[ -d "${name}" ]] || fatal "Project directory './${name}' does not exist."
-    (cd "${name}" && pwd)
+    if is_gosite_project "${name}"; then
+      (cd "${name}" && pwd)
+      return 0
+    fi
+    local hit; hit="$(registry_lookup "${name}")"
+    if [[ -n "${hit}" ]]; then
+      printf '%s' "${hit}"
+      return 0
+    fi
+    fatal "Unknown project '${name}'. Run 'gosite list' to see the registered ones."
   elif is_gosite_project "."; then
     pwd
   else

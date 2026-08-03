@@ -27,7 +27,11 @@
 # Marker file that identifies a directory as a gosite project.
 : "${GOSITE_MARKER:=.gosite.env}"
 
+# Index of known projects ("<name>\t<path>"), so they can be resolved by name
+# from any directory.
+: "${GOSITE_REGISTRY:=${GOSITE_HOME}/projects.tsv}"
+
 export GOSITE_NETWORK GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
        GOSITE_PG_HOST GOSITE_PG_PORT GOSITE_PG_USER GOSITE_PG_PASSWORD \
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
-       GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER
+       GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY

@@ -1,0 +1,22 @@
+# air - hot reload for local development inside the dev container.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Regenerate Templ components before every rebuild.
+  pre_cmd  = ["templ generate"]
+  cmd      = "go build -o ./tmp/main ."
+  bin      = "./tmp/main"
+  delay    = 300
+  include_ext  = ["go", "templ", "html", "css", "js"]
+  exclude_dir  = ["tmp", "static/vendor", ".git", "cockpit-storage"]
+  exclude_regex = ["_test\\.go", "_templ\\.go"]
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "1s"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

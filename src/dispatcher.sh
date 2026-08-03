@@ -22,6 +22,9 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   create <name>      Scaffold a new Go + Cockpit project in ./<name>
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack
+  logs   [name]      Tail a project's logs ([app|cms] [-n N] [--no-follow])
+  cd     <name>      Jump into a project directory (needs shell-init)
+  path   <name>      Print a project's absolute path
   remove <name>      Tear down a project stack (containers, volumes, network links)
   list               List gosite projects and their container status
 
@@ -33,6 +36,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
 
 $(printf "${C_BOLD}OTHER${C_NC}")
   doctor             Verify local dependencies (go, templ, air, docker, ...)
+  shell-init         Emit shell integration; eval "\$(gosite shell-init)"
   help               Show this help
   version            Print the version
 
@@ -57,6 +61,10 @@ dispatch() {
     list|ls)         load_command list;   cmd_list   "$@" ;;
     start|up)        load_command start;  cmd_start  "$@" ;;
     stop|down)       load_command stop;   cmd_stop   "$@" ;;
+    logs)            load_command logs;   cmd_logs   "$@" ;;
+    cd)              load_command cd;     cmd_cd     "$@" ;;
+    path)            load_command cd;     cmd_path   "$@" ;;
+    shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     doctor)          require_dependencies --report ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;
