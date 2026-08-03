@@ -10,7 +10,7 @@ cache-aside** in front of the CMS.
 
 | Layer | Scope | Contents |
 | --- | --- | --- |
-| Shared infrastructure | One per machine | PostgreSQL + Redis on the `gosite-network` Docker network |
+| Shared infrastructure | One per machine | Traefik proxy + PostgreSQL + Redis on the `gosite-network` Docker network |
 | Per project | One per site | Its own Go app container (air hot reload) + its own Cockpit container |
 
 Projects never define Postgres or Redis. They attach to `gosite-network` as an
@@ -80,9 +80,10 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 
 ```bash
 gosite doctor                 # verify go, templ, air, docker, docker compose
-gosite infra up               # create gosite-network + shared Postgres/Redis
-gosite create my-site         # scaffold ./my-site
+gosite infra up               # gosite-network + Traefik, Postgres, Redis
+gosite create my-site         # scaffold ./my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
+                              # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
 gosite list                   # projects, ports, container status, paths
 gosite stop my-site
@@ -92,6 +93,42 @@ gosite infra down
 
 Every project command takes an optional project name. Omit it to act on the
 project in the current directory; pass it to act on any project from anywhere.
+
+### Local domains over HTTPS
+
+Every project is served at `https://<name>.test` with its Cockpit at
+`https://cms.<name>.test`, through the shared Traefik proxy. Certificates are
+issued by [mkcert](https://github.com/FiloSottile/mkcert), whose CA the system
+trusts, so browsers show a valid padlock with no warnings. Port 80 redirects
+to 443. The mapped `localhost:<port>` stays available as a fallback.
+
+Requirements (checked by `gosite infra status` and `gosite dns`):
+
+```bash
+brew install mkcert && mkcert -install      # trusted local CA
+
+brew install dnsmasq                        # wildcard DNS for *.test
+echo 'address=/.test/127.0.0.1' >> "$(brew --prefix)/etc/dnsmasq.conf"
+sudo brew services restart dnsmasq
+sudo mkdir -p /etc/resolver
+echo 'nameserver 127.0.0.1' | sudo tee /etc/resolver/test
+```
+
+```bash
+gosite dns          # verify *.test resolves to 127.0.0.1
+```
+
+The wildcard is what makes this zero-config per project: a new site works the
+moment it starts, with no `/etc/hosts` edits. Each project gets one certificate
+covering `<name>.test` and `*.<name>.test` — a wildcard matches a single label,
+so a shared `*.test` certificate could not cover `cms.<name>.test`.
+
+Traefik reads certificates from a watched directory, so adding a project never
+restarts the proxy. Its dashboard is at `https://proxy.test`.
+
+Because dev now routes by Traefik labels exactly like `docker-compose.prod.yml`
+does under Coolify, local and production differ only in hostnames and TLS
+source.
 
 ### Logs
 
@@ -138,11 +175,13 @@ gosite-cli/
     ├── main.sh                   # global entrypoint: symlink resolution, colors, flags
     ├── dispatcher.sh             # command router (case statement), usage text
     ├── lib/
-    │   ├── config.sh             # network, ports, registry, service names (env-overridable)
-    │   └── helpers.sh            # logging, validation, registry, docker helpers, dep checks
+    │   ├── config.sh             # network, ports, domains, registry (env-overridable)
+    │   ├── helpers.sh            # logging, validation, registry, docker helpers, dep checks
+    │   └── tls.sh                # mkcert certificates + *.test DNS checks
     └── commands/
         ├── cmd_create.sh         # project scaffolding (Go, Templ, Docker, compose, env)
-        ├── cmd_infra.sh          # shared Postgres + Redis lifecycle
+        ├── cmd_infra.sh          # shared Traefik + Postgres + Redis lifecycle
+        ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
         ├── cmd_stop.sh           # stop a project's containers
         ├── cmd_logs.sh           # tail project logs (app/cms, follow, tail size)
@@ -180,6 +219,8 @@ my-site/
 | Source | bind-mounted, hot reload | baked into the image |
 | Config | `.env` file | env vars set in the Coolify UI |
 | Datastores | shared `gosite-network` containers | `REDIS_URL` / `DATABASE_URL` from Coolify |
+| Domains | `<name>.test` via local Traefik | `SERVICE_FQDN_*` via Coolify's Traefik |
+| TLS | mkcert, trusted locally | Let's Encrypt via `certresolver` |
 
 ### Cache-aside flow
 

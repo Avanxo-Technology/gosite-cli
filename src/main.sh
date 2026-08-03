@@ -46,6 +46,8 @@ export GOSITE_VERBOSE GOSITE_ASSUME_YES
 source "${GOSITE_ROOT}/lib/config.sh"
 # shellcheck source=lib/helpers.sh
 source "${GOSITE_ROOT}/lib/helpers.sh"
+# shellcheck source=lib/tls.sh
+source "${GOSITE_ROOT}/lib/tls.sh"
 # shellcheck source=dispatcher.sh
 source "${GOSITE_ROOT}/dispatcher.sh"
 

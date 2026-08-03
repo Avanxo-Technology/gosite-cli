@@ -20,6 +20,15 @@
 : "${GOSITE_REDIS_HOST:=gosite-redis}"
 : "${GOSITE_REDIS_PORT:=6379}"
 
+# Local domains. Projects are served at <name>.<TLD> and cms.<name>.<TLD>
+# through the shared Traefik proxy, over HTTPS with mkcert certificates.
+: "${GOSITE_TLD:=test}"
+: "${GOSITE_PROXY_HOST:=gosite-proxy}"
+: "${GOSITE_PROXY_HTTP_PORT:=80}"
+: "${GOSITE_PROXY_HTTPS_PORT:=443}"
+: "${GOSITE_CERTS_DIR:=${GOSITE_HOME}/certs}"
+: "${GOSITE_DYNAMIC_DIR:=${GOSITE_HOME}/traefik/dynamic}"
+
 # Host port range used when allocating ports for new projects.
 : "${GOSITE_PORT_MIN:=8000}"
 : "${GOSITE_PORT_MAX:=8999}"
@@ -34,4 +43,6 @@
 export GOSITE_NETWORK GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
        GOSITE_PG_HOST GOSITE_PG_PORT GOSITE_PG_USER GOSITE_PG_PASSWORD \
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
-       GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY
+       GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY \
+       GOSITE_TLD GOSITE_PROXY_HOST GOSITE_PROXY_HTTP_PORT GOSITE_PROXY_HTTPS_PORT \
+       GOSITE_CERTS_DIR GOSITE_DYNAMIC_DIR

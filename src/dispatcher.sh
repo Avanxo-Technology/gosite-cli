@@ -33,6 +33,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   infra down         Stop the shared infrastructure
   infra status       Show shared infrastructure health
   infra logs [svc]   Tail shared infrastructure logs
+  dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
 
 $(printf "${C_BOLD}OTHER${C_NC}")
   doctor             Verify local dependencies (go, templ, air, docker, ...)
@@ -67,6 +68,7 @@ dispatch() {
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     doctor)          require_dependencies --report ;;
+    dns)             load_command dns; cmd_dns ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;
     help|"")         usage ;;
     *)

@@ -20,6 +20,8 @@ render_placeholders() {
     -e "s|__PROJECT__|${PROJECT_NAME}|g" \
     -e "s|__MODULE__|${PROJECT_MODULE}|g" \
     -e "s|__NETWORK__|${GOSITE_NETWORK}|g" \
+    -e "s|__DOMAIN__|${APP_DOMAIN}|g" \
+    -e "s|__CMS_DOMAIN__|${CMS_DOMAIN}|g" \
     -e "s|__APP_PORT__|${APP_PORT}|g" \
     -e "s|__CMS_PORT__|${CMS_PORT}|g" \
     -e "s|__PG_HOST__|${GOSITE_PG_HOST}|g" \
@@ -42,10 +44,12 @@ cmd_create() {
   [[ -e "${PROJECT_DIR}" ]] && fatal "'./${PROJECT_NAME}' already exists."
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
-  local APP_PORT CMS_PORT CMS_TOKEN
+  local APP_PORT CMS_PORT CMS_TOKEN APP_DOMAIN CMS_DOMAIN
   APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
   CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
   CMS_TOKEN="$(random_secret 24)"
+  APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
+  CMS_DOMAIN="$(project_cms_domain "${PROJECT_NAME}")"
 
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
@@ -73,6 +77,9 @@ cmd_create() {
   # GOFLAGS and refuses to compile without verified module checksums.
   _resolve_dependencies "${PROJECT_DIR}"
 
+  # Issue the local TLS certificate covering <name>.test and cms.<name>.test.
+  ensure_project_cert "${PROJECT_NAME}" || true
+
   # Index the project so it can be reached by name from any directory.
   registry_register "${PROJECT_DIR}"
 
@@ -82,8 +89,9 @@ cmd_create() {
 $(printf "${C_BOLD}Next steps${C_NC}")
   1. gosite infra up                 $(printf "${C_DIM}# shared Postgres + Redis on ${GOSITE_NETWORK}${C_NC}")
   2. cd ${PROJECT_NAME} && gosite start
-  3. App  -> http://localhost:${APP_PORT}   $(printf "${C_DIM}(air hot reload)${C_NC}")
-     CMS  -> http://localhost:${CMS_PORT}   $(printf "${C_DIM}(Cockpit)${C_NC}")
+  3. App  -> https://${APP_DOMAIN}   $(printf "${C_DIM}(air hot reload)${C_NC}")
+     CMS  -> https://${CMS_DOMAIN}   $(printf "${C_DIM}(Cockpit)${C_NC}")
+     $(printf "${C_DIM}Also on http://localhost:${APP_PORT} and http://localhost:${CMS_PORT}.${C_NC}")
 
 $(printf "${C_DIM}Production: push to Git and point Coolify at docker-compose.prod.yml.${C_NC}")
 EOF
@@ -564,8 +572,16 @@ services:
       APP_ENV: development
       REDIS_URL: "redis://__REDIS_HOST__:__REDIS_PORT__/0"
       COCKPIT_URL: "http://__PROJECT__-cms:80"
+    # Host ports stay mapped as a fallback; the domain below is the main entry.
     ports:
       - "__APP_PORT__:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=__NETWORK__
+      - traefik.http.routers.__PROJECT__-app.rule=Host(`__DOMAIN__`)
+      - traefik.http.routers.__PROJECT__-app.entrypoints=websecure
+      - traefik.http.routers.__PROJECT__-app.tls=true
+      - traefik.http.services.__PROJECT__-app.loadbalancer.server.port=8080
     volumes:
       # Live source mount: air rebuilds on save.
       - .:/app
@@ -586,6 +602,13 @@ services:
       COCKPIT_SESSION_NAME: "__PROJECT__"
     ports:
       - "__CMS_PORT__:80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=__NETWORK__
+      - traefik.http.routers.__PROJECT__-cms.rule=Host(`__CMS_DOMAIN__`)
+      - traefik.http.routers.__PROJECT__-cms.entrypoints=websecure
+      - traefik.http.routers.__PROJECT__-cms.tls=true
+      - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
     volumes:
       - ./cockpit-storage:/var/www/html/storage
     networks:
@@ -702,6 +725,8 @@ GOSITE_PROJECT=__PROJECT__
 GOSITE_MODULE=__MODULE__
 GOSITE_APP_PORT=__APP_PORT__
 GOSITE_CMS_PORT=__CMS_PORT__
+GOSITE_APP_DOMAIN=__DOMAIN__
+GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
 GOSITE_NETWORK=__NETWORK__
 EOF
 }

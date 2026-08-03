@@ -35,6 +35,7 @@ cmd_remove() {
     info "Deleting ${dir}"
     rm -rf "${dir}" 2>/dev/null || sudo rm -rf "${dir}"
     registry_forget "${GOSITE_PROJECT}"
+    remove_project_cert "${GOSITE_PROJECT}"
     ok "Directory deleted."
   else
     printf "${C_DIM}Source kept at %s (pass --purge to delete it).${C_NC}\n" "${dir}"
