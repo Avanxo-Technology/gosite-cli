@@ -74,6 +74,17 @@ cmd_create() {
   # Keep static/ in Git so the production COPY stage always finds it.
   touch "${PROJECT_DIR}/static/.gitkeep"
 
+  # Cockpit's storage is bind-mounted in development so content is visible and
+  # backed up with the project. A bind mount hides whatever the image ships at
+  # that path, so the skeleton it expects has to exist on the host up front -
+  # otherwise Cockpit fails on a missing storage/cache directory.
+  local sub
+  for sub in cache data logs tmp uploads; do
+    mkdir -p "${PROJECT_DIR}/cockpit-storage/${sub}"
+    touch "${PROJECT_DIR}/cockpit-storage/${sub}/.gitkeep"
+  done
+  chmod -R 0777 "${PROJECT_DIR}/cockpit-storage"
+
   _write_go_mod        "${PROJECT_DIR}"
   _write_main_go       "${PROJECT_DIR}"
   _write_templ         "${PROJECT_DIR}"

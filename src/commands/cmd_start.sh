@@ -23,6 +23,7 @@ cmd_start() {
   source "${dir}/${GOSITE_MARKER}"
 
   registry_register "${dir}"
+  ensure_cockpit_storage "${dir}"
   ensure_network
 
   # Projects created before a certificate existed get one on first start.

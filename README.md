@@ -139,6 +139,11 @@ so a shared `*.test` certificate could not cover `cms.<name>.test`.
 Traefik reads certificates from a watched directory, so adding a project never
 restarts the proxy. Its dashboard is at `https://proxy.test`.
 
+Traefik excludes containers whose health check is still `starting`, so a
+freshly started Cockpit returns 404 through the proxy for a few seconds before
+its route appears. That is expected — it avoids routing to a service that is
+not ready yet.
+
 Because dev now routes by Traefik labels exactly like `docker-compose.prod.yml`
 does under Coolify, local and production differ only in hostnames and TLS
 source.

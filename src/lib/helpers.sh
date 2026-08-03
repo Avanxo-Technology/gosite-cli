@@ -104,6 +104,22 @@ resolve_project_dir() {
   fi
 }
 
+# Cockpit's storage is bind-mounted, and a bind mount hides whatever the image
+# ships at that path. The skeleton must therefore exist on the host, or Cockpit
+# dies on a missing storage/cache directory. Idempotent, so it doubles as a
+# repair for projects created before this was handled and for fresh clones
+# (cockpit-storage/ is gitignored).
+ensure_cockpit_storage() {
+  local dir="$1" sub
+  for sub in cache data logs tmp uploads; do
+    [[ -d "${dir}/cockpit-storage/${sub}" ]] && continue
+    mkdir -p "${dir}/cockpit-storage/${sub}"
+    touch "${dir}/cockpit-storage/${sub}/.gitkeep"
+    chmod 0777 "${dir}/cockpit-storage/${sub}"
+    debug "Created missing cockpit-storage/${sub}"
+  done
+}
+
 # --- docker helpers ----------------------------------------------------------
 # Supports both the compose v2 plugin and the legacy standalone binary.
 compose() {
