@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 #
-# gosite remove <project> [--purge]
+# gosite remove <project> [--keep-source]
 #
-# Tears down a project's containers, volumes and images. The source directory
-# is only deleted with --purge, and always behind an explicit confirmation.
+# Removes a project completely: containers, volumes, local images, its TLS
+# certificate, its registry entry and its directory. `remove` is expected to
+# remove, so deleting the source is the default; --keep-source opts out.
+#
+# Destructive, so it always confirms unless -y/--yes was passed.
 #
 
 cmd_remove() {
   require_dependencies
 
-  local purge=0 name=""
+  local keep_source=0 name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --purge) purge=1; shift ;;
-      *)       name="$1"; shift ;;
+      --keep-source) keep_source=1; shift ;;
+      # Kept so older muscle memory and scripts do not break: deleting the
+      # source is now the default, so --purge is simply a no-op.
+      --purge)       shift ;;
+      -*)            fatal "Unknown flag for 'remove': $1 (expected --keep-source)" ;;
+      *)             name="$1"; shift ;;
     esac
   done
 
@@ -21,24 +28,31 @@ cmd_remove() {
   # shellcheck source=/dev/null
   source "${dir}/${GOSITE_MARKER}"
 
-  warn "This removes the containers, volumes and images of '${GOSITE_PROJECT}'."
-  [[ "${purge}" -eq 1 ]] && warn "--purge will also DELETE the directory ${dir}"
+  warn "About to remove '${GOSITE_PROJECT}':"
+  printf "    containers, volumes and local images\n"
+  printf "    TLS certificate for %s\n" "${GOSITE_APP_DOMAIN:-${GOSITE_PROJECT}}"
+  if [[ "${keep_source}" -eq 1 ]]; then
+    printf "    %s(source kept: %s)%s\n" "${C_DIM}" "${dir}" "${C_NC}"
+  else
+    printf "    %sthe directory %s and everything in it%s\n" "${C_RED}" "${dir}" "${C_NC}"
+  fi
   confirm "Continue?" || { info "Aborted."; return 0; }
 
-  info "Removing containers and volumes for '${GOSITE_PROJECT}'"
+  info "Removing containers, volumes and images for '${GOSITE_PROJECT}'"
   compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" \
     down --volumes --remove-orphans --rmi local || warn "Compose teardown reported errors; continuing."
   ok "Stack removed."
 
-  if [[ "${purge}" -eq 1 ]]; then
-    # Cockpit writes storage as root, so the bind mount may need elevation.
+  remove_project_cert "${GOSITE_PROJECT}"
+
+  if [[ "${keep_source}" -eq 1 ]]; then
+    printf "${C_DIM}Source kept at %s; still listed by 'gosite list'.${C_NC}\n" "${dir}"
+  else
+    # Cockpit writes its storage as root, so the bind mount may need elevation.
     info "Deleting ${dir}"
     rm -rf "${dir}" 2>/dev/null || sudo rm -rf "${dir}"
     registry_forget "${GOSITE_PROJECT}"
-    remove_project_cert "${GOSITE_PROJECT}"
     ok "Directory deleted."
-  else
-    printf "${C_DIM}Source kept at %s (pass --purge to delete it).${C_NC}\n" "${dir}"
   fi
 
   printf "${C_DIM}Shared infrastructure untouched. Use 'gosite infra down' to stop it.${C_NC}\n"

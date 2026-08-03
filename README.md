@@ -88,7 +88,7 @@ gosite start my-site          # app (air hot reload) + Cockpit
 gosite logs my-site           # follow the logs
 gosite list                   # projects, ports, container status, paths
 gosite stop my-site
-gosite remove my-site [--purge]
+gosite remove my-site          # deletes containers, cert and the directory
 gosite infra down
 ```
 
@@ -175,6 +175,17 @@ gosite path my-site           # prints the absolute path (scriptable)
 Without the shell integration, `gosite cd` explains the setup and prints the
 path; `cd "$(gosite path my-site)"` always works.
 
+### Removing a project
+
+`gosite remove <name>` removes the project entirely: containers, volumes, local
+images, its TLS certificate, its registry entry and its directory. It always
+asks for confirmation first (skip with `-y`).
+
+```bash
+gosite remove my-site                # everything, including the code
+gosite remove my-site --keep-source  # tear down the stack, keep the directory
+```
+
 ### Project registry
 
 Projects are indexed in `~/.gosite/projects.tsv` (`<name>\t<path>`) when they
@@ -205,7 +216,7 @@ gosite-cli/
         ├── cmd_stop.sh           # stop a project's containers
         ├── cmd_logs.sh           # tail project logs (app/cms, follow, tail size)
         ├── cmd_cd.sh             # cd/path/shell-init - jump into a project
-        ├── cmd_remove.sh         # full teardown (+ optional --purge of the source)
+        ├── cmd_remove.sh         # full teardown incl. the source (--keep-source opts out)
         └── cmd_list.sh           # project inventory and status
 ```
 

@@ -25,7 +25,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   logs   [name]      Tail a project's logs ([app|cms] [-n N] [--no-follow])
   cd     <name>      Jump into a project directory (needs shell-init)
   path   <name>      Print a project's absolute path
-  remove <name>      Tear down a project stack (containers, volumes, network links)
+  remove <name>      Delete a project entirely (--keep-source keeps the code)
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
