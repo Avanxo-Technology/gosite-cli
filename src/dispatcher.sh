@@ -19,7 +19,7 @@ $(printf "${C_BOLD}USAGE${C_NC}")
   gosite [global flags] <command> [args]
 
 $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
-  create <name>      Scaffold a new Go + Cockpit project in ./<name>
+  create <name>      Scaffold a new project in ${GOSITE_WORKSPACE} (--here for cwd)
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack
   logs   [name]      Tail a project's logs ([app|cms] [-n N] [--no-follow])
@@ -48,7 +48,7 @@ $(printf "${C_BOLD}GLOBAL FLAGS${C_NC}")
   -V, --version      Print version and exit
   -h, --help         Show this help
 
-$(printf "${C_DIM}Shared network: ${GOSITE_NETWORK}   Infra home: ${GOSITE_HOME}${C_NC}")
+$(printf "${C_DIM}Workspace: ${GOSITE_WORKSPACE}   Network: ${GOSITE_NETWORK}   Infra: ${GOSITE_HOME}${C_NC}")
 EOF
 }
 

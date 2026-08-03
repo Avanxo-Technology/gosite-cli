@@ -14,7 +14,7 @@ cmd_list() {
   local marker
   while IFS= read -r marker; do
     registry_register "$(cd "$(dirname "${marker}")" && pwd)"
-  done < <(find "${GOSITE_WORKSPACE:-${PWD}}" -maxdepth 3 -name "${GOSITE_MARKER}" -type f 2>/dev/null)
+  done < <(find "${GOSITE_WORKSPACE}" "${PWD}" -maxdepth 3 -name "${GOSITE_MARKER}" -type f 2>/dev/null)
 
   info "Registered projects"
 
@@ -47,7 +47,12 @@ cmd_list() {
 }
 
 # Keeps the PATH column readable by collapsing $HOME to ~.
-_short_path() { printf '%s' "${1/#${HOME}/\~}"; }
+_short_path() {
+  case "$1" in
+    "${HOME}"/*) printf '~/%s' "${1#"${HOME}"/}" ;;
+    *)           printf '%s' "$1" ;;
+  esac
+}
 
 _status_of() {
   if container_running "$1"; then

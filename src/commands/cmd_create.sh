@@ -36,12 +36,28 @@ render_placeholders() {
 }
 
 cmd_create() {
-  local PROJECT_NAME="${1:-}"
+  local PROJECT_NAME="" here=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --here) here=1; shift ;;
+      -*)     fatal "Unknown flag for 'create': $1 (expected --here)" ;;
+      *)      PROJECT_NAME="$1"; shift ;;
+    esac
+  done
+
   validate_project_name "${PROJECT_NAME}"
   require_dependencies
 
-  local PROJECT_DIR="${PWD}/${PROJECT_NAME}"
-  [[ -e "${PROJECT_DIR}" ]] && fatal "'./${PROJECT_NAME}' already exists."
+  # Sites live together under the workspace so they are easy to find and list.
+  # --here overrides that for a one-off project in the current directory.
+  local PROJECT_DIR
+  if [[ "${here}" -eq 1 ]]; then
+    PROJECT_DIR="${PWD}/${PROJECT_NAME}"
+  else
+    mkdir -p "${GOSITE_WORKSPACE}"
+    PROJECT_DIR="${GOSITE_WORKSPACE}/${PROJECT_NAME}"
+  fi
+  [[ -e "${PROJECT_DIR}" ]] && fatal "'${PROJECT_DIR}' already exists."
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
   local APP_PORT CMS_PORT CMS_TOKEN APP_DOMAIN CMS_DOMAIN
@@ -83,12 +99,12 @@ cmd_create() {
   # Index the project so it can be reached by name from any directory.
   registry_register "${PROJECT_DIR}"
 
-  ok "Project scaffolded at ./${PROJECT_NAME}"
+  ok "Project scaffolded at ${PROJECT_DIR}"
   cat <<EOF
 
 $(printf "${C_BOLD}Next steps${C_NC}")
   1. gosite infra up                 $(printf "${C_DIM}# shared Postgres + Redis on ${GOSITE_NETWORK}${C_NC}")
-  2. cd ${PROJECT_NAME} && gosite start
+  2. gosite start ${PROJECT_NAME}      $(printf "${C_DIM}# or: gosite cd ${PROJECT_NAME}${C_NC}")
   3. App  -> https://${APP_DOMAIN}   $(printf "${C_DIM}(air hot reload)${C_NC}")
      CMS  -> https://${CMS_DOMAIN}   $(printf "${C_DIM}(Cockpit)${C_NC}")
      $(printf "${C_DIM}Also on http://localhost:${APP_PORT} and http://localhost:${CMS_PORT}.${C_NC}")
@@ -116,7 +132,7 @@ _resolve_dependencies() {
     return 0
   fi
 
-  warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ./${PROJECT_NAME} before deploying."
+  warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ${dir} before deploying."
   return 0
 }
 

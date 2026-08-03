@@ -78,7 +78,8 @@ registry_lookup() {
 # Resolve a project directory. Resolution order:
 #   1. an explicit ./<name> directory below the cwd
 #   2. the registry, so any project can be reached by name from anywhere
-#   3. the current directory, when it is itself a project
+#   3. <workspace>/<name>, in case the registry was lost
+#   4. the current directory, when it is itself a project
 resolve_project_dir() {
   local name="${1:-}"
   if [[ -n "${name}" ]]; then
@@ -89,6 +90,10 @@ resolve_project_dir() {
     local hit; hit="$(registry_lookup "${name}")"
     if [[ -n "${hit}" ]]; then
       printf '%s' "${hit}"
+      return 0
+    fi
+    if is_gosite_project "${GOSITE_WORKSPACE}/${name}"; then
+      printf '%s' "${GOSITE_WORKSPACE}/${name}"
       return 0
     fi
     fatal "Unknown project '${name}'. Run 'gosite list' to see the registered ones."

@@ -7,6 +7,10 @@
 # Shared Docker network every project and the global infra attach to.
 : "${GOSITE_NETWORK:=gosite-network}"
 
+# Where projects are created and looked for. Keeping every site under one
+# directory is what makes `list` and the registry predictable.
+: "${GOSITE_WORKSPACE:=${HOME}/gosites}"
+
 # Where the shared infrastructure compose file and its data live.
 : "${GOSITE_HOME:=${HOME}/.gosite}"
 : "${GOSITE_INFRA_DIR:=${GOSITE_HOME}/infra}"
@@ -40,7 +44,7 @@
 # from any directory.
 : "${GOSITE_REGISTRY:=${GOSITE_HOME}/projects.tsv}"
 
-export GOSITE_NETWORK GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
+export GOSITE_NETWORK GOSITE_WORKSPACE GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
        GOSITE_PG_HOST GOSITE_PG_PORT GOSITE_PG_USER GOSITE_PG_PASSWORD \
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
        GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY \

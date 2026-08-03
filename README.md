@@ -81,7 +81,7 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 ```bash
 gosite doctor                 # verify go, templ, air, docker, docker compose
 gosite infra up               # gosite-network + Traefik, Postgres, Redis
-gosite create my-site         # scaffold ./my-site + issue its TLS cert
+gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
@@ -93,6 +93,19 @@ gosite infra down
 
 Every project command takes an optional project name. Omit it to act on the
 project in the current directory; pass it to act on any project from anywhere.
+
+### Workspace
+
+Sites are created under `~/gosites` regardless of the current directory, so
+they stay in one place instead of scattered across the filesystem. Override the
+location with `GOSITE_WORKSPACE`, or pass `--here` to scaffold into the current
+directory for a one-off:
+
+```bash
+gosite create my-site                        # -> ~/gosites/my-site
+GOSITE_WORKSPACE=~/work gosite create other  # -> ~/work/other
+gosite create scratch --here                 # -> ./scratch
+```
 
 ### Local domains over HTTPS
 
@@ -175,7 +188,7 @@ gosite-cli/
     ├── main.sh                   # global entrypoint: symlink resolution, colors, flags
     ├── dispatcher.sh             # command router (case statement), usage text
     ├── lib/
-    │   ├── config.sh             # network, ports, domains, registry (env-overridable)
+    │   ├── config.sh             # workspace, network, ports, domains (env-overridable)
     │   ├── helpers.sh            # logging, validation, registry, docker helpers, dep checks
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     └── commands/
