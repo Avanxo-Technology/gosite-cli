@@ -227,10 +227,16 @@ my-site/
 ├── main.go                   # startup: config, dependencies, server
 ├── app.go                    # Config + App: every dependency, built once
 ├── router.go                 # every route and middleware, one screen
-├── handlers.go               # what each route does
-├── cache.go                  # cache-aside over Redis, written once
-├── cms.go                    # the Cockpit API client
 ├── go.mod / go.sum
+├── config/                   # environment settings, read exactly once
+├── handlers/                 # one file per route
+│   ├── handlers.go           # deps + the receiver they hang off
+│   ├── response.go           # how this app replies (thin layer over Echo)
+│   ├── home.go               # GET /
+│   ├── purge.go              # POST /cache/purge
+│   └── health.go             # GET /healthz
+├── cache/                    # cache-aside over Redis, written once
+├── cms/                      # the Cockpit API client
 ├── models/                   # data shapes: no Redis, no HTTP, no HTML
 │   └── article.go
 ├── views/                    # markup, embedded with go:embed
@@ -255,11 +261,18 @@ my-site/
 ### Layout
 
 One file per responsibility, read in the order `main.go` -> `app.go` ->
-`router.go` -> `handlers.go`. `router.go` is the single source of truth for the
-HTTP surface: nothing registers routes anywhere else. Data flows one way -
-`cms.go` fetches from the Cockpit API into `models`, the handler hands those to
-`views`, and the rendered HTML goes into the cache. Adding a page is one
-template in `views/pages/`, one handler and one line in `router.go`.
+`router.go` -> `handlers/`. Handlers live in their own package, one file per
+route, so that file never becomes a dumping ground as the app grows.
+`router.go` is the single source of truth for the HTTP surface: nothing
+registers routes anywhere else. Data flows one way - `cms` fetches from the
+Cockpit API into `models`, a handler hands those to `views`, and the rendered
+HTML goes into `cache`. Adding an endpoint is one file in `handlers/` and one
+line in `router.go`; adding a page is one template in `views/pages/`.
+
+Handlers reply through a small `Response` helper - a thin layer over [Echo's
+response helpers](https://echo.labstack.com/guide/response/) that adds the
+`X-Cache` header and, in `Fail`, logs the real error while returning only a
+message safe to show a client.
 
 The example ships two routes, `/` and `POST /cache/purge`, which is enough to
 show the whole pattern without any code to delete.

@@ -75,7 +75,7 @@ cmd_create() {
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
 
-  mkdir -p "${PROJECT_DIR}"/{models,views/pages,views/components,static}
+  mkdir -p "${PROJECT_DIR}"/{config,handlers,cache,cms,models,views/pages,views/components,static}
   # Keep static/ in Git so the production COPY stage always finds it.
   touch "${PROJECT_DIR}/static/.gitkeep"
 
@@ -94,6 +94,7 @@ cmd_create() {
   _write_main_go       "${PROJECT_DIR}"
   _write_app           "${PROJECT_DIR}"
   _write_router        "${PROJECT_DIR}"
+  _write_config        "${PROJECT_DIR}"
   _write_handlers      "${PROJECT_DIR}"
   _write_cache         "${PROJECT_DIR}"
   _write_cms           "${PROJECT_DIR}"
@@ -184,7 +185,7 @@ _write_main_go() {
 // htmx and Alpine.js, and a Redis cache in front of the CMS.
 //
 // Reading order: main.go (startup) -> app.go (dependencies) -> router.go
-// (every route) -> handlers.go (what each route does).
+// (every route) -> handlers/ (one file per handler).
 package main
 
 import (
@@ -196,12 +197,14 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"__MODULE__/config"
 )
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	app, err := NewApp(Load(), log)
+	app, err := NewApp(config.Load(), log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)
@@ -214,12 +217,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg := echo.StartConfig{
+	start := echo.StartConfig{
 		Address:         ":" + app.Config.Port,
 		HideBanner:      true,
 		GracefulTimeout: 10 * time.Second,
 	}
-	if err := cfg.Start(ctx, NewRouter(app)); err != nil {
+	if err := start.Start(ctx, NewRouter(app)); err != nil {
 		log.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
@@ -228,8 +231,8 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# Dependencies in one struct, built once. Handlers reach for what they need
-# through it instead of each taking its own constructor arguments.
+# The composition root: build every dependency once and hand them to the
+# handlers. Nothing here knows about HTTP.
 _write_app() {
   cat > "$1/app.go" <<'EOF'
 package main
@@ -237,16 +240,111 @@ package main
 import (
 	"context"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
+	"__MODULE__/cache"
+	"__MODULE__/cms"
+	"__MODULE__/config"
+	"__MODULE__/handlers"
 	"__MODULE__/views"
 )
 
-// Config holds every environment-provided setting. Reading it in one place
-// means no os.Getenv calls are scattered through the handlers.
+// App holds what main needs to keep alive; the handlers get their own
+// dependencies injected at construction.
+type App struct {
+	Config   config.Config
+	Log      *slog.Logger
+	Redis    *redis.Client
+	Handlers *handlers.Handlers
+	Renderer *views.Renderer
+}
+
+// NewApp wires everything and verifies Redis up front, so a misconfigured
+// environment fails at boot instead of on the first request.
+func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return nil, err
+	}
+	rdb := redis.NewClient(opts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+	log.Info("redis connected", "addr", opts.Addr, "db", opts.DB)
+
+	renderer := views.NewRenderer()
+
+	return &App{
+		Config:   cfg,
+		Log:      log,
+		Redis:    rdb,
+		Renderer: renderer,
+		Handlers: handlers.New(handlers.Deps{
+			Config:   cfg,
+			Log:      log,
+			Cache:    cache.New(rdb, log),
+			CMS:      cms.New(cfg, log),
+			Renderer: renderer,
+			Redis:    rdb,
+		}),
+	}, nil
+}
+
+func (a *App) Close() error { return a.Redis.Close() }
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Every route in one table. Adding an endpoint means one line here plus one
+# file in handlers/, and the whole surface of the app stays readable.
+_write_router() {
+  cat > "$1/router.go" <<'EOF'
+package main
+
+import (
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
+)
+
+// NewRouter wires middleware and routes. This is the single source of truth
+// for the app's HTTP surface - nothing registers routes anywhere else.
+func NewRouter(app *App) *echo.Echo {
+	e := echo.New()
+	e.Renderer = app.Renderer
+
+	e.Use(middleware.Recover())
+	e.Use(middleware.RequestLogger())
+	e.Use(middleware.Gzip())
+
+	e.Static("/static", "static")
+
+	h := app.Handlers
+
+	// --- routes --------------------------------------------------------------
+	e.GET("/", h.Home)                   // the page, served from cache
+	e.POST("/cache/purge", h.PurgeCache) // htmx button + Cockpit webhook
+	e.GET("/healthz", h.Health)          // liveness, checks Redis
+
+	return e
+}
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Environment settings in one place, so no os.Getenv call is ever buried in a
+# handler. Its own package because handlers, cms and main all read it.
+_write_config() {
+  cat > "$1/config/config.go" <<'EOF'
+// Package config reads every environment-provided setting exactly once.
+package config
+
+import "os"
+
 type Config struct {
 	Port         string
 	RedisURL     string
@@ -269,95 +367,113 @@ func env(key, fallback string) string {
 	}
 	return fallback
 }
-
-// App is the set of dependencies shared by every handler.
-type App struct {
-	Config   Config
-	Log      *slog.Logger
-	Redis    *redis.Client
-	Cache    *Cache
-	CMS      *CMS
-	Renderer *views.Renderer
-}
-
-// NewApp builds everything the server needs and verifies Redis up front, so a
-// misconfigured environment fails at boot instead of on the first request.
-func NewApp(cfg Config, log *slog.Logger) (*App, error) {
-	opts, err := redis.ParseURL(cfg.RedisURL)
-	if err != nil {
-		return nil, err
-	}
-	rdb := redis.NewClient(opts)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, err
-	}
-	log.Info("redis connected", "addr", opts.Addr, "db", opts.DB)
-
-	return &App{
-		Config:   cfg,
-		Log:      log,
-		Redis:    rdb,
-		Cache:    NewCache(rdb, log),
-		CMS:      NewCMS(cfg, log),
-		Renderer: views.NewRenderer(),
-	}, nil
-}
-
-func (a *App) Close() error { return a.Redis.Close() }
 EOF
 }
 
 # -----------------------------------------------------------------------------
-# Every route in one table. Adding an endpoint means one line here plus one
-# handler, and the whole surface of the app is readable at a glance.
-_write_router() {
-  cat > "$1/router.go" <<'EOF'
-package main
+# HANDLERS. One file per route, plus the shared pieces: the dependency struct
+# and the Response helper every handler replies through.
+_write_handlers() {
+  cat > "$1/handlers/handlers.go" <<'EOF'
+// Package handlers holds one file per route. Everything shared between them
+// lives here (dependencies) and in response.go (how they reply), so a new
+// endpoint is a new file and a line in router.go - nothing else changes.
+package handlers
+
+import (
+	"log/slog"
+
+	"github.com/redis/go-redis/v9"
+
+	"__MODULE__/cache"
+	"__MODULE__/cms"
+	"__MODULE__/config"
+	"__MODULE__/views"
+)
+
+// Deps is what the handlers need. Passing a struct rather than six positional
+// arguments means adding a dependency does not touch every call site.
+type Deps struct {
+	Config   config.Config
+	Log      *slog.Logger
+	Cache    *cache.Cache
+	CMS      *cms.Client
+	Renderer *views.Renderer
+	Redis    *redis.Client
+}
+
+// Handlers is the receiver every handler hangs off, so they share dependencies
+// without any of them reaching for a global.
+type Handlers struct {
+	Deps
+}
+
+func New(d Deps) *Handlers { return &Handlers{Deps: d} }
+EOF
+
+  cat > "$1/handlers/response.go" <<'EOF'
+package handlers
 
 import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 )
 
-// NewRouter wires middleware and routes. This is the single source of truth
-// for the app's HTTP surface - nothing registers routes anywhere else.
-func NewRouter(app *App) *echo.Echo {
-	e := echo.New()
-	e.Renderer = app.Renderer
+// Response is a thin layer over Echo's own response helpers
+// (https://echo.labstack.com/guide/response/): Context.HTMLBlob, Context.String
+// and Context.JSON already know how to set content types and write the body,
+// so nothing here re-implements them.
+//
+// What it does add is the bookkeeping this app would otherwise repeat in every
+// handler: the cache header, and logging an error while replying with a
+// message that is safe to show a client.
+//
+// Usage: return h.reply(c).Page(html, cached)
+type Response struct {
+	h *Handlers
+	c *echo.Context
+}
 
-	e.Use(middleware.Recover())
-	e.Use(middleware.RequestLogger())
-	e.Use(middleware.Gzip())
+func (h *Handlers) reply(c *echo.Context) Response {
+	return Response{h: h, c: c}
+}
 
-	e.Static("/static", "static")
+// Page sends a rendered HTML page and records whether it came from the cache.
+// The X-Cache header makes the cache observable in devtools without putting
+// anything in the markup.
+func (r Response) Page(html []byte, cached bool) error {
+	status := "MISS"
+	if cached {
+		status = "HIT"
+	}
+	r.c.Response().Header().Set("X-Cache", status)
+	return r.c.HTMLBlob(http.StatusOK, html)
+}
 
-	// --- routes --------------------------------------------------------------
-	e.GET("/", app.Index)                  // the page, served from cache
-	e.POST("/cache/purge", app.PurgeCache) // htmx button + Cockpit webhook
+// Text sends a plain-text response, for endpoints with nothing to render.
+func (r Response) Text(status int, message string) error {
+	return r.c.String(status, message)
+}
 
-	e.GET("/healthz", func(c *echo.Context) error {
-		if err := app.Redis.Ping(c.Request().Context()).Err(); err != nil {
-			return c.String(http.StatusServiceUnavailable, "redis unavailable")
-		}
-		return c.String(http.StatusOK, "ok")
-	})
+// JSON sends a JSON response, for when this app grows an API route.
+func (r Response) JSON(status int, body any) error {
+	return r.c.JSON(status, body)
+}
 
-	return e
+// Fail logs the real error and returns a generic message to the client, so
+// internal details never leak and no handler has to remember to do both.
+// Echo's error handler turns the returned HTTPError into the response.
+func (r Response) Fail(status int, message string, err error) error {
+	if err != nil {
+		r.h.Log.Error(message, "err", err, "path", r.c.Request().URL.Path)
+	}
+	return echo.NewHTTPError(status, message)
 }
 EOF
-}
 
-# -----------------------------------------------------------------------------
-# What each route does, and nothing more. The caching mechanics live in
-# cache.go and the CMS call in cms.go, so these stay short enough to read.
-_write_handlers() {
-  cat > "$1/handlers.go" <<'EOF'
-package main
+  cat > "$1/handlers/home.go" <<'EOF'
+package handlers
 
 import (
 	"bytes"
@@ -366,58 +482,75 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-// pageCacheKey is the Redis key holding the fully rendered page.
-const pageCacheKey = "__PROJECT__:index_html"
+// homeCacheKey is the Redis key holding the fully rendered home page.
+const homeCacheKey = "__PROJECT__:home_html"
 
-// Index serves the home page through the cache.
+// Home serves the page through the cache.
 //
-// The cache-aside dance itself lives in Cache.HTML: this handler only says
-// what to render when the cache is cold. On a hit nothing here runs beyond
-// writing the bytes out, which is why a hit costs microseconds.
-func (a *App) Index(c *echo.Context) error {
-	html, hit, err := a.Cache.HTML(c.Request().Context(), pageCacheKey, func() ([]byte, error) {
-		articles, err := a.CMS.Articles(c.Request().Context())
+// The cache-aside dance lives in cache.Cache.HTML; this handler only says what
+// to render when the cache is cold. On a hit none of the closure runs, which
+// is why a hit costs microseconds.
+func (h *Handlers) Home(c *echo.Context) error {
+	html, cached, err := h.Cache.HTML(c.Request().Context(), homeCacheKey, func() ([]byte, error) {
+		articles, err := h.CMS.Articles(c.Request().Context())
 		if err != nil {
 			return nil, err
 		}
 		var buf bytes.Buffer
-		err = a.Renderer.Page(&buf, "home", map[string]any{
+		err = h.Renderer.Page(&buf, "home", map[string]any{
 			"Title":    "__PROJECT__",
 			"Articles": articles,
 		})
 		return buf.Bytes(), err
 	})
 	if err != nil {
-		a.Log.Error("index", "err", err)
-		return echo.NewHTTPError(http.StatusBadGateway, "could not load the page")
+		return h.reply(c).Fail(http.StatusBadGateway, "could not load the page", err)
 	}
-
-	// Surfaced as a header so the cache behaviour is visible in devtools
-	// without polluting the HTML.
-	c.Response().Header().Set("X-Cache", cacheStatus(hit))
-	return c.HTMLBlob(http.StatusOK, html)
+	return h.reply(c).Page(html, cached)
 }
+EOF
+
+  cat > "$1/handlers/purge.go" <<'EOF'
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v5"
+)
 
 // PurgeCache drops the cached page. It is both the target of the htmx button
 // on the page and a webhook Cockpit can call when an editor publishes, so the
 // site updates without waiting out the TTL.
-func (a *App) PurgeCache(c *echo.Context) error {
+func (h *Handlers) PurgeCache(c *echo.Context) error {
 	// The token is only enforced when configured, which keeps the htmx button
 	// working locally while still protecting a deployed site.
-	if a.Config.CockpitToken != "" && c.Request().Header.Get("X-Api-Key") != a.Config.CockpitToken {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+	if h.Config.CockpitToken != "" && c.Request().Header.Get("X-Api-Key") != h.Config.CockpitToken {
+		return h.reply(c).Fail(http.StatusUnauthorized, "invalid token", nil)
 	}
-	if err := a.Cache.Purge(c.Request().Context(), pageCacheKey); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "purge failed")
+	if err := h.Cache.Purge(c.Request().Context(), homeCacheKey); err != nil {
+		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
-	return c.String(http.StatusOK, "purged")
+	return h.reply(c).Text(http.StatusOK, "purged")
 }
+EOF
 
-func cacheStatus(hit bool) string {
-	if hit {
-		return "HIT"
+  cat > "$1/handlers/health.go" <<'EOF'
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v5"
+)
+
+// Health reports liveness. It checks Redis because the site is unusable
+// without it, so an orchestrator restarting the container is the right call.
+func (h *Handlers) Health(c *echo.Context) error {
+	if err := h.Redis.Ping(c.Request().Context()).Err(); err != nil {
+		return h.reply(c).Fail(http.StatusServiceUnavailable, "redis unavailable", err)
 	}
-	return "MISS"
+	return h.reply(c).Text(http.StatusOK, "ok")
 }
 EOF
 }
@@ -426,8 +559,9 @@ EOF
 # The cache-aside pattern, written once. Every cached endpoint calls HTML and
 # passes a render function, so no handler repeats Get/Set/error handling.
 _write_cache() {
-  cat > "$1/cache.go" <<'EOF'
-package main
+  cat > "$1/cache/cache.go" <<'EOF'
+// Package cache is a small cache-aside helper over Redis.
+package cache
 
 import (
 	"context"
@@ -442,23 +576,21 @@ import (
 // fresh enough for editorial work. Publishing calls /cache/purge anyway.
 const ttl = 10 * time.Minute
 
-// Cache is a small cache-aside helper over Redis.
 type Cache struct {
 	rdb *redis.Client
 	log *slog.Logger
 }
 
-func NewCache(rdb *redis.Client, log *slog.Logger) *Cache {
+func New(rdb *redis.Client, log *slog.Logger) *Cache {
 	return &Cache{rdb: rdb, log: log}
 }
 
-// HTML returns the cached bytes for key, calling render only on a miss and
-// storing whatever it produced:
+// HTML returns the cached bytes for key, calling render only on a miss:
 //
 //	1. GET the key. On a hit, return immediately - no CMS call, no rendering.
 //	2. On a miss, run render, SET the result with a TTL and return it.
 //
-// A Redis failure is never fatal: render still runs, the request is just
+// A Redis failure is never fatal: render still runs and the request is just
 // slower, which keeps the site up when the cache is down.
 func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, error)) ([]byte, bool, error) {
 	start := time.Now()
@@ -492,11 +624,12 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# The only place that knows how to talk to Cockpit. Swap the stub for a real
-# HTTP call here and nothing else in the app changes.
+# The only package that knows how to talk to Cockpit.
 _write_cms() {
-  cat > "$1/cms.go" <<'EOF'
-package main
+  cat > "$1/cms/cms.go" <<'EOF'
+// Package cms is the Cockpit CMS client. Everything the app knows about the
+// CMS lives here, so the rest of the code never sees an HTTP call.
+package cms
 
 import (
 	"context"
@@ -506,20 +639,19 @@ import (
 	"net/http"
 	"time"
 
+	"__MODULE__/config"
 	"__MODULE__/models"
 )
 
-// CMS is the Cockpit client. It is the only place that knows the CMS exists:
-// handlers ask it for data and hand that data to the views.
-type CMS struct {
+type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
 	log     *slog.Logger
 }
 
-func NewCMS(cfg Config, log *slog.Logger) *CMS {
-	return &CMS{
+func New(cfg config.Config, log *slog.Logger) *Client {
+	return &Client{
 		baseURL: cfg.CockpitURL,
 		token:   cfg.CockpitToken,
 		// Always bound the CMS call: without a timeout a slow Cockpit would
@@ -532,13 +664,13 @@ func NewCMS(cfg Config, log *slog.Logger) *CMS {
 // Articles fetches the "articles" collection.
 //
 // Cockpit exposes collections at /api/content/items/<collection> and
-// authenticates with an api-key header. Create the collection in the Cockpit
+// authenticates with an api-key header. Create that collection in the Cockpit
 // admin with the fields in models.Article and this returns real content.
 //
-// Until that collection exists the request fails, so a fresh project falls
-// back to sample articles and logs why - the site renders something on the
-// very first run instead of an error page.
-func (c *CMS) Articles(ctx context.Context) ([]models.Article, error) {
+// Until it exists the request fails, so a fresh project falls back to sample
+// articles and logs why - the site renders something on the very first run
+// instead of an error page.
+func (c *Client) Articles(ctx context.Context) ([]models.Article, error) {
 	articles, err := c.fetchArticles(ctx)
 	if err != nil {
 		c.log.Warn("cockpit unavailable, serving sample content", "err", err)
@@ -547,7 +679,7 @@ func (c *CMS) Articles(ctx context.Context) ([]models.Article, error) {
 	return articles, nil
 }
 
-func (c *CMS) fetchArticles(ctx context.Context) ([]models.Article, error) {
+func (c *Client) fetchArticles(ctx context.Context) ([]models.Article, error) {
 	url := c.baseURL + "/api/content/items/articles"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -567,8 +699,6 @@ func (c *CMS) fetchArticles(ctx context.Context) ([]models.Article, error) {
 		return nil, fmt.Errorf("cockpit returned %s", res.Status)
 	}
 
-	// Cockpit returns a bare array for a collection query; models.CockpitResponse
-	// documents the enveloped shape used by the paginated endpoints.
 	var articles []models.Article
 	if err := json.NewDecoder(res.Body).Decode(&articles); err != nil {
 		return nil, err
@@ -1100,30 +1230,56 @@ Redis cache-aside in front of the CMS.
 
 ## Structure
 
-One file per responsibility, so each is short enough to read in one sitting:
+One file per responsibility. Handlers live in their own package, one file per
+route, so the file never becomes a dumping ground as the app grows:
 
 ```
-main.go        Startup: read config, build the app, start the server.
-app.go         Config + App: every dependency, built once, shared by handlers.
-router.go      Every route and middleware. The whole HTTP surface, one screen.
-handlers.go    What each route does. Nothing else.
-cache.go       Cache-aside over Redis, written once and reused.
-cms.go         The Cockpit API client. The only file that knows the CMS exists.
-models/        Data shapes. No Redis, no HTTP, no HTML.
-views/         Markup, embedded with go:embed.
-  render.go    Parses every template at startup.
-  layout.html  Base document (Tailwind, htmx, Alpine).
-  pages/       One file per page.
-  components/  Reusable pieces, one per file.
-static/        Assets served at /static.
+main.go            Startup: read config, build the app, start the server.
+app.go             Composition root: build every dependency once.
+router.go          Every route and middleware. The whole HTTP surface.
+config/            Environment settings, read exactly once.
+handlers/          One file per route.
+  handlers.go      Deps + the receiver they hang off.
+  response.go      How this app replies (see below).
+  home.go          GET /
+  purge.go         POST /cache/purge
+  health.go        GET /healthz
+cache/             Cache-aside over Redis, written once.
+cms/               The Cockpit API client. The only package that calls the CMS.
+models/            Data shapes. No Redis, no HTTP, no HTML.
+views/             Markup, embedded with go:embed.
+  render.go        Parses every template at startup.
+  layout.html      Base document (Tailwind, htmx, Alpine).
+  pages/           One file per page.
+  components/      Reusable pieces, one per file.
+static/            Assets served at /static.
 ```
 
-Reading order: `main.go` -> `app.go` -> `router.go` -> `handlers.go`.
+Reading order: `main.go` -> `app.go` -> `router.go` -> `handlers/`.
 
-Data flows one way: `cms.go` fetches from Cockpit into `models`, the handler
-passes those models to `views`, and the rendered HTML goes into the cache.
-Adding a page is one template in `views/pages/`, one handler, one line in
-`router.go`.
+Adding an endpoint is one file in `handlers/` and one line in `router.go`.
+Adding a page is one template in `views/pages/`. Nothing else changes.
+
+Data flows one way: `cms` fetches from Cockpit into `models`, a handler passes
+those to `views`, and the rendered HTML goes into `cache`.
+
+## Responses
+
+Handlers reply through the small `Response` helper in `handlers/response.go`
+rather than repeating the same bookkeeping:
+
+```go
+return h.reply(c).Page(html, cached)                       // HTML + X-Cache header
+return h.reply(c).Text(http.StatusOK, "purged")            // plain text
+return h.reply(c).Fail(http.StatusBadGateway, "...", err)  // log + safe message
+```
+
+It is a thin layer over [Echo's own response helpers][echo-response] -
+`Context.HTMLBlob`, `Context.String` and `Context.JSON` do the actual writing.
+What it adds is the cache header and, in `Fail`, logging the real error while
+returning only a message that is safe to show a client.
+
+[echo-response]: https://echo.labstack.com/guide/response/
 
 ## Routes
 
