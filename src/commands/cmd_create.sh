@@ -127,37 +127,26 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# Generates the Templ components and resolves the module graph, writing go.sum.
-#
-# Order matters: views/ and views/components/ hold only .templ files, so those
-# packages do not exist for the Go toolchain until `templ generate` has run.
-# Running `go mod tidy` first fails to resolve them and leaves no go.sum, which
-# then breaks the production build.
-#
-# Prefers the host toolchain and falls back to a throwaway container, so the
-# result is identical whether or not Go and templ are installed locally.
+# Resolves the module graph and writes go.sum, which the production build needs:
+# it compiles with the default GOFLAGS and refuses to build without verified
+# checksums. Prefers the host toolchain, falls back to a throwaway container so
+# the result is identical whether or not Go is installed locally.
 _resolve_dependencies() {
   local dir="$1"
-  info "Generating Templ components and resolving dependencies"
+  info "Resolving Go dependencies (writing go.sum)"
 
-  if command -v go >/dev/null 2>&1 && command -v templ >/dev/null 2>&1; then
-    if ( cd "${dir}" && templ generate >/dev/null && go mod tidy ); then
-      ok "Components generated, go.sum written."
-      return 0
-    fi
-    warn "Host toolchain failed; retrying inside a container."
+  if command -v go >/dev/null 2>&1; then
+    ( cd "${dir}" && go mod tidy ) && { ok "go.sum written."; return 0; }
+    warn "Host 'go mod tidy' failed; retrying inside a container."
   fi
 
-  if docker run --rm -v "${dir}:/src" -w /src golang:1.22-alpine sh -c '
-        apk add --no-cache git >/dev/null &&
-        go install github.com/a-h/templ/cmd/templ@v0.2.793 >/dev/null 2>&1 &&
-        /go/bin/templ generate >/dev/null &&
-        go mod tidy'; then
-    ok "Components generated, go.sum written."
+  if docker run --rm -v "${dir}:/src" -w /src golang:1.26-alpine \
+       sh -c 'apk add --no-cache git >/dev/null && go mod tidy'; then
+    ok "go.sum written."
     return 0
   fi
 
-  warn "Could not resolve dependencies (offline?). Run 'templ generate && go mod tidy' in ${dir} before deploying."
+  warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ${dir} before deploying."
   return 0
 }
 
@@ -166,12 +155,12 @@ _write_go_mod() {
   cat > "$1/go.mod" <<'EOF'
 module __MODULE__
 
-go 1.22
+// Echo v5 requires Go 1.25 or newer.
+go 1.25
 
 require (
-	github.com/a-h/templ v0.2.793
-	github.com/labstack/echo/v4 v4.12.0
-	github.com/redis/go-redis/v9 v9.6.1
+	github.com/labstack/echo/v5 v5.3.1
+	github.com/redis/go-redis/v9 v9.22.0
 )
 EOF
 }
@@ -181,76 +170,79 @@ EOF
 # is create dependencies and hand them to the handlers layer.
 _write_main_go() {
   cat > "$1/main.go" <<'EOF'
-// Package main is the composition root: it builds the dependencies (Redis,
-// Echo) and wires the handlers layer. It contains no business logic and no
-// markup - those live in handlers/ and views/ respectively.
+// Package main is the composition root: it builds the dependencies (Redis, the
+// template renderer, Echo) and wires the handlers layer. It holds no business
+// logic and no markup - those live in handlers/ and views/ respectively.
 package main
 
 import (
 	"context"
-	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"github.com/redis/go-redis/v9"
 
 	"__MODULE__/handlers"
+	"__MODULE__/views"
 )
 
 func main() {
-	rdb, err := newRedisClient()
+	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	rdb, err := newRedisClient(log)
 	if err != nil {
-		log.Fatalf("redis: %v", err)
+		log.Error("redis", "err", err)
+		os.Exit(1)
 	}
 	defer rdb.Close()
 
 	e := echo.New()
-	e.HideBanner = true
+	// views owns the templates; main only registers the renderer.
+	e.Renderer = views.NewRenderer()
+
 	e.Use(middleware.Recover())
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Gzip())
 	e.Static("/static", "static")
 
 	// The handlers layer owns its own routes, so adding a feature means
 	// touching one package instead of editing this file.
-	handlers.NewArticulos(rdb).Register(e)
+	handlers.NewArticulos(rdb, log).Register(e)
 
-	e.GET("/healthz", func(c echo.Context) error {
+	e.GET("/healthz", func(c *echo.Context) error {
 		if err := rdb.Ping(c.Request().Context()).Err(); err != nil {
 			return c.String(http.StatusServiceUnavailable, "redis unavailable")
 		}
 		return c.String(http.StatusOK, "ok")
 	})
 
-	port := env("PORT", "8080")
-	go func() {
-		if err := e.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("server: %v", err)
-		}
-	}()
+	// Echo v5 handles graceful shutdown itself: StartConfig.Start stops
+	// accepting connections when the context is cancelled and then waits up to
+	// GracefulTimeout for in-flight requests. No manual Shutdown call needed.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// Graceful shutdown so in-flight htmx requests are not cut mid-render.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := e.Shutdown(ctx); err != nil {
-		log.Printf("shutdown: %v", err)
+	cfg := echo.StartConfig{
+		Address:         ":" + env("PORT", "8080"),
+		HideBanner:      true,
+		GracefulTimeout: 10 * time.Second,
+	}
+	if err := cfg.Start(ctx, e); err != nil {
+		log.Error("server stopped", "err", err)
+		os.Exit(1)
 	}
 }
 
 // newRedisClient parses REDIS_URL (redis://host:port/db) and verifies the
 // connection up front, so a misconfigured environment fails at boot instead of
 // on the first cache miss.
-func newRedisClient() (*redis.Client, error) {
+func newRedisClient(log *slog.Logger) (*redis.Client, error) {
 	opts, err := redis.ParseURL(env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"))
 	if err != nil {
 		return nil, err
@@ -262,7 +254,7 @@ func newRedisClient() (*redis.Client, error) {
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, err
 	}
-	log.Printf("redis connected: %s db=%d", opts.Addr, opts.DB)
+	log.Info("redis connected", "addr", opts.Addr, "db", opts.DB)
 	return rdb, nil
 }
 
@@ -281,8 +273,8 @@ EOF
 _write_models() {
   cat > "$1/models/articulo.go" <<'EOF'
 // Package models holds the data structures the application works with.
-// It has no dependencies on Echo, Redis or Templ on purpose: this package
-// describes *what* the data is, never how it is fetched or rendered.
+// It has no dependencies on Echo, Redis or the templates on purpose: this
+// package describes *what* the data is, never how it is fetched or rendered.
 package models
 
 import "time"
@@ -301,8 +293,8 @@ type Articulo struct {
 	Creado    time.Time `json:"_created"`
 }
 
-// URL is the canonical path of the article. Keeping it here means views never
-// have to build paths by hand.
+// URL is the canonical path of the article. Keeping it here means templates
+// never have to build paths by hand.
 func (a Articulo) URL() string {
 	return "/articulos/" + a.Slug
 }
@@ -316,162 +308,195 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
-# VIEW LAYER. Markup only, one component per file. Components receive
-# already-resolved data and never reach for Redis, the CMS or the request.
-#
-#   views/           page-level markup (layout, pages, fragments)
-#   views/components/ reusable pieces, each in its own file
-#
+# VIEW LAYER. Markup only, one component per file, rendered with the standard
+# library's html/template. Templates are embedded in the binary with go:embed,
+# so the production image ships a single file and cannot drift from the code.
 _write_views() {
-  # --- base document ---------------------------------------------------------
-  cat > "$1/views/layout.templ" <<'EOF'
-package views
-
-// Layout is the base HTML document and nothing else: Tailwind CSS, htmx and
-// Alpine.js. Every page wraps itself in this.
-//
-// The three libraries are loaded from a CDN to keep local development
-// build-free. Before going to production, vendor them into /static so the site
-// does not depend on third-party uptime and a CSP can be tightened.
-templ Layout(titulo string) {
-	<!DOCTYPE html>
-	<html lang="es" class="h-full">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>{ titulo }</title>
-			<script src="https://cdn.tailwindcss.com"></script>
-			<script src="https://unpkg.com/htmx.org@2.0.2"></script>
-			<script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
-			<style>
-				[x-cloak] { display: none !important; }
-			</style>
-		</head>
-		<body class="h-full bg-slate-50 text-slate-900 antialiased">
-			<div class="mx-auto max-w-3xl px-6 py-12">
-				{ children... }
-			</div>
-		</body>
-	</html>
-}
-EOF
-
-  # --- home page -------------------------------------------------------------
-  cat > "$1/views/inicio.templ" <<'EOF'
-package views
-
-import "__MODULE__/views/components"
-
-// Inicio is the page shell. The article list is loaded out of band by htmx, so
-// the first paint never waits on the CMS.
-templ Inicio(titulo string) {
-	@Layout(titulo) {
-		<header class="mb-8 flex items-center justify-between">
-			<h1 class="text-3xl font-bold tracking-tight">{ titulo }</h1>
-			@components.BotonRecargar("/articulos", "#articulos")
-		</header>
-
-		@components.Cargando()
-
-		<section
-			id="articulos"
-			hx-get="/articulos"
-			hx-trigger="load"
-			hx-swap="innerHTML"
-		></section>
-	}
-}
-EOF
-
-  # --- htmx fragment ---------------------------------------------------------
-  cat > "$1/views/articulos.templ" <<'EOF'
+  cat > "$1/views/render.go" <<'EOF'
+// Package views owns every piece of markup and the renderer that turns it into
+// HTML. It never touches Redis, the CMS or the request: it is handed
+// already-resolved data and decides only how that data looks.
 package views
 
 import (
-	"__MODULE__/models"
-	"__MODULE__/views/components"
+	"embed"
+	"html/template"
+	"io"
+
+	"github.com/labstack/echo/v5"
 )
 
-// ListaArticulos is the fragment htmx swaps into the page. It only composes
-// components: the markup of a single article lives in its own file, so it can
-// be reused or changed without touching the list.
+// Templates are embedded so the binary is self-contained: no template files to
+// copy into the image, and no chance of the markup drifting from the code.
 //
-// It receives the data already resolved by the handler and never knows whether
-// that data came from the cache or from the CMS.
-templ ListaArticulos(articulos []models.Articulo) {
-	if len(articulos) == 0 {
-		@components.Vacio("No hay articulos publicados todavia.")
-	} else {
-		<ul class="space-y-4" x-data="{ abierto: null }">
-			for _, articulo := range articulos {
-				@components.TarjetaArticulo(articulo)
-			}
-		</ul>
+//go:embed *.html components/*.html
+var archivos embed.FS
+
+// Renderer implements echo.Renderer.
+//
+// Each entry is a fully parsed template set. Pages are rendered through the
+// shared layout; fragments (the htmx targets) are rendered on their own, which
+// is what lets htmx swap them into an existing document.
+type Renderer struct {
+	paginas    map[string]*template.Template
+	fragmentos map[string]*template.Template
+}
+
+// NewRenderer parses every template at startup and panics on a malformed one,
+// so a broken template fails the deploy instead of the first request.
+func NewRenderer() *Renderer {
+	const componentes = "components/*.html"
+
+	return &Renderer{
+		paginas: map[string]*template.Template{
+			// A page set is layout + page + components; executing "layout"
+			// pulls in the page's "contenido" block.
+			"inicio": template.Must(template.ParseFS(archivos, "layout.html", "inicio.html", componentes)),
+		},
+		fragmentos: map[string]*template.Template{
+			// A fragment set has no layout: htmx swaps it into a live page.
+			"articulos": template.Must(template.ParseFS(archivos, "articulos.html", componentes)),
+		},
 	}
 }
+
+// Render satisfies echo.Renderer. Echo renders into a buffer first, so a
+// template error never leaves a half-written response on the wire.
+func (r *Renderer) Render(_ *echo.Context, w io.Writer, nombre string, datos any) error {
+	if t, ok := r.paginas[nombre]; ok {
+		return t.ExecuteTemplate(w, "layout", datos)
+	}
+	if t, ok := r.fragmentos[nombre]; ok {
+		return t.ExecuteTemplate(w, nombre, datos)
+	}
+	return echo.NewHTTPError(500, "plantilla desconocida: "+nombre)
+}
+
+// Fragmento renders a fragment to a writer outside the request cycle, which is
+// what the cache layer uses to produce the HTML it stores.
+func (r *Renderer) Fragmento(w io.Writer, nombre string, datos any) error {
+	t, ok := r.fragmentos[nombre]
+	if !ok {
+		return echo.NewHTTPError(500, "fragmento desconocido: "+nombre)
+	}
+	return t.ExecuteTemplate(w, nombre, datos)
+}
+EOF
+
+  # --- base document ---------------------------------------------------------
+  cat > "$1/views/layout.html" <<'EOF'
+{{/*
+  Base HTML document: Tailwind CSS, htmx and Alpine.js, and nothing else.
+  Every page fills in the "contenido" block.
+
+  The libraries are loaded from a CDN to keep local development build-free.
+  Before going to production, vendor them into /static so the site does not
+  depend on third-party uptime and a CSP can be tightened.
+*/}}
+{{define "layout"}}<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>{{.Titulo}}</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
+	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
+	<style>[x-cloak]{display:none !important}</style>
+</head>
+<body class="h-full bg-slate-50 text-slate-900 antialiased">
+	<div class="mx-auto max-w-3xl px-6 py-12">
+		{{template "contenido" .}}
+	</div>
+</body>
+</html>{{end}}
+EOF
+
+  # --- home page -------------------------------------------------------------
+  cat > "$1/views/inicio.html" <<'EOF'
+{{/*
+  Home page. The article list is loaded out of band by htmx, so the first paint
+  never waits on the CMS.
+*/}}
+{{define "contenido"}}
+<header class="mb-8 flex items-center justify-between">
+	<h1 class="text-3xl font-bold tracking-tight">{{.Titulo}}</h1>
+	{{template "boton-recargar" .}}
+</header>
+
+{{template "cargando" .}}
+
+<section id="articulos" hx-get="/articulos" hx-trigger="load" hx-swap="innerHTML"></section>
+{{end}}
+EOF
+
+  # --- htmx fragment ---------------------------------------------------------
+  cat > "$1/views/articulos.html" <<'EOF'
+{{/*
+  The fragment htmx swaps into the page. It only composes components: the
+  markup of a single article lives in its own file, so it can be reused or
+  restyled without touching this list.
+
+  Receives []models.Articulo, already resolved by the handler. It does not know
+  whether that data came from the cache or from the CMS.
+*/}}
+{{define "articulos"}}
+{{- if . -}}
+<ul class="space-y-4" x-data="{ abierto: null }">
+	{{- range . }}
+	{{template "tarjeta" .}}
+	{{- end }}
+</ul>
+{{- else -}}
+{{template "vacio" "No hay articulos publicados todavia."}}
+{{- end -}}
+{{end}}
 EOF
 
   # --- reusable components, one per file -------------------------------------
-  cat > "$1/views/components/tarjeta.templ" <<'EOF'
-package components
-
-import "__MODULE__/models"
-
-// TarjetaArticulo renders a single article. It expects an Alpine `abierto`
-// scope from its parent list, which is what lets one card expand at a time.
-templ TarjetaArticulo(articulo models.Articulo) {
-	<li class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-		<button
-			class="w-full text-left"
-			@click={ "abierto = abierto === '" + articulo.ID + "' ? null : '" + articulo.ID + "'" }
-		>
-			<h2 class="text-lg font-semibold">{ articulo.Titulo }</h2>
-			<p class="mt-1 text-sm text-slate-600">{ articulo.Extracto }</p>
-		</button>
-
-		<div x-show={ "abierto === '" + articulo.ID + "'" } x-cloak>
-			<p class="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">
-				{ articulo.Contenido }
-			</p>
-			<a class="mt-2 inline-block text-sm text-blue-600 hover:underline" href={ templ.SafeURL(articulo.URL()) }>
-				Leer mas
-			</a>
-		</div>
-	</li>
-}
-EOF
-
-  cat > "$1/views/components/boton.templ" <<'EOF'
-package components
-
-// BotonRecargar triggers an htmx request against `url` and swaps the result
-// into `objetivo`. Parameterised so any page can reuse it.
-templ BotonRecargar(url string, objetivo string) {
-	<button
-		class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-		hx-get={ url }
-		hx-target={ objetivo }
-		hx-swap="innerHTML"
-		hx-indicator="#cargando"
-	>
-		Recargar
+  cat > "$1/views/components/tarjeta.html" <<'EOF'
+{{/*
+  A single article card. Expects an Alpine `abierto` scope from its parent
+  list, which is what lets one card be open at a time.
+*/}}
+{{define "tarjeta"}}
+<li class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+	<button class="w-full text-left" @click="abierto = abierto === '{{.ID}}' ? null : '{{.ID}}'">
+		<h2 class="text-lg font-semibold">{{.Titulo}}</h2>
+		<p class="mt-1 text-sm text-slate-600">{{.Extracto}}</p>
 	</button>
-}
+
+	<div x-show="abierto === '{{.ID}}'" x-cloak>
+		<p class="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">{{.Contenido}}</p>
+		<a class="mt-2 inline-block text-sm text-blue-600 hover:underline" href="{{.URL}}">Ver detalle</a>
+	</div>
+</li>
+{{end}}
 EOF
 
-  cat > "$1/views/components/estado.templ" <<'EOF'
-package components
+  cat > "$1/views/components/boton.html" <<'EOF'
+{{/* htmx reload button. Kept separate so any page can reuse it. */}}
+{{define "boton-recargar"}}
+<button
+	class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+	hx-get="/articulos"
+	hx-target="#articulos"
+	hx-swap="innerHTML"
+	hx-indicator="#cargando"
+>Recargar</button>
+{{end}}
+EOF
 
-// Cargando is the htmx indicator: htmx toggles it automatically for any
-// request that points hx-indicator at it.
-templ Cargando() {
-	<p id="cargando" class="htmx-indicator text-sm text-slate-500">Cargando...</p>
-}
+  cat > "$1/views/components/estado.html" <<'EOF'
+{{/* Loading indicator: htmx toggles it for any request with hx-indicator. */}}
+{{define "cargando"}}
+<p id="cargando" class="htmx-indicator text-sm text-slate-500">Cargando...</p>
+{{end}}
 
-// Vacio is the empty state, kept separate so copy changes never touch logic.
-templ Vacio(mensaje string) {
-	<p class="text-slate-500">{ mensaje }</p>
-}
+{{/* Empty state, separate so copy changes never touch logic. */}}
+{{define "vacio"}}
+<p class="text-slate-500">{{.}}</p>
+{{end}}
 EOF
 }
 
@@ -482,7 +507,7 @@ _write_handlers() {
   cat > "$1/handlers/articulos.go" <<'EOF'
 // Package handlers holds the HTTP controllers: routing, caching and the calls
 // to Cockpit CMS. It is the only layer that talks to Redis, and the only one
-// that decides *when* data is produced - views only decide how it looks.
+// that decides *when* data is produced - views decide only how it looks.
 package handlers
 
 import (
@@ -490,12 +515,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
 	"__MODULE__/models"
@@ -512,17 +537,18 @@ const (
 	cacheTTL = 10 * time.Minute
 )
 
-// Articulos is the controller for everything under /articulos.
+// Articulos is the controller for everything articles related.
 type Articulos struct {
 	rdb *redis.Client
+	log *slog.Logger
 }
 
-func NewArticulos(rdb *redis.Client) *Articulos {
-	return &Articulos{rdb: rdb}
+func NewArticulos(rdb *redis.Client, log *slog.Logger) *Articulos {
+	return &Articulos{rdb: rdb, log: log}
 }
 
-// Register mounts this controller's routes. Keeping it here means main.go
-// never has to change when a route is added.
+// Register mounts this controller's routes, so main.go never has to change
+// when a route is added.
 func (h *Articulos) Register(e *echo.Echo) {
 	e.GET("/", h.Inicio)
 	e.GET("/articulos", h.Lista)
@@ -530,59 +556,61 @@ func (h *Articulos) Register(e *echo.Echo) {
 }
 
 // Inicio renders the page shell.
-func (h *Articulos) Inicio(c echo.Context) error {
-	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
-	return views.Inicio("__PROJECT__").Render(c.Request().Context(), c.Response().Writer)
+func (h *Articulos) Inicio(c *echo.Context) error {
+	return c.Render(http.StatusOK, "inicio", map[string]any{"Titulo": "__PROJECT__"})
 }
 
 // Lista is the htmx target and the cache-aside read path:
 //
 //	1. GET the key from Redis. On a hit, write the cached HTML straight to the
-//	   response - no CMS call, no template rendering, microseconds.
-//	2. On a miss, query Cockpit, render the Templ component into a buffer, SET
-//	   that HTML with a TTL, and serve it.
+//	   response - no CMS call, no template execution, microseconds.
+//	2. On a miss, query Cockpit, render the fragment into a buffer, SET those
+//	   exact bytes with a TTL, and serve them.
 //
 // A Redis failure is never fatal: the CMS is queried directly, just slower.
-func (h *Articulos) Lista(c echo.Context) error {
+func (h *Articulos) Lista(c *echo.Context) error {
 	ctx := c.Request().Context()
 	inicio := time.Now()
 
-	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTMLCharsetUTF8)
-
 	// --- cache hit ---------------------------------------------------------
-	if html, err := h.rdb.Get(ctx, cacheKey).Bytes(); err == nil {
+	html, err := h.rdb.Get(ctx, cacheKey).Bytes()
+	if err == nil {
 		h.marcar(c, "HIT", inicio)
-		_, err = c.Response().Write(html)
-		return err
-	} else if !errors.Is(err, redis.Nil) {
-		log.Printf("cache: read failed, falling back to cockpit: %v", err)
+		return c.HTMLBlob(http.StatusOK, html)
+	}
+	if !errors.Is(err, redis.Nil) {
+		h.log.Warn("cache read failed, falling back to cockpit", "err", err)
 	}
 
 	// --- cache miss --------------------------------------------------------
 	articulos, err := consultarCockpit(ctx)
 	if err != nil {
-		log.Printf("cockpit: %v", err)
+		h.log.Error("cockpit", "err", err)
 		return echo.NewHTTPError(http.StatusBadGateway, "no se pudieron cargar los articulos")
 	}
 
-	// Render into a buffer so the exact bytes served are the bytes cached.
+	// Render into a buffer so the bytes served are exactly the bytes cached.
+	renderer, ok := c.Echo().Renderer.(*views.Renderer)
+	if !ok {
+		return echo.NewHTTPError(http.StatusInternalServerError, "renderer no configurado")
+	}
 	var buf bytes.Buffer
-	if err := views.ListaArticulos(articulos).Render(ctx, &buf); err != nil {
+	if err := renderer.Fragmento(&buf, "articulos", articulos); err != nil {
+		h.log.Error("render", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "error al renderizar")
 	}
 
 	if err := h.rdb.Set(ctx, cacheKey, buf.Bytes(), cacheTTL).Err(); err != nil {
-		log.Printf("cache: write failed: %v", err)
+		h.log.Warn("cache write failed", "err", err)
 	}
 
 	h.marcar(c, "MISS", inicio)
-	_, err = c.Response().Write(buf.Bytes())
-	return err
+	return c.HTMLBlob(http.StatusOK, buf.Bytes())
 }
 
 // Purgar lets Cockpit invalidate the cache on publish, so editors do not have
-// to wait out the TTL. Point a Cockpit webhook at it.
-func (h *Articulos) Purgar(c echo.Context) error {
+// to wait out the TTL. Point a Cockpit publish webhook at it.
+func (h *Articulos) Purgar(c *echo.Context) error {
 	if token := os.Getenv("COCKPIT_API_TOKEN"); token != "" && c.Request().Header.Get("X-Api-Key") != token {
 		return echo.NewHTTPError(http.StatusUnauthorized, "token invalido")
 	}
@@ -593,12 +621,12 @@ func (h *Articulos) Purgar(c echo.Context) error {
 }
 
 // marcar exposes the cache outcome as response headers, so the behaviour is
-// visible in the browser devtools without polluting the HTML.
-func (h *Articulos) marcar(c echo.Context, estado string, inicio time.Time) {
+// visible in browser devtools without polluting the HTML.
+func (h *Articulos) marcar(c *echo.Context, estado string, inicio time.Time) {
 	transcurrido := time.Since(inicio)
 	c.Response().Header().Set("X-Cache", estado)
 	c.Response().Header().Set("X-Cache-Elapsed", transcurrido.String())
-	log.Printf("GET /articulos cache=%s elapsed=%s", estado, transcurrido)
+	h.log.Info("GET /articulos", "cache", estado, "elapsed", transcurrido)
 }
 
 // consultarCockpit stands in for the real CMS call. Replace the body with an
@@ -635,14 +663,12 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  # Regenerate Templ components before every rebuild.
-  pre_cmd  = ["templ generate"]
-  cmd      = "go build -o ./tmp/main ."
-  bin      = "./tmp/main"
+  cmd        = "go build -o ./tmp/main ."
+  entrypoint = "./tmp/main"
   delay    = 300
-  include_ext  = ["go", "templ", "html", "css", "js"]
+  include_ext  = ["go", "html", "css", "js"]
   exclude_dir  = ["tmp", "static/vendor", ".git", "cockpit-storage"]
-  exclude_regex = ["_test\\.go", "_templ\\.go"]
+  exclude_regex = ["_test\\.go"]
   stop_on_error = true
   send_interrupt = true
   kill_delay = "1s"
@@ -662,7 +688,7 @@ _write_dockerfiles() {
 # syntax=docker/dockerfile:1
 
 # --- stage 1: build ----------------------------------------------------------
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
@@ -671,12 +697,7 @@ WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 
-# Templ codegen must run before the compiler sees the package. The CLI is
-# pinned to the same version as the library so generated code always matches.
-RUN go install github.com/a-h/templ/cmd/templ@v0.2.793
-
 COPY . .
-RUN templ generate
 
 # CGO_ENABLED=0 produces a fully static binary that runs on a bare alpine.
 RUN CGO_ENABLED=0 GOOS=linux go build \
@@ -708,12 +729,11 @@ EOF
 # syntax=docker/dockerfile:1
 # Local development only. The source tree is bind-mounted, so this image just
 # carries the toolchain and runs air for hot reload.
-FROM golang:1.22-alpine
+FROM golang:1.26-alpine
 
 RUN apk add --no-cache git curl
 
-RUN go install github.com/a-h/templ/cmd/templ@v0.2.793 \
- && go install github.com/air-verse/air@v1.52.3
+RUN go install github.com/air-verse/air@v1.67.4
 
 WORKDIR /app
 ENV PORT=8080 CGO_ENABLED=0
@@ -727,7 +747,6 @@ EOF
 .gitignore
 tmp/
 cockpit-storage/
-*_templ.go
 .env
 .env.*
 !.env.example
@@ -925,20 +944,16 @@ _write_meta_files() {
 .env
 tmp/
 cockpit-storage/
-*_templ.go
 /app
 EOF
 
   cat > "$1/Makefile" <<'EOF'
-.PHONY: dev generate build tidy
+.PHONY: dev build tidy
 
-dev:      ## Hot reload on the host (containers: use `gosite start`)
+dev:   ## Hot reload on the host (containers: use `gosite start`)
 	air -c .air.toml
 
-generate: ## Regenerate Templ components
-	templ generate
-
-build: generate
+build: ## Static production binary (templates are embedded)
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ./tmp/app .
 
 tidy:
@@ -960,14 +975,15 @@ is easy to navigate and extend without mixing server logic and markup:
 main.go               Composition root: builds Redis + Echo, wires handlers.
 models/               DATA. Plain structs mapping Cockpit JSON. No I/O.
   articulo.go
-views/                MARKUP. One component per file. No Redis, no CMS.
-  layout.templ        Base HTML document (Tailwind, htmx, Alpine).
-  inicio.templ        Home page shell.
-  articulos.templ     htmx fragment; composes components.
+views/                MARKUP. html/template, one component per file, embedded
+  render.go           echo.Renderer; parses every template at startup.
+  layout.html         Base HTML document (Tailwind, htmx, Alpine).
+  inicio.html         Home page shell.
+  articulos.html      htmx fragment; composes components.
   components/         Reusable pieces.
-    tarjeta.templ     A single article card.
-    boton.templ       htmx reload button.
-    estado.templ      Loading indicator and empty state.
+    tarjeta.html      A single article card.
+    boton.html        htmx reload button.
+    estado.html       Loading indicator and empty state.
 handlers/             LOGIC. Routing, caching, CMS access.
   articulos.go        Controller for /, /articulos and /cache/purge.
 ```
@@ -988,8 +1004,9 @@ gosite start         # app (air hot reload) + Cockpit
 | App | http://localhost:__APP_PORT__ |
 | Cockpit | http://localhost:__CMS_PORT__ |
 
-Editing any `.go` or `.templ` file (including a single component) triggers
-`templ generate` + rebuild via air, in about 3 seconds.
+Editing any `.go` or `.html` file (including a single component) triggers an
+air rebuild in about 3 seconds. Templates are embedded with `go:embed`, so the
+production image is a single self-contained binary.
 
 ## Caching
 

@@ -44,7 +44,7 @@ cmd_start() {
     ok "App -> http://localhost:${GOSITE_APP_PORT}"
     ok "CMS -> http://localhost:${GOSITE_CMS_PORT}"
   fi
-  printf "${C_DIM}Edit any .go/.templ file and air rebuilds automatically. Logs: gosite start --logs${C_NC}\n"
+  printf "${C_DIM}Edit any .go/.html file and air rebuilds automatically. Logs: gosite start --logs${C_NC}\n"
 
   if [[ "${follow}" -eq 1 ]]; then
     compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" logs -f --tail=50

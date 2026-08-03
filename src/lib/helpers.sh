@@ -161,13 +161,12 @@ find_free_port() {
 # Required tools break the CLI outright; optional ones only degrade the local
 # workflow (you can still run everything inside containers).
 readonly GOSITE_REQUIRED_DEPS=(docker)
-readonly GOSITE_OPTIONAL_DEPS=(go templ air git openssl)
+readonly GOSITE_OPTIONAL_DEPS=(go air git openssl)
 
 dep_hint() {
   case "$1" in
     docker) echo "https://docs.docker.com/get-docker/" ;;
-    go)     echo "https://go.dev/dl/ (1.22+)" ;;
-    templ)  echo "go install github.com/a-h/templ/cmd/templ@latest" ;;
+    go)     echo "https://go.dev/dl/ (1.25+, required by Echo v5)" ;;
     air)    echo "go install github.com/air-verse/air@latest" ;;
     git)    echo "https://git-scm.com/downloads" ;;
     openssl) echo "used to generate project secrets" ;;

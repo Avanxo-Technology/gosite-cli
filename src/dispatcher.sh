@@ -36,7 +36,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
 
 $(printf "${C_BOLD}OTHER${C_NC}")
-  doctor             Verify local dependencies (go, templ, air, docker, ...)
+  doctor             Verify local dependencies (go, air, docker, compose)
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
   help               Show this help
   version            Print the version

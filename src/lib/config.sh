@@ -16,6 +16,12 @@
 : "${GOSITE_INFRA_DIR:=${GOSITE_HOME}/infra}"
 : "${GOSITE_INFRA_PROJECT:=gosite-infra}"
 
+# Image versions for the shared infrastructure. Pinned and overridable so a
+# machine can stay on an older major while its data volume is migrated.
+: "${GOSITE_TRAEFIK_VERSION:=v3.7}"
+: "${GOSITE_PG_VERSION:=18}"
+: "${GOSITE_REDIS_VERSION:=8}"
+
 # Shared service container names, referenced by every project as DNS hostnames.
 : "${GOSITE_PG_HOST:=gosite-postgres}"
 : "${GOSITE_PG_PORT:=5432}"
@@ -49,4 +55,5 @@ export GOSITE_NETWORK GOSITE_WORKSPACE GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
        GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY \
        GOSITE_TLD GOSITE_PROXY_HOST GOSITE_PROXY_HTTP_PORT GOSITE_PROXY_HTTPS_PORT \
-       GOSITE_CERTS_DIR GOSITE_DYNAMIC_DIR
+       GOSITE_CERTS_DIR GOSITE_DYNAMIC_DIR \
+       GOSITE_TRAEFIK_VERSION GOSITE_PG_VERSION GOSITE_REDIS_VERSION

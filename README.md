@@ -3,8 +3,9 @@
 A modular Bash CLI that manages local development environments and produces
 Coolify-ready production files for a high-performance monolith:
 
-**Go 1.22+ (Echo) + htmx + Alpine.js + Templ + Cockpit CMS**, with **Redis
-cache-aside** in front of the CMS.
+**Go 1.25+ (Echo v5) + htmx + Alpine.js + Tailwind + Cockpit CMS**, with
+**Redis cache-aside** in front of the CMS. Server-side HTML uses the standard
+library's `html/template` - no code generation, no build step.
 
 ## Architecture
 
@@ -79,7 +80,7 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 ## Usage
 
 ```bash
-gosite doctor                 # verify go, templ, air, docker, docker compose
+gosite doctor                 # verify go, air, docker, docker compose
 gosite infra up               # gosite-network + Traefik, Postgres, Redis
 gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
@@ -216,19 +217,20 @@ my-site/
 ├── go.mod / go.sum
 ├── models/                   # DATA: structs mapping Cockpit JSON, no I/O
 │   └── articulo.go
-├── views/                    # MARKUP: one component per file
-│   ├── layout.templ          # base document (Tailwind, htmx, Alpine)
-│   ├── inicio.templ          # home page shell
-│   ├── articulos.templ       # htmx fragment, composes components
+├── views/                    # MARKUP: html/template, embedded with go:embed
+│   ├── render.go             # echo.Renderer; parses every template at startup
+│   ├── layout.html           # base document (Tailwind, htmx, Alpine)
+│   ├── inicio.html           # home page shell
+│   ├── articulos.html        # htmx fragment, composes components
 │   └── components/
-│       ├── tarjeta.templ     # a single article card
-│       ├── boton.templ       # htmx reload button
-│       └── estado.templ      # loading indicator + empty state
+│       ├── tarjeta.html      # a single article card
+│       ├── boton.html        # htmx reload button
+│       └── estado.html       # loading indicator + empty state
 ├── handlers/                 # LOGIC: routing, cache-aside, CMS access
 │   └── articulos.go
 ├── static/
-├── .air.toml                 # hot reload: templ generate + rebuild on .go/.templ
-├── Dockerfile                # PROD multi-stage: templ generate -> static binary -> alpine
+├── .air.toml                 # hot reload: rebuild on .go/.html changes
+├── Dockerfile                # PROD multi-stage: static binary -> alpine
 ├── Dockerfile.dev            # LOCAL: toolchain + air, source bind-mounted
 ├── docker-compose.yml        # LOCAL: mapped ports, external gosite-network
 ├── docker-compose.prod.yml   # COOLIFY: no host ports, Traefik labels, env-driven
@@ -257,14 +259,34 @@ markup from bleeding into each other: `handlers` imports `views` and `models`,
 in its own file, so a card can be restyled without touching the list that
 composes it.
 
+### Pinned versions
+
+Everything the generated project and the shared infra depend on is pinned and
+overridable, so an upgrade is a deliberate change rather than a surprise:
+
+| Component | Version | Override |
+| --- | --- | --- |
+| Echo | v5.3.1 (needs Go 1.25+) | edit `go.mod` |
+| go-redis | v9.22.0 | edit `go.mod` |
+| htmx / Alpine.js / Tailwind | 2.0.10 / 3.15.12 / 4.3.3 | edit `views/layout.html` |
+| air | v1.67.4 | edit `Dockerfile.dev` |
+| Traefik | v3.7 | `GOSITE_TRAEFIK_VERSION` |
+| PostgreSQL | 18-alpine | `GOSITE_PG_VERSION` |
+| Redis | 8-alpine | `GOSITE_REDIS_VERSION` |
+| Cockpit | core-2.14.0 | edit the compose files |
+
+`gosite infra up` refuses to start Postgres when the data volume was written by
+a different major version, and prints the dump/restore steps instead of leaving
+a container in a restart loop.
+
 ### Cache-aside flow
 
 `GET /articulos` (htmx target) reads `articulos_html` from Redis. The cached
 value is the rendered HTML fragment, so a hit skips both the CMS call and the
-template render; on a miss it queries Cockpit, renders the Templ component into
-a buffer, and `SET`s those exact bytes with a 10-minute TTL.
+template render; on a miss it queries Cockpit, renders the fragment into a
+buffer, and `SET`s those exact bytes with a 10-minute TTL.
 Redis failures are never fatal — the CMS is queried directly, just slower.
 The `X-Cache` header reports `HIT`/`MISS`. `POST /cache/purge` (guarded by
 `X-Api-Key: $COCKPIT_API_TOKEN`) lets Cockpit invalidate on publish.
 
-Measured on the generated project: **MISS 403ms → HIT 188µs**.
+Measured on the generated project: **MISS 403ms → HIT 301µs**.
