@@ -19,16 +19,62 @@ Projects never define Postgres or Redis. They attach to `gosite-network` as an
 
 ## Install
 
+One line, straight from GitHub — installs per user into `~/.local`, no sudo:
+
 ```bash
-git clone <this-repo> && cd gosite-dev
-./install.sh          # re-execs through sudo automatically
+curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/gosite-cli/main/install.sh | bash
 ```
 
-The installer copies `src/` to `/usr/local/share/gosite` and symlinks
-`/usr/local/share/gosite/src/main.sh` to `/usr/local/bin/gosite` (`chmod +x`),
-so `gosite` works from any directory.
+Or from a clone:
 
-Uninstall: `sudo rm -rf /usr/local/share/gosite /usr/local/bin/gosite`
+```bash
+git clone git@github.com:Avanxo-Technology/gosite-cli.git
+cd gosite-cli && ./install.sh
+```
+
+Then check the toolchain:
+
+```bash
+gosite doctor
+```
+
+### Install modes
+
+| Command | Modules | Binary | sudo |
+| --- | --- | --- | --- |
+| `./install.sh` (default) | `~/.local/share/gosite` | `~/.local/bin/gosite` | no |
+| `./install.sh --system` | `/usr/local/share/gosite` | `/usr/local/bin/gosite` | yes |
+
+Either way the installer copies `src/` into the share directory and symlinks
+`<share>/gosite/src/main.sh` to `<bin>/gosite` (`chmod +x`), so `gosite` runs
+from any directory. `main.sh` resolves the symlink chain to find its own
+modules. If the bin directory is not on your `PATH`, the installer prints the
+exact line to add to your shell profile.
+
+When piped from `curl` the script has no `src/` beside it, so it downloads the
+repository tarball to a temp directory and installs from there — you never need
+`curl | sudo bash`.
+
+### Install options
+
+| Variable / flag | Default | Purpose |
+| --- | --- | --- |
+| `--system` / `--user` | `--user` | Machine-wide vs per-user install |
+| `GOSITE_PREFIX` | `~/.local` or `/usr/local` | Custom install prefix |
+| `GOSITE_REF` | `main` | Install a branch or release tag |
+| `GOSITE_REPO` | `Avanxo-Technology/gosite-cli` | Install from a fork |
+
+```bash
+# pin a release tag
+curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/gosite-cli/main/install.sh | GOSITE_REF=v0.1.0 bash
+
+# machine-wide
+curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/gosite-cli/main/install.sh | bash -s -- --system
+```
+
+**Update**: re-run the install command; it replaces the installed modules in
+place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
+(prefix `sudo` and use `/usr/local` for a system install).
 
 ## Usage
 
@@ -45,8 +91,8 @@ gosite infra down
 ## Repository layout
 
 ```
-gosite-dev/
-├── install.sh                    # system installer (sudo check, copy, symlink)
+gosite-cli/
+├── install.sh                    # installer: remote bootstrap, copy, symlink
 ├── README.md
 └── src/
     ├── main.sh                   # global entrypoint: symlink resolution, colors, flags
