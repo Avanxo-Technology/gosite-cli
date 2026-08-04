@@ -111,16 +111,16 @@ gosite create scratch --here                 # -> ./scratch
 ### Styling
 
 Tailwind CSS is included by default, loaded from a CDN so local development
-needs no build step. `--no-tailwind` swaps it for a small `static/app.css`:
+needs no build step. `--no-tailwind` swaps it for a small `static/styles.css`:
 
 ```bash
 gosite create my-site                 # Tailwind utility classes
-gosite create my-site --no-tailwind   # semantic classes + static/app.css
+gosite create my-site --no-tailwind   # semantic classes + static/styles.css
 ```
 
 The generated markup differs between the two on purpose. With Tailwind the
 components carry utility classes; without it they carry semantic class names
-(`card`, `articles`, `button`) styled by a stylesheet that uses custom
+(`panel`, `page-header`, `button`) styled by a stylesheet that uses custom
 properties and supports dark mode. Neither mode leaves classes that do nothing,
 so the output is clean either way. The choice is recorded in `.gosite.env`.
 
@@ -253,16 +253,12 @@ my-site/
 │   └── health.go             # GET /healthz
 ├── cache/                    # cache-aside over Redis, written once
 ├── cms/                      # the Cockpit API client
-├── models/                   # data shapes: no Redis, no HTTP, no HTML
-│   └── article.go
 ├── views/                    # markup, embedded with go:embed
 │   ├── render.go             # parses every template at startup
-│   ├── layout.html           # base document (Tailwind, htmx, Alpine)
+│   ├── layout.html           # base document (styles, htmx, Alpine)
 │   ├── pages/home.html       # one file per page
 │   └── components/           # reusable pieces, one per file
-│       ├── card.html
-│       ├── button.html
-│       └── state.html
+│       └── button.html
 ├── static/
 ├── .air.toml                 # hot reload: rebuild on .go/.html changes
 ├── Dockerfile                # PROD multi-stage: static binary -> alpine
@@ -281,8 +277,13 @@ One file per responsibility, read in the order `main.go` -> `app.go` ->
 route, so that file never becomes a dumping ground as the app grows.
 `router.go` is the single source of truth for the HTTP surface: nothing
 registers routes anywhere else. Data flows one way - `cms` fetches from the
-Cockpit API into `models`, a handler hands those to `views`, and the rendered
-HTML goes into `cache`. Adding an endpoint is one file in `handlers/` and one
+Cockpit API, a handler hands that to `views`, and the rendered HTML goes into
+`cache`.
+
+The example is deliberately one page with no data model: `cms.Content` is a
+map, so a template reads `{{.Content.headline}}` with nothing to define up
+front, and a field the CMS has not supplied falls back to copy in the template.
+Add a struct in `cms` once the shape of your content settles. Adding an endpoint is one file in `handlers/` and one
 line in `router.go`; adding a page is one template in `views/pages/`.
 
 Handlers reply through a small `Response` helper - a thin layer over [Echo's

@@ -84,7 +84,7 @@ cmd_create() {
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
 
-  mkdir -p "${PROJECT_DIR}"/{config,handlers,cache,cms,models,views/pages,views/components,static}
+  mkdir -p "${PROJECT_DIR}"/{config,handlers,cache,cms,views/pages,views/components,static}
   # Keep static/ in Git so the production COPY stage always finds it.
   touch "${PROJECT_DIR}/static/.gitkeep"
 
@@ -107,7 +107,6 @@ cmd_create() {
   _write_handlers      "${PROJECT_DIR}"
   _write_cache         "${PROJECT_DIR}"
   _write_cms           "${PROJECT_DIR}"
-  _write_models        "${PROJECT_DIR}"
   _write_views         "${PROJECT_DIR}"
   _write_air_config    "${PROJECT_DIR}"
   _write_dockerfiles   "${PROJECT_DIR}"
@@ -501,14 +500,10 @@ const homeCacheKey = "__PROJECT__:home_html"
 // is why a hit costs microseconds.
 func (h *Handlers) Home(c *echo.Context) error {
 	html, cached, err := h.Cache.HTML(c.Request().Context(), homeCacheKey, func() ([]byte, error) {
-		articles, err := h.CMS.Articles(c.Request().Context())
-		if err != nil {
-			return nil, err
-		}
 		var buf bytes.Buffer
-		err = h.Renderer.Page(&buf, "home", map[string]any{
-			"Title":    "__PROJECT__",
-			"Articles": articles,
+		err := h.Renderer.Page(&buf, "home", map[string]any{
+			"Title":   "__PROJECT__",
+			"Content": h.CMS.Singleton(c.Request().Context(), "home"),
 		})
 		return buf.Bytes(), err
 	})
@@ -649,7 +644,6 @@ import (
 	"time"
 
 	"__MODULE__/config"
-	"__MODULE__/models"
 )
 
 type Client struct {
@@ -670,28 +664,31 @@ func New(cfg config.Config, log *slog.Logger) *Client {
 	}
 }
 
-// Articles fetches the "articles" collection.
+// Content is one piece of CMS content, kept as a map so a template can read
+// {{.Content.headline}} without a struct having to exist first. Define a
+// struct in this package once the shape of a model settles down.
+type Content map[string]any
+
+// Singleton fetches a Cockpit singleton by name, e.g. Singleton(ctx, "home").
 //
-// Cockpit exposes collections at /api/content/items/<collection> and
-// authenticates with an api-key header. Create that collection in the Cockpit
-// admin with the fields in models.Article and this returns real content.
+// Cockpit exposes singletons at /api/content/item/<name> and collections at
+// /api/content/items/<name>, both authenticated with an api-key header. Create
+// a "home" singleton in the Cockpit admin and its fields show up here.
 //
-// Until it exists the request fails, so a fresh project falls back to sample
-// articles and logs why - the site renders something on the very first run
-// instead of an error page.
-func (c *Client) Articles(ctx context.Context) ([]models.Article, error) {
-	articles, err := c.fetchArticles(ctx)
+// Until it exists the request fails, so the caller gets an empty Content and a
+// logged warning rather than an error page: the site still renders with the
+// fallbacks in the template.
+func (c *Client) Singleton(ctx context.Context, name string) Content {
+	content, err := c.fetch(ctx, "/api/content/item/"+name)
 	if err != nil {
-		c.log.Warn("cockpit unavailable, serving sample content", "err", err)
-		return sampleArticles()
+		c.log.Warn("cockpit unavailable, using template fallbacks", "item", name, "err", err)
+		return Content{}
 	}
-	return articles, nil
+	return content
 }
 
-func (c *Client) fetchArticles(ctx context.Context) ([]models.Article, error) {
-	url := c.baseURL + "/api/content/items/articles"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -708,61 +705,11 @@ func (c *Client) fetchArticles(ctx context.Context) ([]models.Article, error) {
 		return nil, fmt.Errorf("cockpit returned %s", res.Status)
 	}
 
-	var articles []models.Article
-	if err := json.NewDecoder(res.Body).Decode(&articles); err != nil {
+	var content Content
+	if err := json.NewDecoder(res.Body).Decode(&content); err != nil {
 		return nil, err
 	}
-	return articles, nil
-}
-
-// sampleArticles keeps a fresh project renderable before any content exists.
-// Delete it once the Cockpit collection is populated.
-func sampleArticles() ([]models.Article, error) {
-	data := []byte(`[
-		{"_id":"1","title":"Go and htmx without a build step","excerpt":"Server-rendered HTML, no bundler in sight.","body":"The server returns HTML and htmx swaps it into the DOM. No client-side router, no hydration, no build pipeline to maintain.","slug":"go-htmx","published":true},
-		{"_id":"2","title":"Cockpit as a headless CMS","excerpt":"Let editors work without coupling the frontend.","body":"Cockpit exposes a REST API that the Go server consumes. Content people get an admin UI; the frontend stays plain server-rendered HTML.","slug":"cockpit-headless","published":true},
-		{"_id":"3","title":"Cache-aside with Redis","excerpt":"Keep the CMS off the hot path.","body":"The rendered page is stored in Redis with a ten minute TTL, so a cache hit skips both the CMS call and the template render.","slug":"redis-cache-aside","published":true}
-	]`)
-
-	var articles []models.Article
-	if err := json.Unmarshal(data, &articles); err != nil {
-		return nil, err
-	}
-	return articles, nil
-}
-EOF
-}
-
-# -----------------------------------------------------------------------------
-# Data shapes only: no Redis, no HTTP, no HTML. Kept in its own package so the
-# templates and the CMS client can share it without importing each other.
-_write_models() {
-  cat > "$1/models/article.go" <<'EOF'
-// Package models holds the data structures the application works with.
-// It describes *what* the data is, never how it is fetched or rendered.
-package models
-
-import "time"
-
-// Article maps one item of the "articles" collection in Cockpit CMS. The json
-// tags match Cockpit's field names.
-type Article struct {
-	ID        string    `json:"_id"`
-	Title     string    `json:"title"`
-	Excerpt   string    `json:"excerpt"`
-	Body      string    `json:"body"`
-	Slug      string    `json:"slug"`
-	Published bool      `json:"published"`
-	Created   time.Time `json:"_created"`
-}
-
-// URL is the canonical path of the article, so templates never build paths.
-func (a Article) URL() string { return "/articles/" + a.Slug }
-
-// CockpitResponse is the envelope Cockpit returns for a collection query.
-type CockpitResponse struct {
-	Articles []Article `json:"entries"`
-	Total    int       `json:"total"`
+	return content, nil
 }
 EOF
 }
@@ -876,40 +823,28 @@ _write_views_tailwind() {
 EOF
 
   cat > "$1/views/pages/home.html" <<'EOF'
-{{/* The home page: a header with the purge button, then the article list. */}}
+{{/*
+  The home page. .Content is whatever the Cockpit "home" singleton returns, so
+  a field an editor has not filled in yet falls back to the text here.
+*/}}
 {{define "content"}}
 <header class="mb-8 flex items-center justify-between">
 	<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
 	{{template "purge-button" .}}
 </header>
 
-<ul class="space-y-4" x-data="{ open: null }">
-	{{- range .Articles }}
-	{{template "card" .}}
-	{{- else }}
-	{{template "empty" "No articles published yet."}}
-	{{- end }}
-</ul>
-{{end}}
-EOF
-
-  cat > "$1/views/components/card.html" <<'EOF'
-{{/*
-  A single article card. Expects an Alpine `open` scope from its parent list,
-  which is what lets one card be expanded at a time.
-*/}}
-{{define "card"}}
-<li class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-	<button class="w-full text-left" @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
-		<h2 class="text-lg font-semibold">{{.Title}}</h2>
-		<p class="mt-1 text-sm text-slate-600">{{.Excerpt}}</p>
-	</button>
-
-	<div x-show="open === '{{.ID}}'" x-cloak>
-		<p class="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-700">{{.Body}}</p>
-		<a class="mt-2 inline-block text-sm text-blue-600 hover:underline" href="{{.URL}}">Read more</a>
-	</div>
-</li>
+<section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+	<h2 class="text-xl font-semibold">
+		{{with .Content.headline}}{{.}}{{else}}Your site is running{{end}}
+	</h2>
+	<p class="mt-2 text-slate-600">
+		{{with .Content.intro}}{{.}}{{else}}
+		Edit views/pages/home.html to change this page, or create a "home"
+		singleton in Cockpit with headline and intro fields to drive it from
+		the CMS.
+		{{end}}
+	</p>
+</section>
 {{end}}
 EOF
 
@@ -928,13 +863,6 @@ EOF
 	@htmx:before-request="busy = true"
 	@htmx:after-request="window.location.reload()"
 >Purge cache</button>
-{{end}}
-EOF
-
-  cat > "$1/views/components/state.html" <<'EOF'
-{{/* Empty state, kept separate so copy changes never touch logic. */}}
-{{define "empty"}}
-<li class="text-slate-500">{{.}}</li>
 {{end}}
 EOF
 }
@@ -956,7 +884,7 @@ _write_views_plain() {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}}</title>
-	<link rel="stylesheet" href="/static/app.css">
+	<link rel="stylesheet" href="/static/styles.css">
 	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
 	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
 </head>
@@ -969,40 +897,26 @@ _write_views_plain() {
 EOF
 
   cat > "$1/views/pages/home.html" <<'EOF'
-{{/* The home page: a header with the purge button, then the article list. */}}
+{{/*
+  The home page. .Content is whatever the Cockpit "home" singleton returns, so
+  a field an editor has not filled in yet falls back to the text here.
+*/}}
 {{define "content"}}
 <header class="page-header">
 	<h1>{{.Title}}</h1>
 	{{template "purge-button" .}}
 </header>
 
-<ul class="articles" x-data="{ open: null }">
-	{{- range .Articles }}
-	{{template "card" .}}
-	{{- else }}
-	{{template "empty" "No articles published yet."}}
-	{{- end }}
-</ul>
-{{end}}
-EOF
-
-  cat > "$1/views/components/card.html" <<'EOF'
-{{/*
-  A single article card. Expects an Alpine `open` scope from its parent list,
-  which is what lets one card be expanded at a time.
-*/}}
-{{define "card"}}
-<li class="card">
-	<button class="card-toggle" @click="open = open === '{{.ID}}' ? null : '{{.ID}}'">
-		<h2>{{.Title}}</h2>
-		<p class="excerpt">{{.Excerpt}}</p>
-	</button>
-
-	<div class="card-body" x-show="open === '{{.ID}}'" x-cloak>
-		<p>{{.Body}}</p>
-		<a href="{{.URL}}">Read more</a>
-	</div>
-</li>
+<section class="panel">
+	<h2>{{with .Content.headline}}{{.}}{{else}}Your site is running{{end}}</h2>
+	<p>
+		{{with .Content.intro}}{{.}}{{else}}
+		Edit views/pages/home.html to change this page, or create a "home"
+		singleton in Cockpit with headline and intro fields to drive it from
+		the CMS.
+		{{end}}
+	</p>
+</section>
 {{end}}
 EOF
 
@@ -1024,15 +938,8 @@ EOF
 {{end}}
 EOF
 
-  cat > "$1/views/components/state.html" <<'EOF'
-{{/* Empty state, kept separate so copy changes never touch logic. */}}
-{{define "empty"}}
-<li class="empty">{{.}}</li>
-{{end}}
-EOF
-
   # Served from /static, so it is cached by the browser and never inlined.
-  cat > "$1/static/app.css" <<'EOF'
+  cat > "$1/static/styles.css" <<'EOF'
 /* __PROJECT__ - plain CSS, no build step.
    Custom properties first so a restyle is a few values, not a find-replace. */
 :root {
@@ -1090,33 +997,14 @@ body {
 }
 .button:hover { opacity: 0.85; }
 
-.articles { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
-
-.card {
+.panel {
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
-	padding: 1.25rem;
+	padding: 1.5rem;
 }
-.card-toggle {
-	display: block;
-	width: 100%;
-	padding: 0;
-	border: 0;
-	background: none;
-	color: inherit;
-	font: inherit;
-	text-align: left;
-	cursor: pointer;
-}
-.card-toggle h2 { margin: 0; font-size: 1.125rem; }
-.card .excerpt { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.875rem; }
-
-.card-body { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
-.card-body p { margin: 0; font-size: 0.875rem; color: var(--muted); }
-.card-body a { display: inline-block; margin-top: 0.5rem; color: var(--accent); font-size: 0.875rem; }
-
-.empty { color: var(--muted); }
+.panel h2 { margin: 0; font-size: 1.25rem; }
+.panel p { margin: 0.5rem 0 0; color: var(--muted); }
 EOF
 }
 
@@ -1450,7 +1338,6 @@ handlers/          One file per route.
   health.go        GET /healthz
 cache/             Cache-aside over Redis, written once.
 cms/               The Cockpit API client. The only package that calls the CMS.
-models/            Data shapes. No Redis, no HTTP, no HTML.
 views/             Markup, embedded with go:embed.
   render.go        Parses every template at startup.
   layout.html      Base document (styles, htmx, Alpine).
@@ -1464,8 +1351,12 @@ Reading order: `main.go` -> `app.go` -> `router.go` -> `handlers/`.
 Adding an endpoint is one file in `handlers/` and one line in `router.go`.
 Adding a page is one template in `views/pages/`. Nothing else changes.
 
-Data flows one way: `cms` fetches from Cockpit into `models`, a handler passes
-those to `views`, and the rendered HTML goes into `cache`.
+Data flows one way: `cms` fetches from Cockpit, a handler passes that to
+`views`, and the rendered HTML goes into `cache`.
+
+The example is deliberately one page with no data model. Add a struct in `cms`
+once the shape of your content settles; until then `cms.Content` is a map, so a
+template can read `{{.Content.headline}}` without anything to define first.
 
 ## Responses
 
@@ -1495,14 +1386,16 @@ returning only a message that is safe to show a client.
 
 ## Cockpit
 
-`cms.go` calls `GET $COCKPIT_URL/api/content/items/articles` with an `api-key`
-header. Create an `articles` collection in the Cockpit admin with the fields in
-`models/article.go` and the site renders real content.
+`cms/cms.go` calls `GET $COCKPIT_URL/api/content/item/home` with an `api-key`
+header. Create a `home` singleton in the Cockpit admin with `headline` and
+`intro` fields and the page renders them.
 
-Until that collection exists the request fails and the app falls back to sample
-articles, logging why - so a fresh project renders something on the first run
-instead of an error page. Delete `sampleArticles` in `cms.go` once you have
-real content.
+Until it exists the request fails, the client returns empty content and logs
+why, and the template falls back to the copy written into
+`views/pages/home.html` - so a fresh project renders on the first run instead
+of an error page.
+
+Collections live at `/api/content/items/<name>` if you need a list later.
 
 ## Local development
 
