@@ -139,6 +139,13 @@ h1 .g{background:linear-gradient(100deg,var(--accent),#7DD3FC 70%);-webkit-backg
 .term-body .u{color:#7DD3FC}
 .term-body .w{color:var(--amber)}
 
+.stats{display:grid;gap:1px;margin:2.5rem 0 0;padding:0;
+  border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--border)}
+@media (min-width:640px){.stats{grid-template-columns:repeat(3,1fr)}}
+.stats>div{background:var(--surface);padding:1.4rem 1.5rem}
+.stats dt{font-family:var(--mono);font-size:1.5rem;font-weight:700;letter-spacing:-.03em;color:var(--accent)}
+.stats dd{margin:.4rem 0 0;font-size:var(--step-1);color:var(--fg-muted);font-weight:300;line-height:1.55}
+
 /* ---------- sections ---------- */
 section{padding:clamp(3.5rem,8vw,6.5rem) 0}
 .eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 .9rem}
@@ -231,6 +238,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
     </a>
     <nav class="nav-links" aria-label="Sections">
       <a href="#why">Why</a>
+      <a href="#caching">Caching</a>
       <a href="#commands">Commands</a>
       <a href="#project">Project</a>
       <a href="#https">Local HTTPS</a>
@@ -293,6 +301,12 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
 <span class="p">$</span> <span class="c">curl -sD- -o /dev/null https://acme.test/ | grep -i x-cache</span>
 <span class="w">x-cache: HIT</span>   <span class="d">← 111µs, the CMS was never touched</span></pre>
     </div>
+
+    <dl class="stats rv">
+      <div><dt>1 render</dt><dd>for 60 concurrent requests on a cold key</dd></div>
+      <div><dt>0.26 s</dt><dd>to a warm cache again after a purge</dd></div>
+      <div><dt>~3 s</dt><dd>from saving a file to seeing it live</dd></div>
+    </dl>
   </div>
 </section>
 
@@ -318,7 +332,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/></svg></div>
         <h3>Cached by default</h3>
-        <p>The rendered page lives in Redis behind a cache-aside helper. A hit skips the CMS call and the template render entirely — microseconds instead of milliseconds.</p>
+        <p>The rendered page lives in Redis behind a cache-aside helper. A hit skips the CMS call and the template render entirely, and concurrent misses collapse into a single render.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
@@ -337,6 +351,38 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <div class="step rv"><span class="n">02</span><h4>create</h4><p>A project is scaffolded in <code>~/gosites</code> and its certificate issued.</p></div>
       <div class="step rv"><span class="n">03</span><h4>start</h4><p>App and CMS come up; air rebuilds on every save in about three seconds.</p></div>
       <div class="step rv"><span class="n">04</span><h4>push</h4><p>Coolify builds the multi-stage image and routes it through its own Traefik.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- CACHING -->
+<section id="caching">
+  <div class="wrap">
+    <div class="head rv">
+      <p class="eyebrow">Caching</p>
+      <h2>The CMS stays off the request path.</h2>
+      <p class="sub">
+        The fully rendered page is cached, not the data — so a hit costs a Redis read and
+        nothing else. The parts that usually go wrong are handled for you.
+      </p>
+    </div>
+
+    <div class="cards cards-3">
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg></div>
+        <h3>One helper, not a pattern</h3>
+        <p><code>Cache.HTML(key, render)</code> is the whole API. Caching another page is a call, not another copy of the same Get/Set dance. A Redis outage degrades to a slow page, never an error.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+        <h3>No thundering herd</h3>
+        <p>Concurrent misses of the same key are coalesced with single-flight: one render runs, the rest wait and share it. Measured cold, 60 requests at 30 concurrent produced exactly one call to Cockpit.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div>
+        <h3>Warm again immediately</h3>
+        <p>Purging re-renders in the background before it answers, so the next visitor after an editor publishes never pays the cold path. In development a floating button does it; in production it is a webhook.</p>
+      </article>
     </div>
   </div>
 </section>
@@ -418,11 +464,15 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         </li>
         <li>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-          <span><b>One cache helper.</b> <code>Cache.HTML(key, render)</code> — caching another page is a call, not another copy of the same Get/Set dance.</span>
+          <span><b>One cache helper.</b> <code>Cache.HTML(key, render)</code> — caching another page is a call, not another copy of the same Get/Set dance, and concurrent cold renders are coalesced.</span>
         </li>
         <li>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
           <span><b>Cockpit, not coupled.</b> One package talks to the CMS. When it is unreachable the template falls back to its own copy, so a fresh project renders on the first run.</span>
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+          <span><b>Dev tooling stays in dev.</b> The cache-purge button renders only when <code>APP_ENV</code> is a development value, and carries its own scoped CSS — production ships neither.</span>
         </li>
         <li>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
