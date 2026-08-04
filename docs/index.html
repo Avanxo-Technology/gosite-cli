@@ -432,8 +432,9 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <p class="sub">
         <code>gosite create</code> pulls the <code>Forms</code> and
         <code>Replica</code> addons from the open-source
-        <code>cockpit-addons</code> repo into <code>addons/</code>, which both
-        compose files mount into the CMS container. Skip them with
+        <code>cockpit-addons</code> repo into <code>addons/</code>, mounted into
+        the dev CMS container and baked into the production image by
+        <code>Dockerfile.cms</code>. Skip them with
         <span class="flag">--no-addons</span>.
       </p>
     </div>
@@ -452,7 +453,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/></svg></div>
         <h3>Optional, not mandatory</h3>
-        <p>Addons are plain folders mounted at <code>/var/www/html/addons</code>, so nothing loads unless it exists. Add, update or remove them without touching the app; grant <code>forms/manage</code> and <code>replica/manage</code> per role.</p>
+        <p>Addons are plain folders at <code>/var/www/html/addons</code> - bind-mounted in dev, baked into the image for production - so nothing loads unless it exists. Add, update or remove them without touching the app; grant <code>forms/manage</code> and <code>replica/manage</code> per role.</p>
       </article>
     </div>
   </div>
@@ -571,7 +572,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <caption class="sr">Differences between the local and production compose files</caption>
         <thead><tr><th scope="col"></th><th scope="col">docker-compose.yml</th><th scope="col">docker-compose.prod.yml</th></tr></thead>
         <tbody>
-          <tr><td>Build</td><td>Dockerfile.dev with air</td><td>Multi-stage, static binary on Alpine</td></tr>
+          <tr><td>Build</td><td>Dockerfile.dev with air</td><td>Multi-stage app Dockerfile + <code>Dockerfile.cms</code> baking config and addons</td></tr>
           <tr><td>Ports</td><td>Mapped to localhost</td><td>None — Traefik routes by label</td></tr>
           <tr><td>Source</td><td>Bind-mounted, hot reload</td><td>Baked into the image</td></tr>
           <tr><td>Config</td><td><code>.env</code> file</td><td>Environment set in the Coolify UI</td></tr>

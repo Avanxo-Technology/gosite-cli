@@ -178,8 +178,9 @@ _resolve_dependencies() {
 
 # -----------------------------------------------------------------------------
 # Installs the optional Cockpit addons (default Forms + Replica) from the
-# Avanxo-Technology/cockpit-addons repo into <project>/addons/, which both
-# compose files bind-mount into the CMS container. A failure to reach the
+# Avanxo-Technology/cockpit-addons repo into <project>/addons/: bind-mounted
+# into the dev CMS container, baked into the production image by
+# Dockerfile.cms. A failure to reach the
 # network warns and continues, like _resolve_dependencies: the addons dir
 # stays empty and the project still scaffolds. Re-run the installer later to
 # fetch them:
@@ -1243,6 +1244,28 @@ EXPOSE 8080
 CMD ["air", "-c", ".air.toml"]
 EOF
 
+  # Production CMS image: the stock Cockpit core plus the committed
+  # cockpit/config.php and addons, baked in. Build from this instead of the
+  # stock image so the CMS container carries its own config and addons - the
+  # old approach of bind-mounting them (./cockpit/config.php, ./addons) breaks
+  # in Coolify, where relative paths resolve against the directory that stores
+  # the pasted compose file, not the repo checkout, silently mounting empty
+  # directories. cockpit/config.php reads values through Cockpit's ${VAR}
+  # resolution, so the environment variables in the compose file still win.
+  cat > "$1/Dockerfile.cms" <<'EOF'
+FROM cockpithq/cockpit:core-2.14.0
+
+COPY cockpit/config.php /var/www/html/config/config.php
+EOF
+
+  # Addons are optional (--no-addons scaffolds without addons/), so the COPY
+  # only makes it into the image when they exist.
+  if [[ "${ADDONS_ENABLED}" -eq 1 ]]; then
+    cat >> "$1/Dockerfile.cms" <<'EOF'
+COPY addons/ /var/www/html/addons/
+EOF
+  fi
+
   cat > "$1/.dockerignore" <<'EOF'
 .git
 .gitignore
@@ -1253,6 +1276,7 @@ cockpit-storage/
 !.env.example
 docker-compose*.yml
 Dockerfile.dev
+Dockerfile.cms
 README.md
 EOF
 }
@@ -1394,7 +1418,9 @@ services:
         condition: service_started
 
   cms:
-    image: cockpithq/cockpit:core-2.14.0
+    build:
+      context: .
+      dockerfile: Dockerfile.cms
     restart: unless-stopped
     environment:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
@@ -1405,13 +1431,15 @@ services:
       - MONGO_PASSWORD=${MONGO_PASSWORD}
       - MONGO_DB=${MONGO_DB:-__PROJECT__}
     volumes:
-      # Points Cockpit at MongoDB. Mounted only here: local development keeps
-      # the file-backed mongolite default, so it needs no database at all.
-      - ./cockpit/config.php:/var/www/html/config/config.php:ro
       # Uploads and cache still live on disk even when the data is in MongoDB.
+      # Config and addons are NOT mounted here: Dockerfile.cms bakes the
+      # committed cockpit/config.php and addons/ into the image. Relative bind
+      # mounts (./cockpit/config.php, ./addons) resolve against the directory
+      # where Coolify stores the pasted compose file, not the repo checkout, so
+      # they silently mount empty directories. After a deploy that changes an
+      # addon, clear storage/cache/modules.cache.php once so the CMS re-registers
+      # it on the next boot.
       - cockpit-storage:/var/www/html/storage
-      # Optional Cockpit addons, committed with the repo (read-only here).
-      - ./addons:/var/www/html/addons:ro
     labels:
       - coolify.managed=true
       - traefik.enable=true
@@ -1469,8 +1497,8 @@ EOF
 <?php
 
 // Cockpit configuration, merged over the defaults in bootstrap.php.
-// Mounted only by docker-compose.prod.yml: local development keeps Cockpit's
-// file-backed mongolite database, so it needs no database container.
+// Baked into the production image by Dockerfile.cms; local development keeps
+// Cockpit's file-backed mongolite database, so it needs no database container.
 //
 // ${VAR} placeholders are resolved from the environment by Cockpit's DotEnv.
 
@@ -1599,8 +1627,11 @@ There is no JavaScript build step and no SPA.
 
 ## Cockpit addons
 
-The CMS container mounts `addons/`, holding two optional addons installed at
-scaffold time from Avanxo-Technology/cockpit-addons:
+The CMS carries two optional addons installed at scaffold time from
+Avanxo-Technology/cockpit-addons. Locally the container mounts `addons/`;
+in production `Dockerfile.cms` bakes them (plus `cockpit/config.php`) into the
+image, because relative bind mounts do not resolve to the repo checkout in
+Coolify:
 
 - **Forms** - inbox-style manager for website form submissions, with anti-spam,
   CSV export and notifications.
@@ -1618,7 +1649,11 @@ gosite restart __PROJECT__
 ```
 
 The installer clears the Cockpit module cache; the restart is needed so PHP does
-not serve the previous bootstrap from opcache.
+not serve the previous bootstrap from opcache. In production the module cache
+lives in the persistent `cockpit-storage` volume, so after a deploy that adds or
+updates an addon, clear `storage/cache/modules.cache.php` once inside the cms
+container (the image rebuild ships the files; the stale cache is what hides
+them).
 EOF
 
   # Styling differs per project, so state the truth for this one.
@@ -2029,8 +2064,9 @@ Collections live at `/api/content/items/<name>` if you need a list later.
 
 ## Addons
 
-The CMS container mounts `addons/` into Cockpit. Scaffolding installs two
-optional addons by default:
+Locally the CMS container mounts `addons/`; in production `Dockerfile.cms`
+bakes `cockpit/config.php` and `addons/` into the image. Scaffolding installs
+two optional addons by default:
 
 - **Forms** — inbox-style manager for website form submissions: public receiver
   endpoint with anti-spam, an admin screen, CSV export and notifications.
@@ -2084,5 +2120,11 @@ the environment. In Coolify: create a Docker Compose resource from this repo,
 select `docker-compose.prod.yml`, then set `SERVICE_FQDN_APP`,
 `SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and
 `MONGO_PASSWORD`. The stack brings its own MongoDB and Redis.
+
+The `app` and `cms` services build from the repo's `Dockerfile` and
+`Dockerfile.cms`; nothing is bind-mounted, so Coolify needs no path to the
+checkout. Config and addon changes require an image rebuild rather than a file
+drop, and after a rebuild that adds an addon, clear
+`storage/cache/modules.cache.php` once in the cms container.
 EOF
 }
