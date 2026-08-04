@@ -15,6 +15,7 @@
 # container name on gosite-network, never through the host.
 # Set by cmd_create, read by the view writers.
 TAILWIND=1
+ADDONS_ENABLED=1
 
 render_placeholders() {
   local file="$1" tmp
@@ -31,21 +32,26 @@ render_placeholders() {
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
     -e "s|__TAILWIND__|${TAILWIND}|g" \
+    -e "s|__ADDONS__|${ADDONS_ENABLED}|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
 }
 
 cmd_create() {
-  local PROJECT_NAME="" here=0
+  local PROJECT_NAME="" here=0 ADDONS="Forms Replica" INSTALL_ADDONS=1
   # Tailwind is on by default; --no-tailwind swaps it for a small stylesheet.
   # Either way the generated markup is clean: no orphan utility classes.
+  # Cockpit addons (Forms + Replica) install by default; --no-addons skips them.
   TAILWIND=1
+  ADDONS_ENABLED=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --here)         here=1; shift ;;
       --no-tailwind)  TAILWIND=0; shift ;;
       --tailwind)     TAILWIND=1; shift ;;
-      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind)" ;;
+      --addons)       INSTALL_ADDONS=1; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
+      --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; shift ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
@@ -121,6 +127,10 @@ cmd_create() {
   # GOFLAGS and refuses to compile without verified module checksums.
   _resolve_dependencies "${PROJECT_DIR}"
 
+  # Optional Cockpit addons. Defaults to Forms + Replica from the
+  # Avanxo-Technology/cockpit-addons repo; --no-addons skips the download.
+  [[ "${INSTALL_ADDONS}" -eq 1 ]] && _install_addons "${PROJECT_DIR}" "${ADDONS}"
+
   # Issue the local TLS certificate covering <name>.test and cms.<name>.test.
   ensure_project_cert "${PROJECT_NAME}" || true
 
@@ -164,6 +174,34 @@ _resolve_dependencies() {
 
   warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ${dir} before deploying."
   return 0
+}
+
+# -----------------------------------------------------------------------------
+# Installs the optional Cockpit addons (default Forms + Replica) from the
+# Avanxo-Technology/cockpit-addons repo into <project>/addons/, which both
+# compose files bind-mount into the CMS container. A failure to reach the
+# network warns and continues, like _resolve_dependencies: the addons dir
+# stays empty and the project still scaffolds. Re-run the installer later to
+# fetch them:
+#   curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
+#     | sh -s -- Forms Replica --dir addons
+_install_addons() {
+  local dir="$1" names="$2" addons_dir="${1}/addons"
+  info "Installing Cockpit addons: ${names}"
+  mkdir -p "${addons_dir}"
+
+  if ! curl -fsSL "https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh" \
+      | sh -s -- ${names} --dir "${addons_dir}"; then
+    warn "Addon install failed (offline?). The project still works without them."
+    warn "Re-run later: curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh | sh -s -- ${names} --dir ${addons_dir}"
+    return 0
+  fi
+
+  for name in ${names}; do
+    [[ -d "${addons_dir}/${name}" ]] \
+      || warn "Addon '${name}' did not land in ${addons_dir}; check the name and re-run."
+  done
+  ok "Addons installed into ${addons_dir}"
 }
 
 # -----------------------------------------------------------------------------
@@ -1282,6 +1320,8 @@ services:
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
     volumes:
       - ./cockpit-storage:/var/www/html/storage
+      # Optional Cockpit addons (Forms + Replica), fetched at scaffold time.
+      - ./addons:/var/www/html/addons
     networks:
       - gosite
 
@@ -1370,6 +1410,8 @@ services:
       - ./cockpit/config.php:/var/www/html/config/config.php:ro
       # Uploads and cache still live on disk even when the data is in MongoDB.
       - cockpit-storage:/var/www/html/storage
+      # Optional Cockpit addons, committed with the repo (read-only here).
+      - ./addons:/var/www/html/addons:ro
     labels:
       - coolify.managed=true
       - traefik.enable=true
@@ -1485,6 +1527,7 @@ GOSITE_TAILWIND=__TAILWIND__
 GOSITE_APP_DOMAIN=__DOMAIN__
 GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
 GOSITE_NETWORK=__NETWORK__
+GOSITE_ADDONS=__ADDONS__
 EOF
 }
 
@@ -1517,6 +1560,7 @@ There is no JavaScript build step and no SPA.
 | CMS database | mongolite (file-backed) locally, MongoDB in production |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
+| CMS addons | Forms + Replica in `addons/`, installed at scaffold time (`--no-addons` skips) |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
@@ -1552,6 +1596,29 @@ There is no JavaScript build step and no SPA.
 | Change content | edit it in Cockpit, then purge the cache |
 | Read the logs | `gosite logs __PROJECT__` |
 | Restart | `gosite restart __PROJECT__` (air already reloads code) |
+
+## Cockpit addons
+
+The CMS container mounts `addons/`, holding two optional addons installed at
+scaffold time from Avanxo-Technology/cockpit-addons:
+
+- **Forms** - inbox-style manager for website form submissions, with anti-spam,
+  CSV export and notifications.
+- **Replica** - content replication between Cockpit instances (push/pull,
+  multiple targets, mirror/merge).
+
+Skip them with `gosite create --no-addons`. After the first login grant the
+permissions `forms/manage` and `replica/manage` in Settings > Roles. Update or
+add addons later with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
+  | sh -s -- all --dir addons --force
+gosite restart __PROJECT__
+```
+
+The installer clears the Cockpit module cache; the restart is needed so PHP does
+not serve the previous bootstrap from opcache.
 EOF
 
   # Styling differs per project, so state the truth for this one.
@@ -1743,6 +1810,25 @@ is why a fresh project renders before any content exists.
 
 To add a field: add it in Cockpit, then read it in the template with a fallback
 (`{{with .Content.field}}{{.}}{{else}}default{{end}}`).
+
+### Addons
+
+The CMS container mounts `addons/` into `/var/www/html/addons`, which Cockpit
+core loads as first-class modules (bootstrap.php includes it in `modulesPaths`).
+`gosite create` installs two by default from Avanxo-Technology/cockpit-addons:
+
+- **Forms** - public `POST /forms/api/submit` receiver (anti-spam honeypot +
+  rate limit), per-form admin screen, CSV export, mail/webhook notifications.
+- **Replica** - content sync between Cockpit instances: targets, push/pull,
+  mirror/merge, dry runs, CLI, activity log.
+
+Grant `forms/manage` and `replica/manage` in Settings > Roles after first login.
+
+Addons are plain directories, so an addon is added by dropping its folder into
+`addons/` (or re-running the repo installer) and recreating the CMS container.
+In non-debug mode Cockpit caches the module list in
+`storage/cache/modules.cache.php`; the installer clears it, and the container
+must restart because opcache holds the compiled bootstrap.
 
 ## htmx and Alpine
 
@@ -1940,6 +2026,25 @@ why, and the template falls back to the copy written into
 of an error page.
 
 Collections live at `/api/content/items/<name>` if you need a list later.
+
+## Addons
+
+The CMS container mounts `addons/` into Cockpit. Scaffolding installs two
+optional addons by default:
+
+- **Forms** — inbox-style manager for website form submissions: public receiver
+  endpoint with anti-spam, an admin screen, CSV export and notifications.
+- **Replica** — content replication between Cockpit instances: push/pull,
+  multiple targets, mirror/merge conflict handling, dry runs and a CLI.
+
+Skip them with `gosite create --no-addons`. After first login, grant
+`forms/manage` and `replica/manage` in Settings > Roles. To update or add more:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
+  | sh -s -- all --dir addons --force
+gosite restart
+```
 
 ## Local development
 
