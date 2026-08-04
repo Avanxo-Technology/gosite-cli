@@ -181,6 +181,7 @@ go 1.25
 require (
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/redis/go-redis/v9 v9.22.0
+	golang.org/x/sync v0.22.0
 )
 EOF
 }
@@ -486,7 +487,9 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 )
@@ -500,18 +503,27 @@ const homeCacheKey = "__PROJECT__:home_html"
 // to render when the cache is cold. On a hit none of the closure runs, which
 // is why a hit costs microseconds.
 func (h *Handlers) Home(c *echo.Context) error {
-	html, cached, err := h.Cache.HTML(c.Request().Context(), homeCacheKey, func() ([]byte, error) {
-		var buf bytes.Buffer
-		err := h.Renderer.Page(&buf, "home", map[string]any{
-			"Title":   "__PROJECT__",
-			"Content": h.CMS.Singleton(c.Request().Context(), "home"),
-		})
-		return buf.Bytes(), err
-	})
+	html, cached, err := h.Cache.HTML(c.Request().Context(), homeCacheKey, h.renderHome)
 	if err != nil {
 		return h.reply(c).Fail(http.StatusBadGateway, "could not load the page", err)
 	}
 	return h.reply(c).Page(html, cached)
+}
+
+// renderHome builds the page from scratch. It deliberately uses its own context
+// rather than the request's: a cold render is shared by every request waiting
+// on it, so if the one caller that happened to trigger it disconnects, that
+// must not cancel the work everyone else is waiting for.
+func (h *Handlers) renderHome() ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var buf bytes.Buffer
+	err := h.Renderer.Page(&buf, "home", map[string]any{
+		"Title":   "__PROJECT__",
+		"Content": h.CMS.Singleton(ctx, "home"),
+	})
+	return buf.Bytes(), err
 }
 EOF
 
@@ -519,6 +531,7 @@ EOF
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -536,7 +549,20 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 	if err := h.Cache.Purge(c.Request().Context(), homeCacheKey); err != nil {
 		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
+
+	go h.warmHome()
+
 	return h.reply(c).Text(http.StatusOK, "purged")
+}
+
+// warmHome re-renders the page in the background after a purge, so the next
+// visitor finds a warm cache instead of paying for the cold path. Single-flight
+// in the cache means concurrent purges - and any visitor who arrives mid-render
+// - collapse into this one render rather than piling onto the CMS.
+func (h *Handlers) warmHome() {
+	if _, _, err := h.Cache.HTML(context.Background(), homeCacheKey, h.renderHome); err != nil {
+		h.Log.Warn("cache re-warm failed", "key", homeCacheKey, "err", err)
+	}
 }
 EOF
 
@@ -575,6 +601,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 // ttl keeps Cockpit almost entirely out of the request path while staying
@@ -584,6 +611,11 @@ const ttl = 10 * time.Minute
 type Cache struct {
 	rdb *redis.Client
 	log *slog.Logger
+
+	// sf collapses concurrent cold renders of the same key into a single one,
+	// so an expired cache under load never turns into a stampede against the
+	// CMS: one request renders, the rest wait and share its result.
+	sf singleflight.Group
 }
 
 func New(rdb *redis.Client, log *slog.Logger) *Cache {
@@ -592,8 +624,9 @@ func New(rdb *redis.Client, log *slog.Logger) *Cache {
 
 // HTML returns the cached bytes for key, calling render only on a miss:
 //
-//	1. GET the key. On a hit, return immediately - no CMS call, no rendering.
-//	2. On a miss, run render, SET the result with a TTL and return it.
+//  1. GET the key. On a hit, return immediately - no CMS call, no rendering.
+//  2. On a miss, run render behind single-flight, SET the result with a TTL
+//     and return it. Concurrent misses of the same key share that one render.
 //
 // A Redis failure is never fatal: render still runs and the request is just
 // slower, which keeps the site up when the cache is down.
@@ -609,16 +642,28 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 		c.log.Warn("cache read failed, rendering anyway", "key", key, "err", err)
 	}
 
-	fresh, err := render()
+	v, err, shared := c.sf.Do(key, func() (any, error) {
+		fresh, err := render()
+		if err != nil {
+			// single-flight discards failed results, so the next caller retries
+			// instead of inheriting this error. No Forget needed.
+			return nil, err
+		}
+
+		// Write with a background context, not the request one: the caller that
+		// happened to win the race may disconnect, and that must not stop the
+		// cache from being warmed for everyone else waiting on this render.
+		if err := c.rdb.Set(context.Background(), key, fresh, ttl).Err(); err != nil {
+			c.log.Warn("cache write failed", "key", key, "err", err)
+		}
+		return fresh, nil
+	})
 	if err != nil {
 		return nil, false, err
 	}
 
-	if err := c.rdb.Set(ctx, key, fresh, ttl).Err(); err != nil {
-		c.log.Warn("cache write failed", "key", key, "err", err)
-	}
-	c.log.Info("cache miss", "key", key, "elapsed", time.Since(start))
-	return fresh, false, nil
+	c.log.Info("cache miss", "key", key, "shared", shared, "elapsed", time.Since(start))
+	return v.([]byte), false, nil
 }
 
 // Purge removes keys, so an editor never has to wait out the TTL.
@@ -1320,6 +1365,7 @@ There is no JavaScript build step and no SPA.
 | Cockpit admin | https://__CMS_DOMAIN__ (also http://localhost:__CMS_PORT__) |
 | Redis / Postgres | shared containers `__REDIS_HOST__` / `__PG_HOST__` on the `__NETWORK__` Docker network |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
+| Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
@@ -1472,6 +1518,16 @@ html, cached, err := h.Cache.HTML(ctx, key, func() ([]byte, error) {
 
 Cache another page by calling it with a different key. Do not reimplement
 Get/Set in a handler.
+
+Concurrent misses of the same key are coalesced with single-flight: exactly one
+render runs and the others wait and share its bytes, so an expired or purged
+key under load never becomes a stampede against Cockpit. The `SET` is issued
+with a background context, so the caller that happened to trigger the render
+disconnecting does not stop the cache from being warmed for everyone else.
+
+`POST /cache/purge` re-renders the page in the background before it responds,
+so the next request after an editor publishes finds a warm cache rather than
+paying for the cold path.
 
 The `X-Cache` response header reports `HIT` or `MISS` - check it before
 concluding a change did not work:
