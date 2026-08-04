@@ -87,6 +87,7 @@ gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
 gosite list                   # projects, ports, container status, paths
+gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
 gosite remove my-site          # deletes containers, cert and the directory
 gosite infra down
@@ -191,6 +192,20 @@ gosite path my-site           # prints the absolute path (scriptable)
 Without the shell integration, `gosite cd` explains the setup and prints the
 path; `cd "$(gosite path my-site)"` always works.
 
+### AI context files
+
+Every project ships a `MEMORY.md` and an `ARCHITECTURE.md`, written for an
+assistant reading the repo cold. `MEMORY.md` is short: what the project is, its
+URLs and cache key, the reading order, and the rules that are easy to get wrong
+(Echo v5 is not v4; every route lives in `router.go`; the page is cached, so
+purge after changing it; no build step). `ARCHITECTURE.md` is the reference
+behind it — the v4-to-v5 API differences, the caching helper, the Cockpit
+endpoints and how to update content, htmx/Alpine conventions, the `gosite`
+commands, environment variables and the Coolify deploy.
+
+Both are generated with the project's real values filled in — module path,
+domains, ports, cache key — so nothing in them is a placeholder to correct.
+
 ### Removing a project
 
 `gosite remove <name>` removes the project entirely: containers, volumes, local
@@ -230,6 +245,7 @@ gosite-cli/
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
         ├── cmd_stop.sh           # stop a project's containers
+        ├── cmd_restart.sh        # recreate containers (--build)
         ├── cmd_logs.sh           # tail project logs (app/cms, follow, tail size)
         ├── cmd_cd.sh             # cd/path/shell-init - jump into a project
         ├── cmd_remove.sh         # full teardown incl. the source (--keep-source opts out)
@@ -267,6 +283,8 @@ my-site/
 ├── docker-compose.prod.yml   # COOLIFY: no host ports, Traefik labels, env-driven
 ├── .env / .env.example
 ├── .gosite.env               # project marker read by list/start/stop/remove
+├── MEMORY.md                 # AI entry point: facts, rules, common tasks
+├── ARCHITECTURE.md           # the reference MEMORY.md points at
 ├── Makefile, README.md, .gitignore, .dockerignore
 ```
 

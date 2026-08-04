@@ -23,6 +23,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
                      flags: --here (cwd), --no-tailwind (plain CSS)
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack
+  restart[name]      Recreate containers (--build to rebuild the image)
   logs   [name]      Tail a project's logs ([app|cms] [-n N] [--no-follow])
   cd     <name>      Jump into a project directory (needs shell-init)
   path   <name>      Print a project's absolute path
@@ -63,6 +64,7 @@ dispatch() {
     list|ls)         load_command list;   cmd_list   "$@" ;;
     start|up)        load_command start;  cmd_start  "$@" ;;
     stop|down)       load_command stop;   cmd_stop   "$@" ;;
+    restart)         load_command restart; cmd_restart "$@" ;;
     logs)            load_command logs;   cmd_logs   "$@" ;;
     cd)              load_command cd;     cmd_cd     "$@" ;;
     path)            load_command cd;     cmd_path   "$@" ;;

@@ -114,6 +114,7 @@ cmd_create() {
   _write_compose_prod  "${PROJECT_DIR}"
   _write_env_files     "${PROJECT_DIR}"
   _write_meta_files    "${PROJECT_DIR}"
+  _write_ai_docs       "${PROJECT_DIR}"
 
   local f
   while IFS= read -r f; do render_placeholders "${f}"; done < <(
@@ -1289,6 +1290,335 @@ GOSITE_TAILWIND=__TAILWIND__
 GOSITE_APP_DOMAIN=__DOMAIN__
 GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
 GOSITE_NETWORK=__NETWORK__
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Context files for AI assistants. MEMORY.md is the short entry point loaded
+# first; ARCHITECTURE.md is the reference it points at.
+_write_ai_docs() {
+  cat > "$1/MEMORY.md" <<'EOF'
+# __PROJECT__ - project memory
+
+Read this first, then read `ARCHITECTURE.md` before changing anything. It
+covers the layout, the rules that are easy to get wrong, the Echo v5 API
+differences, how Cockpit and the cache work, and the `gosite` commands.
+
+## What this is
+
+A Go monolith that serves server-rendered HTML: **Echo v5** for routing,
+**html/template** for markup, **htmx** and **Alpine.js** on the client,
+**Cockpit** as the CMS and **Redis** as a page cache in front of it.
+There is no JavaScript build step and no SPA.
+
+## Facts
+
+| | |
+| --- | --- |
+| Go module | `__MODULE__` |
+| Local URL | https://__DOMAIN__ (also http://localhost:__APP_PORT__) |
+| Cockpit admin | https://__CMS_DOMAIN__ (also http://localhost:__CMS_PORT__) |
+| Redis / Postgres | shared containers `__REDIS_HOST__` / `__PG_HOST__` on the `__NETWORK__` Docker network |
+| Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
+| Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
+
+## Reading order
+
+`main.go` -> `app.go` -> `router.go` -> `handlers/`
+
+## Rules that are easy to get wrong
+
+1. **Echo v5, not v4.** Handlers take `*echo.Context`, `c.Response()` returns
+   `http.ResponseWriter`, `echo.NewHTTPError(code, string)` takes a string, and
+   there is no `e.Shutdown`. Do not copy v4 snippets from the web.
+2. **Every route is registered in `router.go`.** Nothing registers routes
+   anywhere else.
+3. **Handlers reply through `h.reply(c)`** (`handlers/response.go`), never by
+   writing headers by hand.
+4. **Views get finished data.** No Redis, no HTTP and no CMS calls inside
+   `views/`.
+5. **The page is cached.** After changing anything that affects the rendered
+   HTML, purge: `curl -X POST -H "X-Api-Key: $COCKPIT_API_TOKEN" https://__DOMAIN__/cache/purge`
+   Otherwise you will be looking at a stale page for up to 10 minutes.
+6. **No build step.** Do not add npm, a bundler or a framework. htmx and
+   Alpine are loaded from a CDN in `views/layout.html`.
+7. **Templates are embedded** with `go:embed`, so a new file under `views/`
+   only ships if it matches the embed patterns in `views/render.go`.
+
+## Common tasks
+
+| Task | Do this |
+| --- | --- |
+| Add a route | one file in `handlers/`, one line in `router.go` |
+| Add a page | template in `views/pages/`, register it in `views/render.go` |
+| Add a component | file in `views/components/`, call `{{template "name" .}}` |
+| Change content | edit it in Cockpit, then purge the cache |
+| Read the logs | `gosite logs __PROJECT__` |
+| Restart | `gosite restart __PROJECT__` (air already reloads code) |
+EOF
+
+  # Styling differs per project, so state the truth for this one.
+  if [[ "${TAILWIND}" -eq 1 ]]; then
+    cat >> "$1/MEMORY.md" <<'EOF'
+
+## Styling
+
+Tailwind CSS, loaded from a CDN in `views/layout.html`. Components carry
+utility classes. There is no Tailwind build or config file; before production,
+vendor the CDN script into `/static`.
+EOF
+  else
+    cat >> "$1/MEMORY.md" <<'EOF'
+
+## Styling
+
+Plain CSS in `static/styles.css`, built on custom properties with a dark-mode
+block. Components carry semantic class names (`panel`, `page-header`,
+`button`). No Tailwind, no build step - add rules to that stylesheet.
+EOF
+  fi
+
+  cat > "$1/ARCHITECTURE.md" <<'EOF'
+# __PROJECT__ - architecture
+
+Reference for humans and AI assistants working on this project. `MEMORY.md` is
+the short version; this file is the detail behind it.
+
+## Stack
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| HTTP | Echo v5 | Small, fast, standard-library shaped |
+| Markup | `html/template` | Standard library, no code generation |
+| Interactivity | htmx + Alpine.js | HTML over the wire; no SPA, no build step |
+| CMS | Cockpit | Headless, editors get an admin UI |
+| Cache | Redis | Keeps the CMS off the request path |
+| Deploy | Docker + Coolify | Same compose format locally and in production |
+
+## Layout
+
+```
+main.go            Startup: read config, build the app, start the server.
+app.go             Composition root: build every dependency once.
+router.go          Every route and middleware. The whole HTTP surface.
+config/            Environment settings, read exactly once.
+handlers/          One file per route.
+  handlers.go      Deps + the receiver the handlers hang off.
+  response.go      How this app replies.
+  home.go          GET /
+  purge.go         POST /cache/purge
+  health.go        GET /healthz
+cache/             Cache-aside over Redis, written once.
+cms/               The Cockpit API client. The only package that calls the CMS.
+views/             Markup, embedded with go:embed.
+  render.go        Parses every template at startup.
+  layout.html      Base document.
+  pages/           One file per page.
+  components/      Reusable pieces, one per file.
+static/            Assets served at /static.
+```
+
+Dependency direction is one way: `config` <- `cache`/`cms` <- `handlers` <-
+`main`. Views import nothing from the app. Keep it that way: it is what stops
+markup changes from breaking the cache and vice versa.
+
+## Echo v5
+
+v5 is not v4. The differences that bite:
+
+| v4 | v5 |
+| --- | --- |
+| `func(c echo.Context) error` (interface) | `func(c *echo.Context) error` (struct pointer) |
+| `c.Response()` returns `*echo.Response` | returns `http.ResponseWriter` |
+| `echo.NewHTTPError(code, any...)` | `echo.NewHTTPError(code, string)` |
+| `e.Shutdown(ctx)` | removed - `Start` handles signals and graceful shutdown |
+| `middleware.Logger()` | `middleware.RequestLogger()` |
+| Go 1.22 | Go 1.25 minimum |
+
+Startup uses `echo.StartConfig{GracefulTimeout: ...}.Start(ctx, e)`, which
+stops accepting connections when the context is cancelled and drains in-flight
+requests. Do not add a manual shutdown.
+
+Response helpers: https://echo.labstack.com/guide/response/
+
+## Responses
+
+Handlers reply through the helper in `handlers/response.go`:
+
+```go
+return h.reply(c).Page(html, cached)                      // HTML + X-Cache header
+return h.reply(c).Text(http.StatusOK, "purged")           // plain text
+return h.reply(c).JSON(http.StatusOK, payload)            // JSON
+return h.reply(c).Fail(http.StatusBadGateway, "...", err) // logs err, returns a safe message
+```
+
+`Fail` logs the real error with the request path and returns only the public
+message, so internal detail never reaches a client. It is a thin layer over
+Echo's own helpers - they still do the writing.
+
+## Caching
+
+`GET /` is served from Redis under `__PROJECT__:home_html` with a 10 minute
+TTL. The cached value is the **fully rendered page**, so a hit skips the CMS
+call and the template execution entirely.
+
+The mechanics live in `cache/cache.go` as one helper:
+
+```go
+html, cached, err := h.Cache.HTML(ctx, key, func() ([]byte, error) {
+    // only runs on a miss
+})
+```
+
+Cache another page by calling it with a different key. Do not reimplement
+Get/Set in a handler.
+
+The `X-Cache` response header reports `HIT` or `MISS` - check it before
+concluding a change did not work:
+
+```bash
+curl -sD- -o /dev/null https://__DOMAIN__/ | grep -i x-cache
+```
+
+A Redis failure is never fatal: the page still renders, just slower.
+
+### Purging
+
+```bash
+curl -X POST -H "X-Api-Key: $COCKPIT_API_TOKEN" https://__DOMAIN__/cache/purge
+```
+
+The button on the page does the same thing over htmx. The token is only
+enforced when `COCKPIT_API_TOKEN` is set. Point a Cockpit publish webhook at
+this URL so editors do not wait out the TTL.
+
+## Cockpit CMS
+
+The admin is at https://__CMS_DOMAIN__. Its data lives in `cockpit-storage/`
+in this project (bind-mounted, so it is yours to back up). That directory must
+keep its `cache`, `data`, `logs`, `tmp` and `uploads` subdirectories - Cockpit
+fails to boot without them. `gosite start` recreates them if they go missing.
+
+### Reading content
+
+`cms/cms.go` is the only place that calls Cockpit:
+
+```go
+content := h.CMS.Singleton(ctx, "home") // GET /api/content/item/home
+```
+
+| Kind | Endpoint |
+| --- | --- |
+| Singleton | `/api/content/item/<name>` |
+| Collection | `/api/content/items/<name>` |
+
+Both authenticate with an `api-key` header, set from `COCKPIT_API_TOKEN`.
+
+`cms.Content` is a `map[string]any`, so a template can read
+`{{.Content.headline}}` without a struct existing. Once a model settles, define
+a struct in `cms` and decode into it.
+
+When Cockpit is unreachable or the item does not exist, the client returns
+empty content and logs a warning; the template falls back to its own copy. That
+is why a fresh project renders before any content exists.
+
+### Updating content
+
+1. Open https://__CMS_DOMAIN__ and sign in.
+2. Create or edit the item (a `home` singleton with `headline` and `intro`
+   fields drives the starter page).
+3. Purge the cache, or wait up to 10 minutes.
+
+To add a field: add it in Cockpit, then read it in the template with a fallback
+(`{{with .Content.field}}{{.}}{{else}}default{{end}}`).
+
+## htmx and Alpine
+
+- **htmx** issues the requests: `hx-get`, `hx-post`, `hx-target`, `hx-swap`.
+  A handler answers with an HTML **fragment**, not JSON.
+- **Alpine** handles local UI state only: `x-data`, `x-show`, `x-text`,
+  `@click`. Use `x-cloak` on anything that would flash before Alpine loads.
+- Both are CDN `<script>` tags in `views/layout.html`. Vendor them into
+  `/static` before production so the site does not depend on a third party and
+  a CSP can be tightened.
+
+Rule of thumb: if the server can render it, let the server render it. Reach for
+Alpine only for state that never needs to touch the server.
+
+## Templates
+
+`views/render.go` parses each page as `layout.html` + `pages/<name>.html` +
+`components/*.html` at startup, and panics on a malformed template - so a
+broken template fails the deploy, not the first request.
+
+Adding a page:
+
+1. `views/pages/about.html` defining `{{define "content"}}`.
+2. Register it in `NewRenderer`: `"about": page("about")`.
+3. A handler that renders `"about"`, and a line in `router.go`.
+
+Templates are embedded, so only files matching the `go:embed` patterns in
+`render.go` ship in the binary.
+
+## gosite commands
+
+The `gosite` CLI manages this project. Run from anywhere with the project name,
+or from inside the directory without it.
+
+| Command | What it does |
+| --- | --- |
+| `gosite start __PROJECT__` | Start the app (air hot reload) and Cockpit |
+| `gosite stop __PROJECT__` | Stop the containers |
+| `gosite restart __PROJECT__` | Recreate the containers; `--build` rebuilds the image |
+| `gosite logs __PROJECT__` | Follow both containers; `app` or `cms` to pick one |
+| `gosite logs __PROJECT__ app -n 50 --no-follow` | Last 50 lines, no follow |
+| `gosite list` | Every project, its ports and container status |
+| `gosite cd __PROJECT__` | Jump to the directory (needs `eval "$(gosite shell-init)"`) |
+| `gosite path __PROJECT__` | Print the directory, for scripts |
+| `gosite remove __PROJECT__` | Delete everything; `--keep-source` keeps the code |
+| `gosite infra up` / `down` / `status` | Shared Traefik, Postgres and Redis |
+| `gosite dns` | Check that `*.test` resolves to 127.0.0.1 |
+| `gosite doctor` | Check the local toolchain |
+
+Editing a `.go` or `.html` file rebuilds automatically through air in about
+three seconds - no restart needed. Restart for `.env`, compose or Dockerfile
+changes.
+
+If a request 404s right after a start, Cockpit is still failing its health
+check: Traefik does not route to a container until it is healthy.
+
+## Environment
+
+Read once in `config/config.go`; never call `os.Getenv` in a handler.
+
+| Variable | Local default | Production |
+| --- | --- | --- |
+| `PORT` | 8080 | set by Coolify |
+| `REDIS_URL` | `redis://__REDIS_HOST__:__REDIS_PORT__/0` | a Coolify Redis service |
+| `COCKPIT_URL` | `http://__PROJECT__-cms:80` | the deployed Cockpit |
+| `COCKPIT_API_TOKEN` | in `.env` | set in the Coolify UI |
+| `DATABASE_URL` | shared Postgres | a Coolify Postgres service |
+
+`.env` is local only and gitignored. Production values come from the Coolify
+UI.
+
+## Deployment
+
+`docker-compose.yml` is local only: mapped ports, source bind-mounted, air.
+`docker-compose.prod.yml` is what Coolify uses: no host ports, Traefik labels,
+every value from the environment, and the multi-stage `Dockerfile` producing a
+static binary on Alpine.
+
+Push to Git, point a Coolify Docker Compose resource at
+`docker-compose.prod.yml`, and set `SERVICE_FQDN_APP`, `SERVICE_FQDN_CMS`,
+`REDIS_URL`, `DATABASE_URL` and `COCKPIT_API_TOKEN`.
+
+## Conventions
+
+- Comments explain **why**, not what the next line does.
+- Errors are logged where they happen and returned as a safe message.
+- No global state; dependencies are passed through `handlers.Deps`.
+- No JavaScript build step. Ever.
 EOF
 }
 
