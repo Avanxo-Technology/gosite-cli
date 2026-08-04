@@ -10,9 +10,9 @@
 # Templates are written with __PLACEHOLDER__ tokens and rendered afterwards so
 # heredocs can stay fully quoted and never mangle Go/compose "${VAR}" syntax.
 #
-# Note: __PG_PORT__/__REDIS_PORT__ render to the IN-NETWORK ports (5432/6379),
-# not the host-published ones. Project containers always reach the shared
-# services by container name on gosite-network, never through the host.
+# Note: __REDIS_PORT__ renders to the IN-NETWORK port (6379), not the
+# host-published one. Project containers always reach the shared services by
+# container name on gosite-network, never through the host.
 # Set by cmd_create, read by the view writers.
 TAILWIND=1
 
@@ -27,10 +27,6 @@ render_placeholders() {
     -e "s|__CMS_DOMAIN__|${CMS_DOMAIN}|g" \
     -e "s|__APP_PORT__|${APP_PORT}|g" \
     -e "s|__CMS_PORT__|${CMS_PORT}|g" \
-    -e "s|__PG_HOST__|${GOSITE_PG_HOST}|g" \
-    -e "s|__PG_PORT__|5432|g" \
-    -e "s|__PG_USER__|${GOSITE_PG_USER}|g" \
-    -e "s|__PG_PASSWORD__|${GOSITE_PG_PASSWORD}|g" \
     -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
@@ -136,7 +132,7 @@ cmd_create() {
   cat <<EOF
 
 $(printf "${C_BOLD}Next steps${C_NC}")
-  1. gosite infra up                 $(printf "${C_DIM}# shared Postgres + Redis on ${GOSITE_NETWORK}${C_NC}")
+  1. gosite infra up                 $(printf "${C_DIM}# shared Traefik + Redis on ${GOSITE_NETWORK}${C_NC}")
   2. gosite start ${PROJECT_NAME}      $(printf "${C_DIM}# or: gosite cd ${PROJECT_NAME}${C_NC}")
   3. App  -> https://${APP_DOMAIN}   $(printf "${C_DIM}(air hot reload)${C_NC}")
      CMS  -> https://${CMS_DOMAIN}   $(printf "${C_DIM}(Cockpit)${C_NC}")
@@ -1226,11 +1222,12 @@ EOF
 # -----------------------------------------------------------------------------
 _write_compose_dev() {
   # LOCAL ONLY: ports mapped to localhost, source bind-mounted, air hot reload,
-  # attached to the external shared network for Postgres and Redis.
+  # attached to the external shared network for Redis.
   cat > "$1/docker-compose.yml" <<'EOF'
 # Local development stack for __PROJECT__.
-# Postgres and Redis are NOT defined here: they are the shared gosite
-# infrastructure, reachable by container name on the external network.
+# Redis is NOT defined here: it is the shared gosite infrastructure, reachable
+# by container name on the external network. Cockpit keeps its file-backed
+# mongolite database locally; production swaps it for MongoDB.
 # Start them with `gosite infra up`.
 
 services:
@@ -1307,15 +1304,20 @@ _write_compose_prod() {
 # Production stack for __PROJECT__, in Coolify's native compose format.
 #
 # No host ports are published: Coolify's Traefik proxy routes to the container
-# port declared in the labels below. Every value comes from the environment,
-# so it is configured from the Coolify UI (or a .env at the service level).
+# port declared in the labels below. The stack is self-contained - it brings its
+# own MongoDB and Redis - so the only thing Coolify has to supply is the domain
+# names and the secrets.
 #
 # Required variables in Coolify:
-#   SERVICE_FQDN_APP        e.g. https://__PROJECT__.example.com
-#   SERVICE_FQDN_CMS        e.g. https://cms.__PROJECT__.example.com
-#   REDIS_URL               redis://<redis-service>:6379/0
-#   DATABASE_URL            postgres://user:pass@<pg-service>:5432/__PROJECT__
-#   COCKPIT_API_TOKEN       shared token between the app and Cockpit
+#   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
+#   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
+#   COCKPIT_API_TOKEN    shared token between the app and Cockpit
+#   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
+#                        default, so this must be set to something private
+#   MONGO_USER           MongoDB root user
+#   MONGO_PASSWORD       MongoDB root password
+#
+# Optional: MONGO_DB (defaults to the project name).
 
 services:
   app:
@@ -1327,9 +1329,8 @@ services:
       - APP_ENV=production
       - PORT=8080
       - SERVICE_FQDN_APP
-      - REDIS_URL=${REDIS_URL}
-      - DATABASE_URL=${DATABASE_URL}
-      - COCKPIT_URL=${COCKPIT_URL:-http://cms:80}
+      - REDIS_URL=redis://redis:6379/0
+      - COCKPIT_URL=http://cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
     labels:
       # Tells Coolify this service is built from the repository Dockerfile.
@@ -1347,15 +1348,27 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
-      - cms
+      redis:
+        condition: service_healthy
+      cms:
+        condition: service_started
 
   cms:
     image: cockpithq/cockpit:core-2.14.0
     restart: unless-stopped
     environment:
-      - COCKPIT_DATABASE_SERVER=${COCKPIT_DATABASE_SERVER:-mongolite://storage/data}
-      - COCKPIT_SESSION_NAME=__PROJECT__
+      # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
+      - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_DB=${MONGO_DB:-__PROJECT__}
     volumes:
+      # Points Cockpit at MongoDB. Mounted only here: local development keeps
+      # the file-backed mongolite default, so it needs no database at all.
+      - ./cockpit/config.php:/var/www/html/config/config.php:ro
+      # Uploads and cache still live on disk even when the data is in MongoDB.
       - cockpit-storage:/var/www/html/storage
     labels:
       - coolify.managed=true
@@ -1365,9 +1378,78 @@ services:
       - traefik.http.routers.__PROJECT__-cms.tls=true
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Gate the CMS on a real ping, not just the container being up: Cockpit
+      # fails at boot if it cannot reach the database.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Page cache only: evict rather than refuse writes when memory runs out.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   cockpit-storage:
+  mongo-data:
+  redis-data:
+EOF
+
+  # Cockpit configures its database in PHP, not through environment variables:
+  # the image has no COCKPIT_DATABASE_* handling. This file is merged over
+  # Cockpit's defaults at boot, and its ${VAR} references are resolved from the
+  # container environment.
+  mkdir -p "$1/cockpit"
+  cat > "$1/cockpit/config.php" <<'EOF'
+<?php
+
+// Cockpit configuration, merged over the defaults in bootstrap.php.
+// Mounted only by docker-compose.prod.yml: local development keeps Cockpit's
+// file-backed mongolite database, so it needs no database container.
+//
+// ${VAR} placeholders are resolved from the environment by Cockpit's DotEnv.
+
+return [
+
+    // MongoDB. The mongodb PHP extension ships with the image, and the
+    // mongodb:// scheme is what selects the Mongo driver over mongolite.
+    'database' => [
+        'server' => 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}',
+        'options' => ['db' => '${MONGO_DB}'],
+        'driverOptions' => [],
+    ],
+
+    // The image ships a hardcoded, publicly known key. Overriding it is what
+    // stops anyone from forging a session against a deployed site.
+    'sec-key' => '${COCKPIT_SEC_KEY}',
+
+    'session' => [
+        'name' => '__PROJECT__',
+    ],
+];
 EOF
 }
 
@@ -1378,7 +1460,6 @@ _write_env_files() {
 APP_ENV=development
 PORT=8080
 REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
-DATABASE_URL=postgres://__PG_USER__:__PG_PASSWORD__@__PG_HOST__:__PG_PORT__/__PROJECT__?sslmode=disable
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=__CMS_TOKEN__
 EOF
@@ -1390,7 +1471,6 @@ EOF
 APP_ENV=production
 PORT=8080
 REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
-DATABASE_URL=postgres://user:password@host:5432/__PROJECT__?sslmode=disable
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=change-me
 EOF
@@ -1433,7 +1513,8 @@ There is no JavaScript build step and no SPA.
 | Go module | `__MODULE__` |
 | Local URL | https://__DOMAIN__ (also http://localhost:__APP_PORT__) |
 | Cockpit admin | https://__CMS_DOMAIN__ (also http://localhost:__CMS_PORT__) |
-| Redis / Postgres | shared containers `__REDIS_HOST__` / `__PG_HOST__` on the `__NETWORK__` Docker network |
+| Redis | shared container `__REDIS_HOST__` on the `__NETWORK__` Docker network |
+| CMS database | mongolite (file-backed) locally, MongoDB in production |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
@@ -1620,8 +1701,13 @@ this URL so editors do not wait out the TTL.
 
 ## Cockpit CMS
 
-The admin is at https://__CMS_DOMAIN__. Its data lives in `cockpit-storage/`
-in this project (bind-mounted, so it is yours to back up). That directory must
+The admin is at https://__CMS_DOMAIN__.
+
+Locally Cockpit uses its file-backed `mongolite` database, so development needs
+no database container: the data lives in `cockpit-storage/` in this project
+(bind-mounted, so it is yours to back up). In production `cockpit/config.php`
+is mounted and points Cockpit at the MongoDB service in the compose file -
+uploads and cache stay on the volume, the content moves into Mongo. That directory must
 keep its `cache`, `data`, `logs`, `tmp` and `uploads` subdirectories - Cockpit
 fails to boot without them. `gosite start` recreates them if they go missing.
 
@@ -1702,7 +1788,7 @@ or from inside the directory without it.
 | `gosite cd __PROJECT__` | Jump to the directory (needs `eval "$(gosite shell-init)"`) |
 | `gosite path __PROJECT__` | Print the directory, for scripts |
 | `gosite remove __PROJECT__` | Delete everything; `--keep-source` keeps the code |
-| `gosite infra up` / `down` / `status` | Shared Traefik, Postgres and Redis |
+| `gosite infra up` / `down` / `status` | Shared Traefik and Redis |
 | `gosite dns` | Check that `*.test` resolves to 127.0.0.1 |
 | `gosite doctor` | Check the local toolchain |
 
@@ -1723,7 +1809,6 @@ Read once in `config/config.go`; never call `os.Getenv` in a handler.
 | `REDIS_URL` | `redis://__REDIS_HOST__:__REDIS_PORT__/0` | a Coolify Redis service |
 | `COCKPIT_URL` | `http://__PROJECT__-cms:80` | the deployed Cockpit |
 | `COCKPIT_API_TOKEN` | in `.env` | set in the Coolify UI |
-| `DATABASE_URL` | shared Postgres | a Coolify Postgres service |
 
 `.env` is local only and gitignored. Production values come from the Coolify
 UI.
@@ -1735,9 +1820,12 @@ UI.
 every value from the environment, and the multi-stage `Dockerfile` producing a
 static binary on Alpine.
 
+The production stack is self-contained: it brings its own MongoDB and Redis, so
+Coolify only supplies domains and secrets.
+
 Push to Git, point a Coolify Docker Compose resource at
 `docker-compose.prod.yml`, and set `SERVICE_FQDN_APP`, `SERVICE_FQDN_CMS`,
-`REDIS_URL`, `DATABASE_URL` and `COCKPIT_API_TOKEN`.
+`COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and `MONGO_PASSWORD`.
 
 ## Conventions
 
@@ -1856,7 +1944,7 @@ Collections live at `/api/content/items/<name>` if you need a list later.
 ## Local development
 
 ```bash
-gosite infra up      # shared Postgres + Redis on __NETWORK__
+gosite infra up      # shared Traefik + Redis on __NETWORK__
 gosite start         # app (air hot reload) + Cockpit
 ```
 
@@ -1889,6 +1977,7 @@ dance.
 `docker-compose.prod.yml` publishes no host ports and takes every value from
 the environment. In Coolify: create a Docker Compose resource from this repo,
 select `docker-compose.prod.yml`, then set `SERVICE_FQDN_APP`,
-`SERVICE_FQDN_CMS`, `REDIS_URL`, `DATABASE_URL` and `COCKPIT_API_TOKEN`.
+`SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and
+`MONGO_PASSWORD`. The stack brings its own MongoDB and Redis.
 EOF
 }

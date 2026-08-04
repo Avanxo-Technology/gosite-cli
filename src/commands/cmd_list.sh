@@ -65,7 +65,7 @@ _status_of() {
 }
 
 cmd_infra_status_hint() {
-  if container_running "${GOSITE_REDIS_HOST}" && container_running "${GOSITE_PG_HOST}"; then
+  if container_running "${GOSITE_REDIS_HOST}" && container_running "${GOSITE_PROXY_HOST}"; then
     ok "Shared infrastructure is running."
   else
     warn "Shared infrastructure is down. Run 'gosite infra up'."

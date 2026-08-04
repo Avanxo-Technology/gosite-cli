@@ -347,7 +347,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
 <section style="padding-top:0">
   <div class="wrap">
     <div class="flow">
-      <div class="step rv"><span class="n">01</span><h4>infra up</h4><p>Traefik, PostgreSQL and Redis start once on a shared Docker network.</p></div>
+      <div class="step rv"><span class="n">01</span><h4>infra up</h4><p>Traefik and Redis start once on a shared Docker network.</p></div>
       <div class="step rv"><span class="n">02</span><h4>create</h4><p>A project is scaffolded in <code>~/gosites</code> and its certificate issued.</p></div>
       <div class="step rv"><span class="n">03</span><h4>start</h4><p>App and CMS come up; air rebuilds on every save in about three seconds.</p></div>
       <div class="step rv"><span class="n">04</span><h4>push</h4><p>Coolify builds the multi-stage image and routes it through its own Traefik.</p></div>
@@ -411,7 +411,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>gosite list</td><td>Every project with its ports, container status and path.</td></tr>
           <tr><td>gosite cd &lt;name&gt;</td><td>Jump into a project directory. <code>gosite path</code> prints it for scripts.</td></tr>
           <tr><td>gosite remove &lt;name&gt;</td><td>Delete containers, volumes, images, certificate and directory. <span class="flag">--keep-source</span> keeps the code.</td></tr>
-          <tr><td>gosite infra up</td><td>Shared Traefik, PostgreSQL and Redis. Also <code>down</code>, <code>status</code>, <code>logs</code>.</td></tr>
+          <tr><td>gosite infra up</td><td>Shared Traefik and Redis. Also <code>down</code>, <code>status</code>, <code>logs</code>.</td></tr>
           <tr><td>gosite dns</td><td>Verify that <code>*.test</code> resolves to 127.0.0.1, and print the fix if not.</td></tr>
           <tr><td>gosite doctor</td><td>Check the local toolchain: Docker, compose, Go, air.</td></tr>
         </tbody>
@@ -509,7 +509,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v6H4zM4 14h16v6H4z"/><path d="M8 7h.01M8 17h.01"/></svg></div>
         <h3>Shared infrastructure</h3>
-        <p>PostgreSQL and Redis run once per machine on <code>gosite-network</code>. Projects attach to it and reach them by container name.</p>
+        <p>Redis runs once per machine on <code>gosite-network</code>. Cockpit uses a file-backed database locally, so development needs no database container at all.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 10l7-7 7 7"/></svg></div>
@@ -537,6 +537,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>Source</td><td>Bind-mounted, hot reload</td><td>Baked into the image</td></tr>
           <tr><td>Config</td><td><code>.env</code> file</td><td>Environment set in the Coolify UI</td></tr>
           <tr><td>TLS</td><td>mkcert, trusted locally</td><td>Let's Encrypt via certresolver</td></tr>
+          <tr><td>Datastores</td><td>Shared Redis; file-backed CMS database</td><td>Own MongoDB and Redis in the stack</td></tr>
         </tbody>
       </table>
     </div>

@@ -11,12 +11,13 @@ library's `html/template` - no code generation, no build step.
 
 | Layer | Scope | Contents |
 | --- | --- | --- |
-| Shared infrastructure | One per machine | Traefik proxy + PostgreSQL + Redis on the `gosite-network` Docker network |
+| Shared infrastructure | One per machine | Traefik proxy + Redis on the `gosite-network` Docker network |
 | Per project | One per site | Its own Go app container (air hot reload) + its own Cockpit container |
 
-Projects never define Postgres or Redis. They attach to `gosite-network` as an
-**external** network and reach the shared services by container name
-(`gosite-postgres`, `gosite-redis`) on their in-network ports.
+Projects never define Redis. They attach to `gosite-network` as an **external**
+network and reach it by container name (`gosite-redis`) on its in-network port.
+Cockpit uses its file-backed database locally, so development needs no database
+container at all; production brings its own MongoDB.
 
 ## Install
 
@@ -81,7 +82,7 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 
 ```bash
 gosite doctor                 # verify go, air, docker, docker compose
-gosite infra up               # gosite-network + Traefik, Postgres, Redis
+gosite infra up               # gosite-network + Traefik and Redis
 gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
@@ -241,7 +242,7 @@ gosite-cli/
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     └── commands/
         ├── cmd_create.sh         # project scaffolding (Go, templates, Docker, compose)
-        ├── cmd_infra.sh          # shared Traefik + Postgres + Redis lifecycle
+        ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
         ├── cmd_stop.sh           # stop a project's containers
@@ -269,6 +270,7 @@ my-site/
 │   └── health.go             # GET /healthz
 ├── cache/                    # cache-aside over Redis, written once
 ├── cms/                      # the Cockpit API client
+├── cockpit/config.php        # points Cockpit at MongoDB (production only)
 ├── views/                    # markup, embedded with go:embed
 │   ├── render.go             # parses every template at startup
 │   ├── layout.html           # base document (styles, htmx, Alpine)
@@ -324,13 +326,8 @@ overridable, so an upgrade is a deliberate change rather than a surprise:
 | htmx / Alpine.js / Tailwind | 2.0.10 / 3.15.12 / 4.3.3 | edit `views/layout.html` |
 | air | v1.67.4 | edit `Dockerfile.dev` |
 | Traefik | v3.7 | `GOSITE_TRAEFIK_VERSION` |
-| PostgreSQL | 18-alpine | `GOSITE_PG_VERSION` |
 | Redis | 8-alpine | `GOSITE_REDIS_VERSION` |
 | Cockpit | core-2.14.0 | edit the compose files |
-
-`gosite infra up` refuses to start Postgres when the data volume was written by
-a different major version, and prints the dump/restore steps instead of leaving
-a container in a restart loop.
 
 ### Cache-aside flow
 

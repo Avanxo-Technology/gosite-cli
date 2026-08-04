@@ -31,7 +31,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
-  infra up           Create '${GOSITE_NETWORK}' and start shared Postgres + Redis
+  infra up           Create '${GOSITE_NETWORK}' and start shared Traefik + Redis
   infra down         Stop the shared infrastructure
   infra status       Show shared infrastructure health
   infra logs [svc]   Tail shared infrastructure logs
