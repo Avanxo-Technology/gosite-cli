@@ -360,6 +360,7 @@ type Config struct {
 	RedisURL     string
 	CockpitURL   string
 	CockpitToken string
+	Environment  string
 }
 
 func Load() Config {
@@ -368,6 +369,19 @@ func Load() Config {
 		RedisURL:     env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"),
 		CockpitURL:   env("COCKPIT_URL", "http://__PROJECT__-cms:80"),
 		CockpitToken: os.Getenv("COCKPIT_API_TOKEN"),
+		Environment:  os.Getenv("APP_ENV"),
+	}
+}
+
+// IsDev reports whether the app is running for development, where the
+// cache-purge button is shown without authentication. The default keeps
+// production safe when APP_ENV is not set.
+func (c Config) IsDev() bool {
+	switch c.Environment {
+	case "development", "dev", "local":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -522,6 +536,7 @@ func (h *Handlers) renderHome() ([]byte, error) {
 	err := h.Renderer.Page(&buf, "home", map[string]any{
 		"Title":   "__PROJECT__",
 		"Content": h.CMS.Singleton(ctx, "home"),
+		"IsDev":   h.Config.IsDev(),
 	})
 	return buf.Bytes(), err
 }
@@ -541,9 +556,10 @@ import (
 // on the page and a webhook Cockpit can call when an editor publishes, so the
 // site updates without waiting out the TTL.
 func (h *Handlers) PurgeCache(c *echo.Context) error {
-	// The token is only enforced when configured, which keeps the htmx button
-	// working locally while still protecting a deployed site.
-	if h.Config.CockpitToken != "" && c.Request().Header.Get("X-Api-Key") != h.Config.CockpitToken {
+	// In development the on-page button posts without a token, so the check is
+	// skipped there; everywhere else the token is enforced whenever one is
+	// configured, which is what protects a deployed site.
+	if !h.Config.IsDev() && h.Config.CockpitToken != "" && c.Request().Header.Get("X-Api-Key") != h.Config.CockpitToken {
 		return h.reply(c).Fail(http.StatusUnauthorized, "invalid token", nil)
 	}
 	if err := h.Cache.Purge(c.Request().Context(), homeCacheKey); err != nil {
@@ -895,20 +911,46 @@ EOF
 EOF
 
   cat > "$1/views/components/button.html" <<'EOF'
-{{/*
-  Purges the cached page and reloads, so the next render comes from the CMS.
-  htmx posts the request; Alpine only handles the "Purging..." label.
-*/}}
+{{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
+   production, and it carries its own <style> block so it can be copied into any
+   project without touching the shared stylesheet. */}}
 {{define "purge-button"}}
+{{if .IsDev}}
 <button
-	class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
-	x-data="{ busy: false }"
-	x-text="busy ? 'Purging...' : 'Purge cache'"
-	hx-post="/cache/purge"
-	hx-swap="none"
-	@htmx:before-request="busy = true"
-	@htmx:after-request="window.location.reload()"
+  type="button"
+  class="dev-purge"
+  aria-label="Clear the page cache"
+  x-data="{ busy: false }"
+  :disabled="busy"
+  x-text="busy ? 'Purging…' : 'Purge cache'"
+  hx-post="/cache/purge"
+  hx-swap="none"
+  hx-on::before-request="busy = true"
+  hx-on::after-request="if (event.detail.successful) window.location.reload()"
 >Purge cache</button>
+<style>
+.dev-purge {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 200;
+  padding: 8px 14px;
+  border: 1px solid var(--dev-purge-border, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: var(--dev-purge-bg, rgba(15, 23, 42, 0.78));
+  color: var(--dev-purge-fg, #f8fafc);
+  font: 600 12px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.dev-purge:hover { background: var(--dev-purge-hover, rgba(37, 99, 235, 0.85)); }
+.dev-purge:disabled { opacity: 0.6; cursor: wait; }
+</style>
+{{end}}
 {{end}}
 EOF
 }
@@ -967,20 +1009,46 @@ EOF
 EOF
 
   cat > "$1/views/components/button.html" <<'EOF'
-{{/*
-  Purges the cached page and reloads, so the next render comes from the CMS.
-  htmx posts the request; Alpine only handles the "Purging..." label.
-*/}}
+{{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
+   production, and it carries its own <style> block so it can be copied into any
+   project without touching the shared stylesheet. */}}
 {{define "purge-button"}}
+{{if .IsDev}}
 <button
-	class="button"
-	x-data="{ busy: false }"
-	x-text="busy ? 'Purging...' : 'Purge cache'"
-	hx-post="/cache/purge"
-	hx-swap="none"
-	@htmx:before-request="busy = true"
-	@htmx:after-request="window.location.reload()"
+  type="button"
+  class="dev-purge"
+  aria-label="Clear the page cache"
+  x-data="{ busy: false }"
+  :disabled="busy"
+  x-text="busy ? 'Purging…' : 'Purge cache'"
+  hx-post="/cache/purge"
+  hx-swap="none"
+  hx-on::before-request="busy = true"
+  hx-on::after-request="if (event.detail.successful) window.location.reload()"
 >Purge cache</button>
+<style>
+.dev-purge {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 200;
+  padding: 8px 14px;
+  border: 1px solid var(--dev-purge-border, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: var(--dev-purge-bg, rgba(15, 23, 42, 0.78));
+  color: var(--dev-purge-fg, #f8fafc);
+  font: 600 12px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.dev-purge:hover { background: var(--dev-purge-hover, rgba(37, 99, 235, 0.85)); }
+.dev-purge:disabled { opacity: 0.6; cursor: wait; }
+</style>
+{{end}}
 {{end}}
 EOF
 
@@ -1317,7 +1385,9 @@ EOF
 
   cat > "$1/.env.example" <<'EOF'
 # Copy to .env for local dev; set the same keys in the Coolify UI for prod.
-APP_ENV=development
+# Runtime environment. development/dev/local render the cache-purge button,
+# which posts without a token; anything else (or unset) means production.
+APP_ENV=production
 PORT=8080
 REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
 DATABASE_URL=postgres://user:password@host:5432/__PROJECT__?sslmode=disable
