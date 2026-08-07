@@ -190,24 +190,18 @@ _prompt_addons() {
 
   printf "\n"
   printf "${C_BOLD}Cockpit addons${C_NC}\n"
-  printf "  ${C_DIM}1${C_NC}) Forms    public form submissions with anti-spam, CSV export\n"
-  printf "  ${C_DIM}2${C_NC}) Replica  content replication between Cockpit instances\n"
-  printf "\n"
-  printf "${C_YELLOW}?${C_NC} Select addons to install ${C_DIM}(1 2, or Enter for none)${C_NC}: "
-  local reply
-  read -r reply
+  printf "  ${C_DIM}Optional: public forms, content replication.${C_NC}\n"
 
   local selected=""
-  local n
-  for n in ${reply}; do
-    case "${n}" in
-      1) selected="${selected} Forms" ;;
-      2) selected="${selected} Replica" ;;
-    esac
-  done
 
-  # Trim leading space
-  selected="${selected# }"
+  printf "${C_YELLOW}?${C_NC} Install Forms ${C_DIM}(public form submissions with anti-spam, CSV export)${C_NC} [y/N] "
+  local reply
+  read -r reply
+  [[ "${reply}" =~ ^[Yy]$ ]] && selected="Forms"
+
+  printf "${C_YELLOW}?${C_NC} Install Replica ${C_DIM}(content replication between Cockpit instances)${C_NC} [y/N] "
+  read -r reply
+  [[ "${reply}" =~ ^[Yy]$ ]] && selected="${selected:+${selected} }Replica"
 
   if [[ -n "${selected}" ]]; then
     ADDONS="${selected}"
