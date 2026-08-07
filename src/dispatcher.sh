@@ -39,6 +39,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
 
 $(printf "${C_BOLD}OTHER${C_NC}")
   doctor             Verify local dependencies (go, air, docker, compose)
+  update             Update gosite to the latest version from GitHub
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
   help               Show this help
   version            Print the version
@@ -70,6 +71,7 @@ dispatch() {
     path)            load_command cd;     cmd_path   "$@" ;;
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
+    update)          load_command update; cmd_update "$@" ;;
     doctor)          require_dependencies --report ;;
     dns)             load_command dns; cmd_dns ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;
