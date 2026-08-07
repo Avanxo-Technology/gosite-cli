@@ -138,6 +138,12 @@ cmd_infra() {
       _infra_compose down
       ok "Infrastructure stopped (data volumes preserved)."
       ;;
+    restart)
+      [[ -f "${GOSITE_INFRA_DIR}/docker-compose.yml" ]] || fatal "Infrastructure was never created. Run 'gosite infra up'."
+      info "Restarting shared infrastructure"
+      _infra_compose restart "$@"
+      ok "Infrastructure restarted."
+      ;;
     status)
       if network_exists "${GOSITE_NETWORK}"; then
         ok "Network '${GOSITE_NETWORK}' exists."

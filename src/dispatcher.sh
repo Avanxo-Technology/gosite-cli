@@ -34,6 +34,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   infra up           Create '${GOSITE_NETWORK}' and start shared Traefik + Redis
   infra down         Stop the shared infrastructure
+  infra restart      Restart shared infrastructure
   infra status       Show shared infrastructure health
   infra logs [svc]   Tail shared infrastructure logs
   dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
