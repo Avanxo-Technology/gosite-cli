@@ -12,7 +12,7 @@ cmd_update() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ref)    ref="$2"; shift 2 ;;
-      --check)  check_only=1 ;;
+      --check)  check_only=1; shift ;;
       -h|--help)
         cat <<USAGE
 Usage: gosite update [flags]
@@ -33,9 +33,10 @@ USAGE
   done
 
   # --- locate current install -------------------------------------------------
-  local share_dir bin_dir
+  local share_dir prefix bin_dir
   share_dir="$(cd -P "${GOSITE_ROOT}/.." && pwd)"
-  bin_dir="$(cd -P "${share_dir}/../bin" && pwd)"
+  prefix="$(cd -P "${share_dir}/../.." && pwd)"
+  bin_dir="${prefix}/bin"
 
   local current_version="${GOSITE_VERSION}"
   info "Current version: ${current_version}"
