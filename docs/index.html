@@ -407,7 +407,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <caption class="sr">gosite commands and what they do</caption>
         <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
         <tbody>
-          <tr><td>gosite create &lt;name&gt;</td><td>Scaffold a project in <code>~/gosites</code>, issue its certificate. <span class="flag">--no-tailwind</span> for plain CSS, <span class="flag">--here</span> for the current directory, <span class="flag">--no-addons</span> to skip the Cockpit addons.</td></tr>
+          <tr><td>gosite create &lt;name&gt;</td><td>Scaffold a project in <code>~/gosites</code>, issue its certificate, and prompt for Cockpit addons. <span class="flag">--no-tailwind</span> for plain CSS, <span class="flag">--here</span> for the current directory, <span class="flag">--addons "A B"</span> to install specific addons, <span class="flag">--no-addons</span> to skip the prompt.</td></tr>
           <tr><td>gosite start</td><td>Start the Go app under air hot reload plus its Cockpit container.</td></tr>
           <tr><td>gosite restart</td><td>Recreate the containers after an <code>.env</code>, compose or Dockerfile change. <span class="flag">--build</span> rebuilds the image.</td></tr>
           <tr><td>gosite logs</td><td>Follow both containers, or pass <code>app</code> / <code>cms</code>. <span class="flag">-n</span> and <span class="flag">--no-follow</span> supported.</td></tr>
@@ -429,14 +429,17 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
   <div class="wrap">
     <div class="head rv">
       <p class="eyebrow">Cockpit addons</p>
-      <h2>Forms and content sync, installed by default.</h2>
+      <h2>Forms and content sync, opt-in.</h2>
       <p class="sub">
-        <code>gosite create</code> pulls the <code>Forms</code> and
-        <code>Replica</code> addons from the open-source
+        <code>gosite create</code> lets you pick from available
+        <code>Forms</code> and <code>Replica</code> addons during project
+        setup. They are fetched from the open-source
         <code>cockpit-addons</code> repo into <code>addons/</code>, mounted into
         the dev CMS container and baked into the production image by
-        <code>Dockerfile.cms</code>. Skip them with
-        <span class="flag">--no-addons</span>.
+        <code>Dockerfile.cms</code>. Pass
+        <span class="flag">--addons "Forms Replica"</span> to install
+        non-interactively, or <span class="flag">--no-addons</span> to skip
+        entirely.
       </p>
     </div>
 

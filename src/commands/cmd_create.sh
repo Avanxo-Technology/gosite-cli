@@ -38,19 +38,18 @@ render_placeholders() {
 }
 
 cmd_create() {
-  local PROJECT_NAME="" here=0 ADDONS="Forms Replica" INSTALL_ADDONS=1
+  local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
   # Tailwind is on by default; --no-tailwind swaps it for a small stylesheet.
   # Either way the generated markup is clean: no orphan utility classes.
-  # Cockpit addons (Forms + Replica) install by default; --no-addons skips them.
   TAILWIND=1
-  ADDONS_ENABLED=1
+  ADDONS_ENABLED=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --here)         here=1; shift ;;
       --no-tailwind)  TAILWIND=0; shift ;;
       --tailwind)     TAILWIND=1; shift ;;
-      --addons)       INSTALL_ADDONS=1; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
-      --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; shift ;;
+      --addons)       INSTALL_ADDONS=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
+      --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; ADDONS_PROMPT=0; shift ;;
       -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
@@ -58,6 +57,7 @@ cmd_create() {
 
   validate_project_name "${PROJECT_NAME}"
   require_dependencies
+  _prompt_addons
 
   # Sites live together under the workspace so they are easy to find and list.
   # --here overrides that for a one-off project in the current directory.
@@ -182,6 +182,43 @@ _resolve_dependencies() {
 # into the dev CMS container, baked into the production image by
 # Dockerfile.cms. A failure to reach the
 # network warns and continues, like _resolve_dependencies: the addons dir
+# Prompt the user to pick Cockpit addons interactively. When --no-addons or
+# --addons is used the prompt is skipped. If -y/--yes is set, skips with none.
+_prompt_addons() {
+  [[ "${ADDONS_PROMPT}" -eq 0 ]] && return 0
+  [[ "${GOSITE_ASSUME_YES}" -eq 1 ]] && return 0
+
+  printf "\n"
+  printf "${C_BOLD}Cockpit addons${C_NC}\n"
+  printf "  ${C_DIM}1${C_NC}) Forms    public form submissions with anti-spam, CSV export\n"
+  printf "  ${C_DIM}2${C_NC}) Replica  content replication between Cockpit instances\n"
+  printf "\n"
+  printf "${C_YELLOW}?${C_NC} Select addons to install ${C_DIM}(1 2, or Enter for none)${C_NC}: "
+  local reply
+  read -r reply
+
+  local selected=""
+  local n
+  for n in ${reply}; do
+    case "${n}" in
+      1) selected="${selected} Forms" ;;
+      2) selected="${selected} Replica" ;;
+    esac
+  done
+
+  # Trim leading space
+  selected="${selected# }"
+
+  if [[ -n "${selected}" ]]; then
+    ADDONS="${selected}"
+    INSTALL_ADDONS=1
+    ADDONS_ENABLED=1
+    ok "Will install: ${selected}"
+  else
+    info "No addons selected."
+  fi
+}
+
 # stays empty and the project still scaffolds. Re-run the installer later to
 # fetch them:
 #   curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
