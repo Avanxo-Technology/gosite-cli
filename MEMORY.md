@@ -1,7 +1,13 @@
 # Project Memory
 
-## Rules
+## BEFORE EVERY COMMIT — Checklist
 
-- **When CLI functionality changes** (new commands, flags, or behavior), update the commands table in `docs/index.html` and the usage section in `README.md` to keep them in sync.
-- **Bump the version** in `src/main.sh` (`GOSITE_VERSION`) whenever user-facing changes are made.
-- **Generated project structure**: Go app lives in `cmd/server/` (entry point) + `internal/` (packages). Cockpit addons in `cockpit/addons/`. Dockerfiles in `deploy/`. This is the standard layout for all scaffolded projects.
+1. **Version bump** — If anything user-facing changed, bump `GOSITE_VERSION` in `src/main.sh`
+2. **Website sync** — If CLI commands/flags changed, update `docs/index.html` (commands table) and `README.md` (usage section)
+3. **Generated structure** — If file paths in the scaffold changed, update `docs/index.html` (folder tree), `README.md`, and the generated `MEMORY.md`/`ARCHITECTURE.md` templates in `cmd_create.sh`
+
+If you skip any of these, the docs, the website, and the installed binary will be out of sync.
+
+## Scaffold Structure
+
+Go app lives in `cmd/server/` (entry point) + `internal/` (packages). Cockpit addons in `cockpit/addons/`. Dockerfiles in `deploy/`. This is the standard layout for all scaffolded projects.

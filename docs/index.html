@@ -476,24 +476,25 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
     </div>
 
     <div class="split">
-      <pre class="tree rv" aria-label="Generated project structure"><span class="f">main.go</span>            <span class="cm">startup: config, deps, server</span>
-<span class="f">app.go</span>             <span class="cm">composition root</span>
-<span class="f">router.go</span>          <span class="cm">every route, one screen</span>
-<span class="dir">config/</span>            <span class="cm">env, read exactly once</span>
-<span class="dir">handlers/</span>          <span class="cm">one file per route</span>
-  <span class="f">handlers.go</span>      <span class="cm">shared dependencies</span>
-  <span class="f">response.go</span>      <span class="cm">how the app replies</span>
-  <span class="f">home.go</span>          <span class="cm">GET /</span>
-  <span class="f">purge.go</span>         <span class="cm">POST /cache/purge</span>
-  <span class="f">health.go</span>        <span class="cm">GET /healthz</span>
-<span class="dir">cache/</span>             <span class="cm">cache-aside over Redis</span>
-<span class="dir">cms/</span>               <span class="cm">the Cockpit API client</span>
-<span class="dir">addons/</span>            <span class="cm">optional Cockpit addons</span>
-<span class="dir">views/</span>             <span class="cm">embedded with go:embed</span>
-  <span class="f">render.go</span>        <span class="cm">parsed once at startup</span>
-  <span class="f">layout.html</span>
-  <span class="dir">pages/</span>           <span class="cm">one file per page</span>
-  <span class="dir">components/</span>      <span class="cm">one file per piece</span>
+      <pre class="tree rv" aria-label="Generated project structure"><span class="dir">cmd/server/</span>        <span class="cm">entry point (main, app, router)</span>
+<span class="dir">internal/</span>           <span class="cm">application packages</span>
+  <span class="dir">app/</span>             <span class="cm">App struct, NewApp, NewRouter</span>
+  <span class="dir">config/</span>          <span class="cm">env, read exactly once</span>
+  <span class="dir">handlers/</span>        <span class="cm">one file per route</span>
+    <span class="f">handlers.go</span>    <span class="cm">shared dependencies</span>
+    <span class="f">response.go</span>    <span class="cm">how the app replies</span>
+    <span class="f">home.go</span>        <span class="cm">GET /</span>
+    <span class="f">purge.go</span>       <span class="cm">POST /cache/purge</span>
+    <span class="f">health.go</span>      <span class="cm">GET /healthz</span>
+  <span class="dir">cache/</span>           <span class="cm">cache-aside over Redis</span>
+  <span class="dir">cms/</span>             <span class="cm">the Cockpit API client</span>
+  <span class="dir">views/</span>           <span class="cm">embedded with go:embed</span>
+    <span class="f">render.go</span>      <span class="cm">parsed once at startup</span>
+    <span class="f">layout.html</span>
+    <span class="dir">pages/</span>         <span class="cm">one file per page</span>
+    <span class="dir">components/</span>    <span class="cm">one file per piece</span>
+<span class="dir">cockpit/</span>            <span class="cm">CMS config + addons</span>
+<span class="dir">deploy/</span>             <span class="cm">Dockerfiles</span>
 <span class="f">MEMORY.md</span>          <span class="cm">AI entry point</span>
 <span class="f">ARCHITECTURE.md</span>    <span class="cm">the reference it points at</span></pre>
 
