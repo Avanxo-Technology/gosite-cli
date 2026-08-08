@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: enforce version bump when source files change.
+#
+set -euo pipefail
+
+VERSION_FILE="src/VERSION"
+
+# Get the list of staged files (excluding deleted ones)
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# If nothing staged, skip
+[[ -z "${staged}" ]] && exit 0
+
+# Check if any of the staged files are user-facing source files
+# (not just the version file itself or docs)
+has_source_change=0
+while IFS= read -r f; do
+  case "$f" in
+    src/*)
+      [[ "$f" == "$VERSION_FILE" ]] && continue
+      has_source_change=1
+      break
+      ;;
+    install.sh|docs/*|README.md|MEMORY.md)
+      has_source_change=1
+      break
+      ;;
+  esac
+done <<< "$staged"
+
+if [[ "${has_source_change}" -eq 0 ]]; then
+  exit 0
+fi
+
+# Read the current (staged) version
+staged_version=$(git diff --cached "$VERSION_FILE" 2>/dev/null | grep '^+[0-9]' | sed 's/^+//' || true)
+if [[ -z "$staged_version" ]]; then
+  # VERSION may not be staged — read from working tree or HEAD
+  staged_version=$(head -1 "$VERSION_FILE" 2>/dev/null || true)
+fi
+
+# Read the version from the last commit
+head_version=$(git show HEAD:"$VERSION_FILE" 2>/dev/null || echo "")
+
+if [[ "$staged_version" == "$head_version" ]]; then
+  echo ""
+  echo "  ⚠️  Version not bumped. Source files changed but $VERSION_FILE"
+  echo "     is still $staged_version (same as HEAD)."
+  echo ""
+  echo "     If this is intentional, override with: git commit --no-verify"
+  echo "     Otherwise, bump the version in $VERSION_FILE."
+  echo ""
+  exit 1
+fi
+
+exit 0
