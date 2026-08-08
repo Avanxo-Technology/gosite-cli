@@ -490,6 +490,8 @@ _write_router() {
 package app
 
 import (
+	"net/url"
+
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 )
@@ -505,6 +507,23 @@ func NewRouter(a *App) *echo.Echo {
 	e.Use(middleware.Gzip())
 
 	e.Static("/static", "static")
+
+	// Cockpit uploads: in development they live on the host filesystem; in
+	// production the Echo and CMS containers are separate, so we proxy the
+	// request to Cockpit's own web server.
+	if a.Config.IsDev() || a.Config.CockpitURL == "" {
+		e.Static("/storage/uploads", "cockpit-storage/uploads")
+	} else {
+		target, err := url.Parse(a.Config.CockpitURL)
+		if err != nil {
+			panic("invalid COCKPIT_URL: " + err.Error())
+		}
+		e.Group("/storage/uploads", middleware.ProxyWithConfig(middleware.ProxyConfig{
+			Balancer: middleware.NewRoundRobinBalancer([]*middleware.ProxyTarget{
+				{URL: target},
+			}),
+		}))
+	}
 
 	h := a.Handlers
 
