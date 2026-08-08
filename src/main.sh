@@ -19,7 +19,7 @@ readonly GOSITE_ROOT="$(cd -P "$(dirname "${__source}")" && pwd)"
 export GOSITE_ROOT
 
 # --- metadata ----------------------------------------------------------------
-readonly GOSITE_VERSION="0.2.1"
+readonly GOSITE_VERSION="0.3.0"
 export GOSITE_VERSION
 
 # --- colors (disabled when not a TTY or when NO_COLOR is set) ----------------
