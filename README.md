@@ -1,5 +1,9 @@
 # gosite
 
+> **⚠️ Experimental** — This project is in active development and is not
+> recommended for production use. If you choose to use it in production, you do
+> so at your own risk.
+
 A modular Bash CLI that manages local development environments and produces
 Coolify-ready production files for a high-performance monolith:
 

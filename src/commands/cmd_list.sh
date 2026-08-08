@@ -18,10 +18,6 @@ cmd_list() {
 
   info "Registered projects"
 
-  printf "\n${C_BOLD}%-20s %-7s %-7s %-11s %-11s %-30s %s${C_NC}\n" \
-    "PROJECT" "APP" "CMS" "APP" "CMS" "URLS" "PATH"
-  printf "%s\n" "-------------------------------------------------------------------------------------------"
-
   local found=0 name dir
   while IFS=$'\t' read -r name dir; do
     [[ -n "${name}" ]] || continue
@@ -29,17 +25,21 @@ cmd_list() {
       # Subshell so one project's marker never leaks into the next.
       # shellcheck source=/dev/null
       source "${dir}/${GOSITE_MARKER}"
-      printf "%-20s %-7s %-7s %-11s %-11s %-30s %s\n" \
-        "${GOSITE_PROJECT}" "${GOSITE_APP_PORT}" "${GOSITE_CMS_PORT}" \
-        "$(_status_of "${GOSITE_PROJECT}-app")" "$(_status_of "${GOSITE_PROJECT}-cms")" \
-        "https://${GOSITE_APP_DOMAIN} https://${GOSITE_CMS_DOMAIN}" \
-        "$(_short_path "${dir}")"
+
+      local app_status cms_status
+      app_status="$(_status_short "${GOSITE_PROJECT}-app")"
+      cms_status="$(_status_short "${GOSITE_PROJECT}-cms")"
+
+      printf "\n${C_BOLD}%s${C_NC}  %s %s\n" \
+        "${GOSITE_PROJECT}" "${app_status}" "${cms_status}"
+      printf "  ${C_DIM}Site: https://%s${C_NC}\n" "${GOSITE_APP_DOMAIN}"
+      printf "  ${C_DIM}CMS:  https://%s${C_NC}\n" "${GOSITE_CMS_DOMAIN}"
     )
     found=$(( found + 1 ))
   done < <(registry_entries)
 
   if [[ "${found}" -eq 0 ]]; then
-    printf "${C_DIM}No projects found. Create one with 'gosite create <name>'.${C_NC}\n"
+    printf "\n${C_DIM}No projects found. Create one with 'gosite create <name>'.${C_NC}\n"
     return 0
   fi
 
@@ -62,6 +62,16 @@ _status_of() {
     printf "${C_YELLOW}stopped${C_NC}"
   else
     printf "${C_DIM}-${C_NC}"
+  fi
+}
+
+_status_short() {
+  if container_running "$1"; then
+    printf "${C_GREEN}●${C_NC}"
+  elif container_exists "$1"; then
+    printf "${C_YELLOW}●${C_NC}"
+  else
+    printf "${C_DIM}○${C_NC}"
   fi
 }
 
