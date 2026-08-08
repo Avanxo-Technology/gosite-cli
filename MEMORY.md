@@ -8,6 +8,12 @@
 
 If you skip any of these, the docs, the website, and the installed binary will be out of sync.
 
+## Knowledge Base
+
+Reusable Cockpit CMS knowledge lives in `src/knowledge/`. When you discover a
+non-obvious behaviour or a change that must be re-applied after container rebuilds,
+add a file there so it is available to every project.
+
 ## Scaffold Structure
 
 Go app lives in `cmd/server/` (entry point) + `internal/` (packages). Cockpit addons in `cockpit/addons/`. Dockerfiles in `deploy/`. This is the standard layout for all scaffolded projects.
