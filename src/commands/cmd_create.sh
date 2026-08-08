@@ -121,7 +121,7 @@ cmd_create() {
   _write_env_files     "${PROJECT_DIR}"
   _write_meta_files    "${PROJECT_DIR}"
   _write_ai_docs       "${PROJECT_DIR}"
-  _write_assets_upload_addon "${PROJECT_DIR}"
+  _write_builtin_addons "${PROJECT_DIR}"
 
   local f
   while IFS= read -r f; do render_placeholders "${f}"; done < <(
@@ -218,23 +218,101 @@ _prompt_addons() {
   fi
 }
 
-# Built-in addon that adds a POST /api/assets/upload endpoint to Cockpit,
-# since the stock REST API only exposes GET endpoints for assets.
-_write_assets_upload_addon() {
+# Built-in Cockpit addons that ship with every scaffolded project.
+_write_builtin_addons() {
+
+  # --- AssetsUpload: POST /api/assets/upload -----------------------------------
   mkdir -p "$1/cockpit/addons/AssetsUpload"
   cat > "$1/cockpit/addons/AssetsUpload/bootstrap.php" <<'PHP'
 <?php
-
-// Asset upload endpoint for the REST API.
-// The stock Cockpit REST API only exposes GET endpoints for assets.
-// This addon registers POST /api/assets/upload so files can be uploaded
-// programmatically via curl or the Go CMS client.
 
 $this->on('restApi.config', function($restApi) {
     $restApi->addEndPoint('/assets/upload', [
         'POST' => function($params, $app) {
             $meta = ['folder' => $this->param('folder', '')];
             return $this->module('assets')->upload('files', $meta);
+        }
+    ]);
+});
+PHP
+
+  # --- ModelManager: CRUD for content models -----------------------------------
+  mkdir -p "$1/cockpit/addons/ModelManager"
+  cat > "$1/cockpit/addons/ModelManager/bootstrap.php" <<'PHP'
+<?php
+
+$this->on('restApi.config', function($restApi) {
+
+    // List all content models
+    $restApi->addEndPoint('/models', [
+        'GET' => function($params, $app) {
+            $models = $app->module('content')->models();
+
+            if (!$app->helper('acl')->isSuperAdmin()) {
+                $acl = $app->helper('acl');
+                $models = array_filter($models, function($m) use($acl) {
+                    return $acl->isAllowed("content/{$m['name']}/read");
+                });
+            }
+
+            return array_values($models);
+        }
+    ]);
+
+    // Save (create or update) a content model
+    $restApi->addEndPoint('/models/save', [
+        'POST' => function($params, $app) {
+
+            $model = $app->param('model');
+
+            if (!$model || !isset($model['name'], $model['type']) || !trim($model['name']) || !trim($model['type'])) {
+                $app->response->status = 412;
+                return ['error' => 'Model data is missing or invalid'];
+            }
+
+            if (!in_array($model['type'], ['collection', 'singleton', 'tree'])) {
+                $app->response->status = 412;
+                return ['error' => 'Invalid model type'];
+            }
+
+            if (!$app->helper('acl')->isAllowed("content/:models/manage") && !$app->helper('acl')->isAllowed("content/{$model['name']}/manage")) {
+                $app->response->status = 401;
+                return ['error' => 'Permission denied'];
+            }
+
+            try {
+                $result = $app->module('content')->saveModel($model['name'], $model);
+                return $result;
+            } catch (\Throwable $e) {
+                $app->response->status = 500;
+                return ['error' => $e->getMessage()];
+            }
+        }
+    ]);
+
+    // Remove a content model
+    $restApi->addEndPoint('/models/remove', [
+        'POST' => function($params, $app) {
+
+            $name = $app->param('name');
+
+            if (!$name || !trim($name)) {
+                $app->response->status = 412;
+                return ['error' => 'Model name is missing'];
+            }
+
+            if (!$app->helper('acl')->isAllowed("content/:models/manage")) {
+                $app->response->status = 401;
+                return ['error' => 'Permission denied'];
+            }
+
+            try {
+                $app->module('content')->removeModel($name);
+                return ['success' => true];
+            } catch (\Throwable $e) {
+                $app->response->status = 500;
+                return ['error' => $e->getMessage()];
+            }
         }
     ]);
 });
@@ -392,7 +470,7 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 		Handlers: handlers.New(handlers.Deps{
 			Config:   cfg,
 			Log:      log,
-			Cache:    cache.New(rdb, log),
+			Cache:    cache.New(rdb, log, cfg.IsDev()),
 			CMS:      cms.New(cfg, log),
 			Renderer: renderer,
 			Redis:    rdb,
@@ -722,6 +800,7 @@ const ttl = 10 * time.Minute
 type Cache struct {
 	rdb *redis.Client
 	log *slog.Logger
+	dev bool
 
 	// sf collapses concurrent cold renders of the same key into a single one,
 	// so an expired cache under load never turns into a stampede against the
@@ -729,8 +808,8 @@ type Cache struct {
 	sf singleflight.Group
 }
 
-func New(rdb *redis.Client, log *slog.Logger) *Cache {
-	return &Cache{rdb: rdb, log: log}
+func New(rdb *redis.Client, log *slog.Logger, dev bool) *Cache {
+	return &Cache{rdb: rdb, log: log, dev: dev}
 }
 
 // HTML returns the cached bytes for key, calling render only on a miss:
@@ -741,8 +820,21 @@ func New(rdb *redis.Client, log *slog.Logger) *Cache {
 //
 // A Redis failure is never fatal: render still runs and the request is just
 // slower, which keeps the site up when the cache is down.
+//
+// In development mode (dev=true) the cache is bypassed entirely — every
+// request renders fresh, which makes iteration faster and avoids stale pages.
 func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, error)) ([]byte, bool, error) {
 	start := time.Now()
+
+	// Bypass cache entirely in development — always render fresh.
+	if c.dev {
+		html, err := render()
+		if err != nil {
+			return nil, false, err
+		}
+		c.log.Debug("dev bypass", "key", key, "elapsed", time.Since(start))
+		return html, false, nil
+	}
 
 	cached, err := c.rdb.Get(ctx, key).Bytes()
 	if err == nil {
