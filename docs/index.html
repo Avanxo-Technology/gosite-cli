@@ -411,7 +411,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>gosite start</td><td>Start the Go app under air hot reload plus its Cockpit container.</td></tr>
           <tr><td>gosite restart</td><td>Recreate the containers after an <code>.env</code>, compose or Dockerfile change. <span class="flag">--build</span> rebuilds the image.</td></tr>
           <tr><td>gosite logs</td><td>Follow both containers, or pass <code>app</code> / <code>cms</code>. <span class="flag">-n</span> and <span class="flag">--no-follow</span> supported.</td></tr>
-          <tr><td>gosite list</td><td>Every project with its ports, container status and path.</td></tr>
+          <tr><td>gosite list</td><td>Every project with its URLs, ports, container status and path.</td></tr>
           <tr><td>gosite cd &lt;name&gt;</td><td>Jump into a project directory. <code>gosite path</code> prints it for scripts.</td></tr>
           <tr><td>gosite remove &lt;name&gt;</td><td>Delete containers, volumes, images, certificate and directory. <span class="flag">--keep-source</span> keeps the code.</td></tr>
           <tr><td>gosite infra up</td><td>Shared Traefik and Redis. Also <code>down</code>, <code>restart</code>, <code>status</code>, <code>logs</code>.</td></tr>
@@ -554,7 +554,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v6H4zM4 14h16v6H4z"/><path d="M8 7h.01M8 17h.01"/></svg></div>
         <h3>Shared infrastructure</h3>
-        <p>Redis runs once per machine on <code>gosite-network</code>. Cockpit uses a file-backed database locally, so development needs no database container at all.</p>
+        <p>Redis runs once per machine on <code>gosite-network</code>. MongoDB runs once per machine too — <code>gosite-mongo</code> — so each project shares the same database server, just like production.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 10l7-7 7 7"/></svg></div>
@@ -582,7 +582,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>Source</td><td>Bind-mounted, hot reload</td><td>Baked into the image</td></tr>
           <tr><td>Config</td><td><code>.env</code> file</td><td>Environment set in the Coolify UI</td></tr>
           <tr><td>TLS</td><td>mkcert, trusted locally</td><td>Let's Encrypt via certresolver</td></tr>
-          <tr><td>Datastores</td><td>Shared Redis; file-backed CMS database</td><td>Own MongoDB and Redis in the stack</td></tr>
+          <tr><td>Datastores</td><td>Shared Redis and MongoDB</td><td>Own MongoDB and Redis in the stack</td></tr>
         </tbody>
       </table>
     </div>

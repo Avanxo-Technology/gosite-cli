@@ -30,7 +30,10 @@ render_placeholders() {
     -e "s|__CMS_PORT__|${CMS_PORT}|g" \
     -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
     -e "s|__REDIS_PORT__|6379|g" \
+    -e "s|__MONGO_HOST__|${GOSITE_MONGO_HOST}|g" \
+    -e "s|__MONGO_PORT__|${GOSITE_MONGO_PORT}|g" \
     -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
+    -e "s|__COCKPIT_SEC_KEY__|${COCKPIT_SEC_KEY}|g" \
     -e "s|__TAILWIND__|${TAILWIND}|g" \
     -e "s|__ADDONS__|${ADDONS_ENABLED}|g" \
     "${file}" > "${tmp}"
@@ -71,10 +74,11 @@ cmd_create() {
   [[ -e "${PROJECT_DIR}" ]] && fatal "'${PROJECT_DIR}' already exists."
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
-  local APP_PORT CMS_PORT CMS_TOKEN APP_DOMAIN CMS_DOMAIN
+  local APP_PORT CMS_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
   APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
   CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
   CMS_TOKEN="$(random_secret 24)"
+  COCKPIT_SEC_KEY="$(random_secret 32)"
   APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
   CMS_DOMAIN="$(project_cms_domain "${PROJECT_NAME}")"
 
@@ -1318,9 +1322,8 @@ _write_compose_dev() {
   # attached to the external shared network for Redis.
   cat > "$1/docker-compose.yml" <<'EOF'
 # Local development stack for __PROJECT__.
-# Redis is NOT defined here: it is the shared gosite infrastructure, reachable
-# by container name on the external network. Cockpit keeps its file-backed
-# mongolite database locally; production swaps it for MongoDB.
+# Redis and MongoDB are NOT defined here: they are the shared gosite
+# infrastructure, reachable by container name on the external network.
 # Start them with `gosite infra up`.
 
 services:
@@ -1362,8 +1365,12 @@ services:
     container_name: __PROJECT__-cms
     restart: unless-stopped
     environment:
-      COCKPIT_DATABASE_SERVER: "mongolite://storage/data"
+      # Cockpit reads these through config.php's ${VAR} resolution.
       COCKPIT_SESSION_NAME: "__PROJECT__"
+      COCKPIT_SEC_KEY: "${COCKPIT_SEC_KEY}"
+      MONGO_HOST: "__MONGO_HOST__"
+      MONGO_PORT: "__MONGO_PORT__"
+      MONGO_DB: "__PROJECT__"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -1374,6 +1381,7 @@ services:
       - traefik.http.routers.__PROJECT__-cms.tls=true
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
     volumes:
+      - ./cockpit/config.php:/var/www/html/config/config.php:ro
       - ./cockpit-storage:/var/www/html/storage
       # Cockpit addons (Forms + Replica), fetched at scaffold time.
       - ./cockpit/addons:/var/www/html/addons
@@ -1528,8 +1536,8 @@ EOF
 <?php
 
 // Cockpit configuration, merged over the defaults in bootstrap.php.
-// Baked into the production image by Dockerfile.cms; local development keeps
-// Cockpit's file-backed mongolite database, so it needs no database container.
+// Used in both local development and production: local mounts this into the
+// CMS container; deployment bakes it into the image via Dockerfile.cms.
 //
 // ${VAR} placeholders are resolved from the environment by Cockpit's DotEnv.
 
@@ -1537,6 +1545,8 @@ return [
 
     // MongoDB. The mongodb PHP extension ships with the image, and the
     // mongodb:// scheme is what selects the Mongo driver over mongolite.
+    // Locally this points at the shared gosite-mongo container; in production
+    // each project has its own MongoDB service in the compose stack.
     'database' => [
         'server' => 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}',
         'options' => ['db' => '${MONGO_DB}'],
@@ -1563,6 +1573,7 @@ PORT=8080
 REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=__CMS_TOKEN__
+COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
 EOF
 
   cat > "$1/.env.example" <<'EOF'
@@ -1574,6 +1585,7 @@ PORT=8080
 REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=change-me
+COCKPIT_SEC_KEY=change-me
 EOF
 
   # Marker file consumed by list/start/stop/remove.
@@ -1616,7 +1628,7 @@ There is no JavaScript build step and no SPA.
 | Local URL | https://__DOMAIN__ (also http://localhost:__APP_PORT__) |
 | Cockpit admin | https://__CMS_DOMAIN__ (also http://localhost:__CMS_PORT__) |
 | Redis | shared container `__REDIS_HOST__` on the `__NETWORK__` Docker network |
-| CMS database | mongolite (file-backed) locally, MongoDB in production |
+| CMS database | MongoDB (shared `__MONGO_HOST__` container locally, own MongoDB in production) |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
 | CMS addons | Forms + Replica in `cockpit/addons/`, installed at scaffold time (`--no-addons` skips) |
@@ -1645,6 +1657,10 @@ There is no JavaScript build step and no SPA.
 7. **Templates are embedded** with `go:embed`, so a new file under
    `internal/views/` only ships if it matches the embed patterns in
    `internal/views/render.go`.
+8. **Data model lives in the database.** Content schemas (singletons,
+   collections, fields) are defined in the Cockpit admin UI and stored in
+   MongoDB. No migration files or SQL schemas exist in this repo - add fields
+   in Cockpit, then render them in the template with a fallback.
 
 ## Common tasks
 
@@ -1845,20 +1861,29 @@ this URL so editors do not wait out the TTL.
 
 The admin is at https://__CMS_DOMAIN__.
 
-Locally Cockpit uses its file-backed `mongolite` database, so development needs
-no database container: the data lives in `cockpit-storage/` in this project
-(bind-mounted, so it is yours to back up). In production `cockpit/config.php`
-is mounted and points Cockpit at the MongoDB service in the compose file -
-uploads and cache stay on the volume, the content moves into Mongo. That directory must
-keep its `cache`, `data`, `logs`, `tmp` and `uploads` subdirectories - Cockpit
-fails to boot without them. `gosite start` recreates them if they go missing.
+Locally Cockpit connects to the shared MongoDB container (`__MONGO_HOST__`), the
+same way it connects to the shared Redis - no per-project database container is
+needed. In production `cockpit/config.php` is baked in and points Cockpit at
+the MongoDB service in the compose stack. Uploads and cache stay on the
+`cockpit-storage` volume; content moves into MongoDB.
 
-### Reading content
+### Data model
 
-`internal/cms/cms.go` is the only place that calls Cockpit:
+Content is stored in MongoDB as documents. Singletons and collections are
+defined in the Cockpit admin UI at https://__CMS_DOMAIN__/settings/blueprints.
+`cms/cms.go` fetches them via the REST API:
 
 ```go
 content := h.CMS.Singleton(ctx, "home") // GET /api/content/item/home
+```
+
+When the schema changes (new fields, new collections, new singletons), the
+change happens in the database - no migration file or code change is needed
+unless the template needs to render the new data. Add a fallback in the
+template until the content exists:
+
+```
+{{with .Content.new_field}}{{.}}{{else}}default{{end}}
 ```
 
 | Kind | Endpoint |
@@ -2112,6 +2137,10 @@ why, and the template falls back to the copy written into
 instead of an error page.
 
 Collections live at `/api/content/items/<name>` if you need a list later.
+
+When the data model changes (new fields, new collections) the change goes into
+MongoDB through the Cockpit admin UI. No migration files or code changes are
+needed unless the template needs to render the new data.
 
 ## Addons
 

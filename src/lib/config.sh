@@ -19,10 +19,13 @@
 # Image versions for the shared infrastructure. Pinned and overridable.
 : "${GOSITE_TRAEFIK_VERSION:=v3.7}"
 : "${GOSITE_REDIS_VERSION:=8}"
+: "${GOSITE_MONGO_VERSION:=8.0}"
 
 # Shared service container names, referenced by every project as DNS hostnames.
 : "${GOSITE_REDIS_HOST:=gosite-redis}"
 : "${GOSITE_REDIS_PORT:=6379}"
+: "${GOSITE_MONGO_HOST:=gosite-mongo}"
+: "${GOSITE_MONGO_PORT:=27017}"
 
 # Local domains. Projects are served at <name>.<TLD> and cms.<name>.<TLD>
 # through the shared Traefik proxy, over HTTPS with mkcert certificates.
@@ -46,6 +49,7 @@
 
 export GOSITE_NETWORK GOSITE_WORKSPACE GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
+       GOSITE_MONGO_HOST GOSITE_MONGO_PORT GOSITE_MONGO_VERSION \
        GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY \
        GOSITE_TLD GOSITE_PROXY_HOST GOSITE_PROXY_HTTP_PORT GOSITE_PROXY_HTTPS_PORT \
        GOSITE_CERTS_DIR GOSITE_DYNAMIC_DIR \

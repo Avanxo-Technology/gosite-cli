@@ -92,8 +92,25 @@ services:
       retries: 5
     networks: [gosite]
 
+  mongo:
+    image: mongo:${GOSITE_MONGO_VERSION}
+    container_name: ${GOSITE_MONGO_HOST}
+    restart: unless-stopped
+    ports:
+      - "${GOSITE_MONGO_PORT}:27017"
+    volumes:
+      - gosite-mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [gosite]
+
 volumes:
   gosite-redisdata:
+  gosite-mongodata:
 
 networks:
   gosite:
@@ -120,12 +137,13 @@ cmd_infra() {
       # The dashboard is served over HTTPS like everything else.
       ensure_project_cert "proxy" >/dev/null 2>&1 || true
 
-      info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST})"
+      info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST}, ${GOSITE_MONGO_HOST})"
       _infra_compose up -d
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
       ok "Redis     -> localhost:${GOSITE_REDIS_PORT}"
-      printf "${C_DIM}From a project container reach it by the hostname '%s'.${C_NC}\n" \
-        "${GOSITE_REDIS_HOST}"
+      ok "MongoDB   -> localhost:${GOSITE_MONGO_PORT}"
+      printf "${C_DIM}From a project container reach them by the hostnames '%s' and '%s'.${C_NC}\n" \
+        "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}"
 
       dns_resolves || {
         warn "*.${GOSITE_TLD} does not resolve to 127.0.0.1, so local domains will not work."
@@ -166,7 +184,7 @@ cmd_infra() {
       fi
 
       local svc
-      for svc in "${GOSITE_PROXY_HOST}" "${GOSITE_REDIS_HOST}"; do
+      for svc in "${GOSITE_PROXY_HOST}" "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}"; do
         if container_running "${svc}"; then
           ok "${svc}: running"
         elif container_exists "${svc}"; then
