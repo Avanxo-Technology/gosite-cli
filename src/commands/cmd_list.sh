@@ -18,9 +18,9 @@ cmd_list() {
 
   info "Registered projects"
 
-  printf "\n${C_BOLD}%-20s %-7s %-7s %-11s %-11s %s${C_NC}\n" \
-    "PROJECT" "APP" "CMS" "APP" "CMS" "PATH"
-  printf "%s\n" "---------------------------------------------------------------------------"
+  printf "\n${C_BOLD}%-20s %-7s %-7s %-11s %-11s %-30s %s${C_NC}\n" \
+    "PROJECT" "APP" "CMS" "APP" "CMS" "URLS" "PATH"
+  printf "%s\n" "-------------------------------------------------------------------------------------------"
 
   local found=0 name dir
   while IFS=$'\t' read -r name dir; do
@@ -29,9 +29,10 @@ cmd_list() {
       # Subshell so one project's marker never leaks into the next.
       # shellcheck source=/dev/null
       source "${dir}/${GOSITE_MARKER}"
-      printf "%-20s %-7s %-7s %-11s %-11s %s\n" \
+      printf "%-20s %-7s %-7s %-11s %-11s %-30s %s\n" \
         "${GOSITE_PROJECT}" "${GOSITE_APP_PORT}" "${GOSITE_CMS_PORT}" \
         "$(_status_of "${GOSITE_PROJECT}-app")" "$(_status_of "${GOSITE_PROJECT}-cms")" \
+        "https://${GOSITE_APP_DOMAIN} https://${GOSITE_CMS_DOMAIN}" \
         "$(_short_path "${dir}")"
     )
     found=$(( found + 1 ))
