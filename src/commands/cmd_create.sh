@@ -86,7 +86,7 @@ cmd_create() {
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
 
-  mkdir -p "${PROJECT_DIR}"/{config,handlers,cache,cms,views/pages,views/components,static}
+  mkdir -p "${PROJECT_DIR}"/{cmd/server,internal/{app,config,cache,cms,handlers,views/{pages,components}},cockpit/addons,static,deploy}
   # Keep static/ in Git so the production COPY stage always finds it.
   touch "${PROJECT_DIR}/static/.gitkeep"
 
@@ -218,7 +218,7 @@ _prompt_addons() {
 #   curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
 #     | sh -s -- Forms Replica --dir addons
 _install_addons() {
-  local dir="$1" names="$2" addons_dir="${1}/addons"
+  local dir="$1" names="$2" addons_dir="${1}/cockpit/addons"
   info "Installing Cockpit addons: ${names}"
   mkdir -p "${addons_dir}"
 
@@ -256,12 +256,12 @@ EOF
 # Entry point: read configuration, build the app, start the server. Nothing
 # else lives here, so there is exactly one place to look for startup order.
 _write_main_go() {
-  cat > "$1/main.go" <<'EOF'
+  cat > "$1/cmd/server/main.go" <<'EOF'
 // Command __PROJECT__ is a Go + Cockpit CMS site: server-rendered HTML with
 // htmx and Alpine.js, and a Redis cache in front of the CMS.
 //
-// Reading order: main.go (startup) -> app.go (dependencies) -> router.go
-// (every route) -> handlers/ (one file per handler).
+// Reading order: cmd/server/main.go (startup) -> internal/app/ (dependencies)
+// -> internal/app/router.go (every route) -> internal/handlers/ (one file per handler).
 package main
 
 import (
@@ -274,18 +274,19 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"__MODULE__/config"
+	"__MODULE__/internal/app"
+	"__MODULE__/internal/config"
 )
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	app, err := NewApp(config.Load(), log)
+	a, err := app.NewApp(config.Load(), log)
 	if err != nil {
 		log.Error("startup failed", "err", err)
 		os.Exit(1)
 	}
-	defer app.Close()
+	defer a.Close()
 
 	// Echo v5 handles graceful shutdown itself: Start stops accepting
 	// connections when the context is cancelled, then waits up to
@@ -294,11 +295,11 @@ func main() {
 	defer stop()
 
 	start := echo.StartConfig{
-		Address:         ":" + app.Config.Port,
+		Address:         ":" + a.Config.Port,
 		HideBanner:      true,
 		GracefulTimeout: 10 * time.Second,
 	}
-	if err := start.Start(ctx, NewRouter(app)); err != nil {
+	if err := start.Start(ctx, app.NewRouter(a)); err != nil {
 		log.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
@@ -310,8 +311,8 @@ EOF
 # The composition root: build every dependency once and hand them to the
 # handlers. Nothing here knows about HTTP.
 _write_app() {
-  cat > "$1/app.go" <<'EOF'
-package main
+  cat > "$1/internal/app/app.go" <<'EOF'
+package app
 
 import (
 	"context"
@@ -320,11 +321,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"__MODULE__/cache"
-	"__MODULE__/cms"
-	"__MODULE__/config"
-	"__MODULE__/handlers"
-	"__MODULE__/views"
+	"__MODULE__/internal/cache"
+	"__MODULE__/internal/cms"
+	"__MODULE__/internal/config"
+	"__MODULE__/internal/handlers"
+	"__MODULE__/internal/views"
 )
 
 // App holds what main needs to keep alive; the handlers get their own
@@ -379,8 +380,8 @@ EOF
 # Every route in one table. Adding an endpoint means one line here plus one
 # file in handlers/, and the whole surface of the app stays readable.
 _write_router() {
-  cat > "$1/router.go" <<'EOF'
-package main
+  cat > "$1/internal/app/router.go" <<'EOF'
+package app
 
 import (
 	"github.com/labstack/echo/v5"
@@ -389,9 +390,9 @@ import (
 
 // NewRouter wires middleware and routes. This is the single source of truth
 // for the app's HTTP surface - nothing registers routes anywhere else.
-func NewRouter(app *App) *echo.Echo {
+func NewRouter(a *App) *echo.Echo {
 	e := echo.New()
-	e.Renderer = app.Renderer
+	e.Renderer = a.Renderer
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLogger())
@@ -399,7 +400,7 @@ func NewRouter(app *App) *echo.Echo {
 
 	e.Static("/static", "static")
 
-	h := app.Handlers
+	h := a.Handlers
 
 	// --- routes --------------------------------------------------------------
 	e.GET("/", h.Home)                   // the page, served from cache
@@ -415,7 +416,7 @@ EOF
 # Environment settings in one place, so no os.Getenv call is ever buried in a
 # handler. Its own package because handlers, cms and main all read it.
 _write_config() {
-  cat > "$1/config/config.go" <<'EOF'
+  cat > "$1/internal/config/config.go" <<'EOF'
 // Package config reads every environment-provided setting exactly once.
 package config
 
@@ -464,7 +465,7 @@ EOF
 # HANDLERS. One file per route, plus the shared pieces: the dependency struct
 # and the Response helper every handler replies through.
 _write_handlers() {
-  cat > "$1/handlers/handlers.go" <<'EOF'
+  cat > "$1/internal/handlers/handlers.go" <<'EOF'
 // Package handlers holds one file per route. Everything shared between them
 // lives here (dependencies) and in response.go (how they reply), so a new
 // endpoint is a new file and a line in router.go - nothing else changes.
@@ -475,10 +476,10 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"__MODULE__/cache"
-	"__MODULE__/cms"
-	"__MODULE__/config"
-	"__MODULE__/views"
+	"__MODULE__/internal/cache"
+	"__MODULE__/internal/cms"
+	"__MODULE__/internal/config"
+	"__MODULE__/internal/views"
 )
 
 // Deps is what the handlers need. Passing a struct rather than six positional
@@ -501,7 +502,7 @@ type Handlers struct {
 func New(d Deps) *Handlers { return &Handlers{Deps: d} }
 EOF
 
-  cat > "$1/handlers/response.go" <<'EOF'
+  cat > "$1/internal/handlers/response.go" <<'EOF'
 package handlers
 
 import (
@@ -562,7 +563,7 @@ func (r Response) Fail(status int, message string, err error) error {
 }
 EOF
 
-  cat > "$1/handlers/home.go" <<'EOF'
+  cat > "$1/internal/handlers/home.go" <<'EOF'
 package handlers
 
 import (
@@ -608,7 +609,7 @@ func (h *Handlers) renderHome() ([]byte, error) {
 }
 EOF
 
-  cat > "$1/handlers/purge.go" <<'EOF'
+  cat > "$1/internal/handlers/purge.go" <<'EOF'
 package handlers
 
 import (
@@ -648,7 +649,7 @@ func (h *Handlers) warmHome() {
 }
 EOF
 
-  cat > "$1/handlers/health.go" <<'EOF'
+  cat > "$1/internal/handlers/health.go" <<'EOF'
 package handlers
 
 import (
@@ -672,7 +673,7 @@ EOF
 # The cache-aside pattern, written once. Every cached endpoint calls HTML and
 # passes a render function, so no handler repeats Get/Set/error handling.
 _write_cache() {
-  cat > "$1/cache/cache.go" <<'EOF'
+  cat > "$1/internal/cache/cache.go" <<'EOF'
 // Package cache is a small cache-aside helper over Redis.
 package cache
 
@@ -758,7 +759,7 @@ EOF
 # -----------------------------------------------------------------------------
 # The only package that knows how to talk to Cockpit.
 _write_cms() {
-  cat > "$1/cms/cms.go" <<'EOF'
+  cat > "$1/internal/cms/cms.go" <<'EOF'
 // Package cms is the Cockpit CMS client. Everything the app knows about the
 // CMS lives here, so the rest of the code never sees an HTTP call.
 package cms
@@ -771,7 +772,7 @@ import (
 	"net/http"
 	"time"
 
-	"__MODULE__/config"
+	"__MODULE__/internal/config"
 )
 
 type Client struct {
@@ -850,7 +851,7 @@ EOF
 # the components carry utility classes, without it they carry semantic class
 # names styled by static/app.css. Neither mode leaves classes that do nothing.
 _write_views() {
-  cat > "$1/views/render.go" <<'EOF'
+  cat > "$1/internal/views/render.go" <<'EOF'
 // Package views owns every piece of markup and the renderer that turns it into
 // HTML. It never touches Redis, the CMS or the request: it is handed
 // already-resolved data and decides only how that data looks.
@@ -922,7 +923,7 @@ EOF
 
 # --- Tailwind flavour ---------------------------------------------------------
 _write_views_tailwind() {
-  cat > "$1/views/layout.html" <<'EOF'
+  cat > "$1/internal/views/layout.html" <<'EOF'
 {{/*
   Base HTML document: Tailwind CSS, htmx and Alpine.js, and nothing else.
   Every page fills in the "content" block.
@@ -950,7 +951,7 @@ _write_views_tailwind() {
 </html>{{end}}
 EOF
 
-  cat > "$1/views/pages/home.html" <<'EOF'
+  cat > "$1/internal/views/pages/home.html" <<'EOF'
 {{/*
   The home page. .Content is whatever the Cockpit "home" singleton returns, so
   a field an editor has not filled in yet falls back to the text here.
@@ -976,7 +977,7 @@ EOF
 {{end}}
 EOF
 
-  cat > "$1/views/components/button.html" <<'EOF'
+  cat > "$1/internal/views/components/button.html" <<'EOF'
 {{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
    production, and it carries its own <style> block so it can be copied into any
    project without touching the shared stylesheet. */}}
@@ -1023,7 +1024,7 @@ EOF
 
 # --- plain CSS flavour --------------------------------------------------------
 _write_views_plain() {
-  cat > "$1/views/layout.html" <<'EOF'
+  cat > "$1/internal/views/layout.html" <<'EOF'
 {{/*
   Base HTML document: one stylesheet, htmx and Alpine.js. Every page fills in
   the "content" block.
@@ -1050,7 +1051,7 @@ _write_views_plain() {
 </html>{{end}}
 EOF
 
-  cat > "$1/views/pages/home.html" <<'EOF'
+  cat > "$1/internal/views/pages/home.html" <<'EOF'
 {{/*
   The home page. .Content is whatever the Cockpit "home" singleton returns, so
   a field an editor has not filled in yet falls back to the text here.
@@ -1074,7 +1075,7 @@ EOF
 {{end}}
 EOF
 
-  cat > "$1/views/components/button.html" <<'EOF'
+  cat > "$1/internal/views/components/button.html" <<'EOF'
 {{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
    production, and it carries its own <style> block so it can be copied into any
    project without touching the shared stylesheet. */}}
@@ -1196,7 +1197,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd        = "go build -o ./tmp/main ."
+  cmd        = "go build -o ./tmp/main ./cmd/server"
   entrypoint = "./tmp/main"
   delay    = 300
   include_ext  = ["go", "html", "css", "js"]
@@ -1217,7 +1218,7 @@ EOF
 # -----------------------------------------------------------------------------
 _write_dockerfiles() {
   # Production image: compile Templ + a static binary, ship it on alpine.
-  cat > "$1/Dockerfile" <<'EOF'
+  cat > "$1/deploy/Dockerfile" <<'EOF'
 # syntax=docker/dockerfile:1
 
 # --- stage 1: build ----------------------------------------------------------
@@ -1235,7 +1236,7 @@ COPY . .
 # CGO_ENABLED=0 produces a fully static binary that runs on a bare alpine.
 RUN CGO_ENABLED=0 GOOS=linux go build \
       -trimpath -ldflags="-s -w" \
-      -o /out/app .
+      -o /out/app ./cmd/server
 
 # --- stage 2: runtime --------------------------------------------------------
 FROM alpine:latest
@@ -1258,7 +1259,7 @@ ENTRYPOINT ["/app/app"]
 EOF
 
   # Development image: toolchain + air, source is bind-mounted at runtime.
-  cat > "$1/Dockerfile.dev" <<'EOF'
+  cat > "$1/deploy/Dockerfile.dev" <<'EOF'
 # syntax=docker/dockerfile:1
 # Local development only. The source tree is bind-mounted, so this image just
 # carries the toolchain and runs air for hot reload.
@@ -1283,17 +1284,17 @@ EOF
   # the pasted compose file, not the repo checkout, silently mounting empty
   # directories. cockpit/config.php reads values through Cockpit's ${VAR}
   # resolution, so the environment variables in the compose file still win.
-  cat > "$1/Dockerfile.cms" <<'EOF'
+  cat > "$1/deploy/Dockerfile.cms" <<'EOF'
 FROM cockpithq/cockpit:core-2.14.0
 
 COPY cockpit/config.php /var/www/html/config/config.php
 EOF
 
-  # Addons are optional (--no-addons scaffolds without addons/), so the COPY
+  # Addons are optional (--no-addons scaffolds without cockpit/addons/), so the COPY
   # only makes it into the image when they exist.
   if [[ "${ADDONS_ENABLED}" -eq 1 ]]; then
-    cat >> "$1/Dockerfile.cms" <<'EOF'
-COPY addons/ /var/www/html/addons/
+    cat >> "$1/deploy/Dockerfile.cms" <<'EOF'
+COPY cockpit/addons/ /var/www/html/addons/
 EOF
   fi
 
@@ -1306,8 +1307,7 @@ cockpit-storage/
 .env.*
 !.env.example
 docker-compose*.yml
-Dockerfile.dev
-Dockerfile.cms
+deploy/
 README.md
 EOF
 }
@@ -1327,7 +1327,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: deploy/Dockerfile.dev
     container_name: __PROJECT__-app
     restart: unless-stopped
     env_file: .env
@@ -1375,8 +1375,8 @@ services:
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
     volumes:
       - ./cockpit-storage:/var/www/html/storage
-      # Optional Cockpit addons (Forms + Replica), fetched at scaffold time.
-      - ./addons:/var/www/html/addons
+      # Cockpit addons (Forms + Replica), fetched at scaffold time.
+      - ./cockpit/addons:/var/www/html/addons
     networks:
       - gosite
 
@@ -1418,7 +1418,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: deploy/Dockerfile
     restart: unless-stopped
     environment:
       - APP_ENV=production
@@ -1451,7 +1451,7 @@ services:
   cms:
     build:
       context: .
-      dockerfile: Dockerfile.cms
+      dockerfile: deploy/Dockerfile.cms
     restart: unless-stopped
     environment:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
@@ -1619,39 +1619,40 @@ There is no JavaScript build step and no SPA.
 | CMS database | mongolite (file-backed) locally, MongoDB in production |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
-| CMS addons | Forms + Replica in `addons/`, installed at scaffold time (`--no-addons` skips) |
+| CMS addons | Forms + Replica in `cockpit/addons/`, installed at scaffold time (`--no-addons` skips) |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
 
-`main.go` -> `app.go` -> `router.go` -> `handlers/`
+`cmd/server/main.go` -> `internal/app/` -> `internal/handlers/`
 
 ## Rules that are easy to get wrong
 
 1. **Echo v5, not v4.** Handlers take `*echo.Context`, `c.Response()` returns
    `http.ResponseWriter`, `echo.NewHTTPError(code, string)` takes a string, and
    there is no `e.Shutdown`. Do not copy v4 snippets from the web.
-2. **Every route is registered in `router.go`.** Nothing registers routes
-   anywhere else.
-3. **Handlers reply through `h.reply(c)`** (`handlers/response.go`), never by
-   writing headers by hand.
+2. **Every route is registered in `internal/app/router.go`.** Nothing registers
+   routes anywhere else.
+3. **Handlers reply through `h.reply(c)`** (`internal/handlers/response.go`),
+   never by writing headers by hand.
 4. **Views get finished data.** No Redis, no HTTP and no CMS calls inside
-   `views/`.
+   `internal/views/`.
 5. **The page is cached.** After changing anything that affects the rendered
    HTML, purge: `curl -X POST -H "X-Api-Key: $COCKPIT_API_TOKEN" https://__DOMAIN__/cache/purge`
    Otherwise you will be looking at a stale page for up to 10 minutes.
 6. **No build step.** Do not add npm, a bundler or a framework. htmx and
-   Alpine are loaded from a CDN in `views/layout.html`.
-7. **Templates are embedded** with `go:embed`, so a new file under `views/`
-   only ships if it matches the embed patterns in `views/render.go`.
+   Alpine are loaded from a CDN in `internal/views/layout.html`.
+7. **Templates are embedded** with `go:embed`, so a new file under
+   `internal/views/` only ships if it matches the embed patterns in
+   `internal/views/render.go`.
 
 ## Common tasks
 
 | Task | Do this |
 | --- | --- |
-| Add a route | one file in `handlers/`, one line in `router.go` |
-| Add a page | template in `views/pages/`, register it in `views/render.go` |
-| Add a component | file in `views/components/`, call `{{template "name" .}}` |
+| Add a route | one file in `internal/handlers/`, one line in `internal/app/router.go` |
+| Add a page | template in `internal/views/pages/`, register it in `internal/views/render.go` |
+| Add a component | file in `internal/views/components/`, call `{{template "name" .}}` |
 | Change content | edit it in Cockpit, then purge the cache |
 | Read the logs | `gosite logs __PROJECT__` |
 | Restart | `gosite restart __PROJECT__` (air already reloads code) |
@@ -1659,10 +1660,10 @@ There is no JavaScript build step and no SPA.
 ## Cockpit addons
 
 The CMS carries two optional addons installed at scaffold time from
-Avanxo-Technology/cockpit-addons. Locally the container mounts `addons/`;
-in production `Dockerfile.cms` bakes them (plus `cockpit/config.php`) into the
-image, because relative bind mounts do not resolve to the repo checkout in
-Coolify:
+Avanxo-Technology/cockpit-addons. Locally the container mounts
+`cockpit/addons/`; in production `deploy/Dockerfile.cms` bakes them (plus
+`cockpit/config.php`) into the image, because relative bind mounts do not
+resolve to the repo checkout in Coolify:
 
 - **Forms** - inbox-style manager for website form submissions, with anti-spam,
   CSV export and notifications.
@@ -1675,7 +1676,7 @@ add addons later with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
-  | sh -s -- all --dir addons --force
+  | sh -s -- all --dir cockpit/addons --force
 gosite restart __PROJECT__
 ```
 
@@ -1693,9 +1694,9 @@ EOF
 
 ## Styling
 
-Tailwind CSS, loaded from a CDN in `views/layout.html`. Components carry
-utility classes. There is no Tailwind build or config file; before production,
-vendor the CDN script into `/static`.
+Tailwind CSS, loaded from a CDN in `internal/views/layout.html`. Components
+carry utility classes. There is no Tailwind build or config file; before
+production, vendor the CDN script into `/static`.
 EOF
   else
     cat >> "$1/MEMORY.md" <<'EOF'
@@ -1728,29 +1729,37 @@ the short version; this file is the detail behind it.
 ## Layout
 
 ```
-main.go            Startup: read config, build the app, start the server.
-app.go             Composition root: build every dependency once.
-router.go          Every route and middleware. The whole HTTP surface.
-config/            Environment settings, read exactly once.
-handlers/          One file per route.
-  handlers.go      Deps + the receiver the handlers hang off.
-  response.go      How this app replies.
-  home.go          GET /
-  purge.go         POST /cache/purge
-  health.go        GET /healthz
-cache/             Cache-aside over Redis, written once.
-cms/               The Cockpit API client. The only package that calls the CMS.
-views/             Markup, embedded with go:embed.
-  render.go        Parses every template at startup.
-  layout.html      Base document.
-  pages/           One file per page.
-  components/      Reusable pieces, one per file.
-static/            Assets served at /static.
+cmd/server/          Entry point (package main).
+  main.go            Startup: read config, build the app, start the server.
+  app.go             Composition root: build every dependency once.
+  router.go          Every route and middleware. The whole HTTP surface.
+internal/            Application packages (not importable by external code).
+  config/            Environment settings, read exactly once.
+  handlers/          One file per route.
+    handlers.go      Deps + the receiver the handlers hang off.
+    response.go      How this app replies.
+    home.go          GET /
+    purge.go         POST /cache/purge
+    health.go        GET /healthz
+  cache/             Cache-aside over Redis, written once.
+  cms/               The Cockpit API client. The only package that calls the CMS.
+  views/             Markup, embedded with go:embed.
+    render.go        Parses every template at startup.
+    layout.html      Base document.
+    pages/           One file per page.
+    components/      Reusable pieces, one per file.
+  app/               App struct, NewApp, NewRouter (wiring).
+cockpit/             Cockpit CMS configuration.
+  config.php         Production config (baked into Dockerfile.cms).
+  addons/            Cockpit addons (Forms, Replica).
+deploy/              Dockerfiles for production, dev, and CMS images.
+static/              Assets served at /static.
 ```
 
-Dependency direction is one way: `config` <- `cache`/`cms` <- `handlers` <-
-`main`. Views import nothing from the app. Keep it that way: it is what stops
-markup changes from breaking the cache and vice versa.
+Dependency direction is one way: `internal/config` <- `internal/cache`/
+`internal/cms` <- `internal/handlers` <- `internal/app` <- `cmd/server/main`.
+Views import nothing from the app. Keep it that way: it is what stops markup
+changes from breaking the cache and vice versa.
 
 ## Echo v5
 
@@ -1773,7 +1782,7 @@ Response helpers: https://echo.labstack.com/guide/response/
 
 ## Responses
 
-Handlers reply through the helper in `handlers/response.go`:
+Handlers reply through the helper in `internal/handlers/response.go`:
 
 ```go
 return h.reply(c).Page(html, cached)                      // HTML + X-Cache header
@@ -1792,7 +1801,7 @@ Echo's own helpers - they still do the writing.
 TTL. The cached value is the **fully rendered page**, so a hit skips the CMS
 call and the template execution entirely.
 
-The mechanics live in `cache/cache.go` as one helper:
+The mechanics live in `internal/cache/cache.go` as one helper:
 
 ```go
 html, cached, err := h.Cache.HTML(ctx, key, func() ([]byte, error) {
@@ -1846,7 +1855,7 @@ fails to boot without them. `gosite start` recreates them if they go missing.
 
 ### Reading content
 
-`cms/cms.go` is the only place that calls Cockpit:
+`internal/cms/cms.go` is the only place that calls Cockpit:
 
 ```go
 content := h.CMS.Singleton(ctx, "home") // GET /api/content/item/home
@@ -1879,9 +1888,10 @@ To add a field: add it in Cockpit, then read it in the template with a fallback
 
 ### Addons
 
-The CMS container mounts `addons/` into `/var/www/html/addons`, which Cockpit
-core loads as first-class modules (bootstrap.php includes it in `modulesPaths`).
-`gosite create` installs two by default from Avanxo-Technology/cockpit-addons:
+The CMS container mounts `cockpit/addons/` into `/var/www/html/addons`, which
+Cockpit core loads as first-class modules (bootstrap.php includes it in
+`modulesPaths`). `gosite create` installs two by default from
+Avanxo-Technology/cockpit-addons:
 
 - **Forms** - public `POST /forms/api/submit` receiver (anti-spam honeypot +
   rate limit), per-form admin screen, CSV export, mail/webhook notifications.
@@ -1891,7 +1901,8 @@ core loads as first-class modules (bootstrap.php includes it in `modulesPaths`).
 Grant `forms/manage` and `replica/manage` in Settings > Roles after first login.
 
 Addons are plain directories, so an addon is added by dropping its folder into
-`addons/` (or re-running the repo installer) and recreating the CMS container.
+`cockpit/addons/` (or re-running the repo installer) and recreating the CMS
+container.
 In non-debug mode Cockpit caches the module list in
 `storage/cache/modules.cache.php`; the installer clears it, and the container
 must restart because opcache holds the compiled bootstrap.
@@ -1902,7 +1913,7 @@ must restart because opcache holds the compiled bootstrap.
   A handler answers with an HTML **fragment**, not JSON.
 - **Alpine** handles local UI state only: `x-data`, `x-show`, `x-text`,
   `@click`. Use `x-cloak` on anything that would flash before Alpine loads.
-- Both are CDN `<script>` tags in `views/layout.html`. Vendor them into
+- Both are CDN `<script>` tags in `internal/views/layout.html`. Vendor them into
   `/static` before production so the site does not depend on a third party and
   a CSP can be tightened.
 
@@ -1911,15 +1922,15 @@ Alpine only for state that never needs to touch the server.
 
 ## Templates
 
-`views/render.go` parses each page as `layout.html` + `pages/<name>.html` +
-`components/*.html` at startup, and panics on a malformed template - so a
+`internal/views/render.go` parses each page as `layout.html` + `pages/<name>.html`
++ `components/*.html` at startup, and panics on a malformed template - so a
 broken template fails the deploy, not the first request.
 
 Adding a page:
 
-1. `views/pages/about.html` defining `{{define "content"}}`.
+1. `internal/views/pages/about.html` defining `{{define "content"}}`.
 2. Register it in `NewRenderer`: `"about": page("about")`.
-3. A handler that renders `"about"`, and a line in `router.go`.
+3. A handler that renders `"about"`, and a line in `internal/app/router.go`.
 
 Templates are embedded, so only files matching the `go:embed` patterns in
 `render.go` ship in the binary.
@@ -1953,7 +1964,7 @@ check: Traefik does not route to a container until it is healthy.
 
 ## Environment
 
-Read once in `config/config.go`; never call `os.Getenv` in a handler.
+Read once in `internal/config/config.go`; never call `os.Getenv` in a handler.
 
 | Variable | Local default | Production |
 | --- | --- | --- |
@@ -1969,8 +1980,8 @@ UI.
 
 `docker-compose.yml` is local only: mapped ports, source bind-mounted, air.
 `docker-compose.prod.yml` is what Coolify uses: no host ports, Traefik labels,
-every value from the environment, and the multi-stage `Dockerfile` producing a
-static binary on Alpine.
+every value from the environment, and the multi-stage `deploy/Dockerfile`
+producing a static binary on Alpine.
 
 The production stack is self-contained: it brings its own MongoDB and Redis, so
 Coolify only supplies domains and secrets.
@@ -2004,7 +2015,7 @@ dev:   ## Hot reload on the host (containers: use `gosite start`)
 	air -c .air.toml
 
 build: ## Static production binary (templates are embedded)
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ./tmp/app .
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o ./tmp/app ./cmd/server
 
 tidy:
 	go mod tidy
@@ -2022,37 +2033,46 @@ One file per responsibility. Handlers live in their own package, one file per
 route, so the file never becomes a dumping ground as the app grows:
 
 ```
-main.go            Startup: read config, build the app, start the server.
-app.go             Composition root: build every dependency once.
-router.go          Every route and middleware. The whole HTTP surface.
-config/            Environment settings, read exactly once.
-handlers/          One file per route.
-  handlers.go      Deps + the receiver they hang off.
-  response.go      How this app replies (see below).
-  home.go          GET /
-  purge.go         POST /cache/purge
-  health.go        GET /healthz
-cache/             Cache-aside over Redis, written once.
-cms/               The Cockpit API client. The only package that calls the CMS.
-views/             Markup, embedded with go:embed.
-  render.go        Parses every template at startup.
-  layout.html      Base document (styles, htmx, Alpine).
-  pages/           One file per page.
-  components/      Reusable pieces, one per file.
-static/            Assets served at /static.
+cmd/server/          Entry point (package main).
+  main.go            Startup: read config, build the app, start the server.
+  app.go             Composition root: build every dependency once.
+  router.go          Every route and middleware. The whole HTTP surface.
+internal/            Application packages (not importable by external code).
+  config/            Environment settings, read exactly once.
+  handlers/          One file per route.
+    handlers.go      Deps + the receiver they hang off.
+    response.go      How this app replies (see below).
+    home.go          GET /
+    purge.go         POST /cache/purge
+    health.go        GET /healthz
+  cache/             Cache-aside over Redis, written once.
+  cms/               The Cockpit API client. The only package that calls the CMS.
+  views/             Markup, embedded with go:embed.
+    render.go        Parses every template at startup.
+    layout.html      Base document (styles, htmx, Alpine).
+    pages/           One file per page.
+    components/      Reusable pieces, one per file.
+  app/               App struct, NewApp, NewRouter (wiring).
+cockpit/             Cockpit CMS configuration.
+  config.php         Production config (baked into Dockerfile.cms).
+  addons/            Cockpit addons (Forms, Replica).
+deploy/              Dockerfiles for production, dev, and CMS images.
+static/              Assets served at /static.
 ```
 
-Reading order: `main.go` -> `app.go` -> `router.go` -> `handlers/`.
+Reading order: `cmd/server/main.go` -> `internal/app/` -> `internal/handlers/`.
 
-Adding an endpoint is one file in `handlers/` and one line in `router.go`.
-Adding a page is one template in `views/pages/`. Nothing else changes.
+Adding an endpoint is one file in `internal/handlers/` and one line in
+`internal/app/router.go`. Adding a page is one template in
+`internal/views/pages/`. Nothing else changes.
 
-Data flows one way: `cms` fetches from Cockpit, a handler passes that to
-`views`, and the rendered HTML goes into `cache`.
+Data flows one way: `internal/cms` fetches from Cockpit, a handler passes that
+to `internal/views`, and the rendered HTML goes into `internal/cache`.
 
-The example is deliberately one page with no data model. Add a struct in `cms`
-once the shape of your content settles; until then `cms.Content` is a map, so a
-template can read `{{.Content.headline}}` without anything to define first.
+The example is deliberately one page with no data model. Add a struct in
+`internal/cms` once the shape of your content settles; until then
+`cms.Content` is a map, so a template can read `{{.Content.headline}}` without
+anything to define first.
 
 ## Responses
 
@@ -2082,22 +2102,22 @@ returning only a message that is safe to show a client.
 
 ## Cockpit
 
-`cms/cms.go` calls `GET $COCKPIT_URL/api/content/item/home` with an `api-key`
-header. Create a `home` singleton in the Cockpit admin with `headline` and
-`intro` fields and the page renders them.
+`internal/cms/cms.go` calls `GET $COCKPIT_URL/api/content/item/home` with an
+`api-key` header. Create a `home` singleton in the Cockpit admin with
+`headline` and `intro` fields and the page renders them.
 
 Until it exists the request fails, the client returns empty content and logs
 why, and the template falls back to the copy written into
-`views/pages/home.html` - so a fresh project renders on the first run instead
-of an error page.
+`internal/views/pages/home.html` - so a fresh project renders on the first run
+instead of an error page.
 
 Collections live at `/api/content/items/<name>` if you need a list later.
 
 ## Addons
 
-Locally the CMS container mounts `addons/`; in production `Dockerfile.cms`
-bakes `cockpit/config.php` and `addons/` into the image. Scaffolding installs
-two optional addons by default:
+Locally the CMS container mounts `cockpit/addons/`; in production
+`deploy/Dockerfile.cms` bakes `cockpit/config.php` and `cockpit/addons/` into
+the image. Scaffolding installs two optional addons by default:
 
 - **Forms** — inbox-style manager for website form submissions: public receiver
   endpoint with anti-spam, an admin screen, CSV export and notifications.
@@ -2109,7 +2129,7 @@ Skip them with `gosite create --no-addons`. After first login, grant
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
-  | sh -s -- all --dir addons --force
+  | sh -s -- all --dir cockpit/addons --force
 gosite restart
 ```
 
@@ -2152,10 +2172,10 @@ select `docker-compose.prod.yml`, then set `SERVICE_FQDN_APP`,
 `SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and
 `MONGO_PASSWORD`. The stack brings its own MongoDB and Redis.
 
-The `app` and `cms` services build from the repo's `Dockerfile` and
-`Dockerfile.cms`; nothing is bind-mounted, so Coolify needs no path to the
-checkout. Config and addon changes require an image rebuild rather than a file
-drop, and after a rebuild that adds an addon, clear
+The `app` and `cms` services build from `deploy/Dockerfile` and
+`deploy/Dockerfile.cms`; nothing is bind-mounted, so Coolify needs no path to
+the checkout. Config and addon changes require an image rebuild rather than a
+file drop, and after a rebuild that adds an addon, clear
 `storage/cache/modules.cache.php` once in the cms container.
 EOF
 }
