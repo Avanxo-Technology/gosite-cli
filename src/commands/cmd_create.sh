@@ -121,6 +121,7 @@ cmd_create() {
   _write_env_files     "${PROJECT_DIR}"
   _write_meta_files    "${PROJECT_DIR}"
   _write_ai_docs       "${PROJECT_DIR}"
+  _write_assets_upload_addon "${PROJECT_DIR}"
 
   local f
   while IFS= read -r f; do render_placeholders "${f}"; done < <(
@@ -215,6 +216,29 @@ _prompt_addons() {
   else
     info "No addons selected."
   fi
+}
+
+# Built-in addon that adds a POST /api/assets/upload endpoint to Cockpit,
+# since the stock REST API only exposes GET endpoints for assets.
+_write_assets_upload_addon() {
+  mkdir -p "$1/cockpit/addons/AssetsUpload"
+  cat > "$1/cockpit/addons/AssetsUpload/bootstrap.php" <<'PHP'
+<?php
+
+// Asset upload endpoint for the REST API.
+// The stock Cockpit REST API only exposes GET endpoints for assets.
+// This addon registers POST /api/assets/upload so files can be uploaded
+// programmatically via curl or the Go CMS client.
+
+$this->on('restApi.config', function($restApi) {
+    $restApi->addEndPoint('/assets/upload', [
+        'POST' => function($params, $app) {
+            $meta = ['folder' => $this->param('folder', '')];
+            return $this->module('assets')->upload('files', $meta);
+        }
+    ]);
+});
+PHP
 }
 
 # stays empty and the project still scaffolds. Re-run the installer later to
