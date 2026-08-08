@@ -43,18 +43,14 @@ USAGE
 
   # --- fetch remote version ---------------------------------------------------
   local remote_version=""
-  local raw_url="https://raw.githubusercontent.com/${repo}/${ref}/src/main.sh"
+  local raw_url="https://raw.githubusercontent.com/${repo}/${ref}/src/VERSION"
 
   info "Checking latest version from ${repo}@${ref}..."
 
   if command -v curl >/dev/null 2>&1; then
-    remote_version="$(curl -fsSL "${raw_url}" 2>/dev/null \
-      | grep -m1 '^readonly GOSITE_VERSION=' \
-      | sed 's/.*"\(.*\)".*/\1/')" || true
+    remote_version="$(curl -fsSL "${raw_url}" 2>/dev/null | tr -d '[:space:]')" || true
   elif command -v wget >/dev/null 2>&1; then
-    remote_version="$(wget -qO- "${raw_url}" 2>/dev/null \
-      | grep -m1 '^readonly GOSITE_VERSION=' \
-      | sed 's/.*"\(.*\)".*/\1/')" || true
+    remote_version="$(wget -qO- "${raw_url}" 2>/dev/null | tr -d '[:space:]')" || true
   else
     fatal "Neither curl nor wget is available; cannot check for updates."
   fi
