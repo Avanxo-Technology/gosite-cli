@@ -243,6 +243,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <a href="#addons">Addons</a>
       <a href="#project">Project</a>
       <a href="#https">Local HTTPS</a>
+      <a href="#storage">Storage</a>
       <a href="#deploy">Deploy</a>
     </nav>
     <a class="gh" href="https://github.com/Avanxo-Technology/gosite-cli">
@@ -561,6 +562,41 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 10l7-7 7 7"/></svg></div>
         <h3>Hot reload</h3>
         <p>air watches every package and template. A change to a single component is live in about three seconds — no restart.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- STORAGE -->
+<section id="storage">
+  <div class="wrap">
+    <div class="head rv">
+      <p class="eyebrow">Asset storage</p>
+      <h2>Files in a bucket, not on disk.</h2>
+      <p class="sub">
+        Every project can keep its asset uploads in an S3-compatible bucket.
+        Local development spins up its own <code>MinIO</code> inside the project
+        stack; production targets any S3-compatible provider. The default is
+        <span class="flag">local</span> — flip <code>STORAGE_ADAPTER=s3</code>
+        in <code>.env</code> (or the Coolify dashboard) to switch — so nothing
+        changes unless you ask for a bucket.
+      </p>
+    </div>
+    <div class="cards">
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M3 8l6-4h6l6 4"/></svg></div>
+        <h3>MinIO locally</h3>
+        <p>Each dev stack includes a <code>minio</code> container on the shared network, reachable as <code>&lt;project&gt;-minio:9000</code>, with a console at <code>minio.&lt;site&gt;.test</code> and its own ports on localhost.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 4-7 4-7-4 7-4Z"/><path d="M5 13l7 4 7-4"/><path d="M5 17l7 4 7-4"/></svg></div>
+        <h3>S3-compatible in prod</h3>
+        <p>Point the same variables at AWS S3, Backblaze B2 or any S3 endpoint and the CMS stores assets there instead. Keys are mounted from the Coolify dashboard — never committed.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v20M2 12h20"/><path d="M5 8l-3 4 3 4M19 8l3 4-3 4"/></svg></div>
+        <h3>Backward compatible</h3>
+        <p><code>STORAGE_ADAPTER</code> defaults to <code>local</code>, so every existing project keeps working untouched. Enable the bucket per environment by editing one variable — no code or image changes required.</p>
       </article>
     </div>
   </div>

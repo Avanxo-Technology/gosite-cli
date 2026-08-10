@@ -172,6 +172,35 @@ Because dev now routes by Traefik labels exactly like `docker-compose.prod.yml`
 does under Coolify, local and production differ only in hostnames and TLS
 source.
 
+### Asset storage
+
+Asset uploads can live in an S3-compatible bucket instead of on disk. By
+default each project uses local storage (`STORAGE_ADAPTER=local`); every dev
+stack also includes a `MinIO` container, and the CMS image ships Cockpit's
+Flysystem S3 adapter, so switching environments is one variable:
+
+```bash
+# .env (dev) — already points at the project's bundled MinIO
+STORAGE_ADAPTER=s3
+S3_ENDPOINT=http://my-site-minio:9000
+S3_BUCKET=assets
+S3_KEY=minioadmin
+S3_SECRET=minioadmin
+S3_USE_PATH_STYLE=true
+
+# production (Coolify dashboard) — any S3-compatible provider
+STORAGE_ADAPTER=s3
+S3_ENDPOINT=https://s3.us-east-1.amazonaws.com   # or Backblaze, etc.
+S3_BUCKET=my-site-assets
+S3_KEY=AKIA...
+S3_SECRET=...
+S3_USE_PATH_STYLE=false
+```
+
+The MinIO console is at `minio.<site>.test` and on two extra localhost ports
+allocated alongside the app. Set `STORAGE_ADAPTER=local` (or leave it unset) to
+keep files in `cockpit-storage/uploads` as before — backward compatible.
+
 ### Logs
 
 ```bash
