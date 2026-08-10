@@ -92,6 +92,7 @@ gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
 gosite list                   # projects, ports, container status, paths
+gosite open my-site           # open in Finder (macOS)
 gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
 gosite remove my-site          # deletes containers, cert and the directory

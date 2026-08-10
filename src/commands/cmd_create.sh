@@ -77,6 +77,7 @@ cmd_create() {
   local APP_PORT CMS_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
   APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
   CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
+  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}"
   CMS_TOKEN="$(random_secret 24)"
   COCKPIT_SEC_KEY="$(random_secret 32)"
   APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
@@ -152,7 +153,9 @@ $(printf "${C_BOLD}Next steps${C_NC}")
   3. App  -> https://${APP_DOMAIN}   $(printf "${C_DIM}(air hot reload)${C_NC}")
      CMS  -> https://${CMS_DOMAIN}   $(printf "${C_DIM}(Cockpit)${C_NC}")
      $(printf "${C_DIM}Also on http://localhost:${APP_PORT} and http://localhost:${CMS_PORT}.${C_NC}")
-
+$(if docker ps -q --filter name=gosite-proxy 2>/dev/null | grep -q .; then
+  printf "\n  4. gosite infra restart$(printf "${C_DIM}          # infra was already running — restart to pick up new routes${C_NC}")\n"
+fi)
 $(printf "${C_DIM}Production: push to Git and point Coolify at docker-compose.prod.yml.${C_NC}")
 EOF
 }

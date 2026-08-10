@@ -83,3 +83,25 @@ And in `MEMORY.md` under "Common tasks":
 ```
 | Upload assets via API | `POST /api/assets/upload` with `files[]` multipart; returns `{"assets":[{"path":"...","_id":"..."}]}` |
 ```
+
+## Replica addon — asset sync
+
+When using the Replica addon to replicate content between Cockpit instances, the
+asset field values (`{path, _id}`) travel with the content items. For the
+references to resolve on the destination, the asset metadata (`assets`
+collection) and files must also be replicated.
+
+The target's `syncAssets` setting controls this:
+
+| `syncAssets` | Asset metadata | Asset files | Field references work? |
+|---|---|---|---|
+| `true` (default) | Replicated with same `_id` | Replicated to `uploads://` | Yes |
+| `false` | Not replicated | Not replicated | No — `_id` points to nothing |
+
+**Since v1.0.0, `syncAssets` defaults to `true`** in both the admin UI (checkbox
+checked by default) and the backend constructor. CLI targets require the
+explicit `--sync-assets` flag (opt-in).
+
+Asset replication requires both instances to run the Replica addon (peer
+transport). If the remote is a plain Cockpit instance, assets are skipped with a
+log message and field references on the remote will be broken.

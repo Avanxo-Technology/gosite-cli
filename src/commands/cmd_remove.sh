@@ -52,6 +52,7 @@ cmd_remove() {
     info "Deleting ${dir}"
     rm -rf "${dir}" 2>/dev/null || sudo rm -rf "${dir}"
     registry_forget "${GOSITE_PROJECT}"
+    release_ports "${GOSITE_PROJECT}"
     ok "Directory deleted."
   fi
 

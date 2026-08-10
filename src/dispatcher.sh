@@ -40,6 +40,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
 
 $(printf "${C_BOLD}OTHER${C_NC}")
+  open   <name>         Open a project directory in Finder
   doctor             Verify local dependencies (go, air, docker, compose)
   update             Update gosite to the latest version from GitHub
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
@@ -70,6 +71,7 @@ dispatch() {
     restart)         load_command restart; cmd_restart "$@" ;;
     logs)            load_command logs;   cmd_logs   "$@" ;;
     cd)              load_command cd;     cmd_cd     "$@" ;;
+    open)            load_command open;   cmd_open   "$@" ;;
     path)            load_command cd;     cmd_path   "$@" ;;
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;

@@ -145,14 +145,42 @@ ensure_network() {
   fi
 }
 
-# Find a free TCP port on the host inside the configured range.
+# --- port reservation ---------------------------------------------------------
+# A persistent "<project>\t<app_port>\t<cms_port>" file that prevents port
+# collisions between concurrent creations and survives daemon restarts.
+
+reserve_ports() {
+  mkdir -p "$(dirname "${GOSITE_PORTS_FILE}")"
+  touch "${GOSITE_PORTS_FILE}"
+  local tmp; tmp="$(mktemp)"
+  grep -v -e "^$1	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "${tmp}"
+  mv "${tmp}" "${GOSITE_PORTS_FILE}"
+}
+
+release_ports() {
+  [[ -f "${GOSITE_PORTS_FILE}" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  grep -v -e "^$1	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
+  mv "${tmp}" "${GOSITE_PORTS_FILE}"
+}
+
+_port_is_reserved() {
+  [[ -f "${GOSITE_PORTS_FILE}" ]] || return 1
+  awk '{ print $2; print $3 }' "${GOSITE_PORTS_FILE}" | grep -qwF "$1"
+}
+
+# Find a free TCP port on the host inside the configured range. Checks three
+# independent sources so it works even when Docker Desktop hides its mappings
+# from lsof.
 find_free_port() {
   local start="${1:-${GOSITE_PORT_MIN}}" port
   for (( port = start; port <= GOSITE_PORT_MAX; port++ )); do
-    if ! lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
-      printf "%s" "${port}"
-      return 0
-    fi
+    lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1 && continue
+    docker ps --format '{{.Ports}}' 2>/dev/null | grep -qP '0\.0\.0\.0:'"${port}"'(->|/|$)' && continue
+    _port_is_reserved "${port}" && continue
+    printf "%s" "${port}"
+    return 0
   done
   fatal "No free port available in range ${GOSITE_PORT_MIN}-${GOSITE_PORT_MAX}."
 }
