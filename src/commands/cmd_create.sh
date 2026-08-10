@@ -28,6 +28,8 @@ render_placeholders() {
     -e "s|__CMS_DOMAIN__|${CMS_DOMAIN}|g" \
     -e "s|__APP_PORT__|${APP_PORT}|g" \
     -e "s|__CMS_PORT__|${CMS_PORT}|g" \
+    -e "s|__MINIO_API_PORT__|${MINIO_API_PORT}|g" \
+    -e "s|__MINIO_CONSOLE_PORT__|${MINIO_CONSOLE_PORT}|g" \
     -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__MONGO_HOST__|${GOSITE_MONGO_HOST}|g" \
@@ -74,10 +76,12 @@ cmd_create() {
   [[ -e "${PROJECT_DIR}" ]] && fatal "'${PROJECT_DIR}' already exists."
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
-  local APP_PORT CMS_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
+  local APP_PORT CMS_PORT MINIO_API_PORT MINIO_CONSOLE_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
   APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
   CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
-  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}"
+  MINIO_API_PORT="$(find_free_port "$(( CMS_PORT + 1 ))")"
+  MINIO_CONSOLE_PORT="$(find_free_port "$(( MINIO_API_PORT + 1 ))")"
+  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}" "${MINIO_API_PORT}" "${MINIO_CONSOLE_PORT}"
   CMS_TOKEN="$(random_secret 24)"
   COCKPIT_SEC_KEY="$(random_secret 32)"
   APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
@@ -511,10 +515,10 @@ func NewRouter(a *App) *echo.Echo {
 
 	e.Static("/static", "static")
 
-	// Cockpit uploads: in development they live on the host filesystem; in
-	// production the Echo and CMS containers are separate, so we proxy the
-	// request to Cockpit's own web server.
-	if a.Config.IsDev() || a.Config.CockpitURL == "" {
+	// Cockpit uploads: in development with local storage they live on the host
+	// filesystem; with S3 storage (or in production) we proxy to Cockpit, which
+	// serves them from the configured S3-compatible bucket via Flysystem.
+	if a.Config.CockpitURL == "" || (a.Config.IsDev() && a.Config.StorageAdapter != "s3") {
 		e.Static("/storage/uploads", "cockpit-storage/uploads")
 	} else {
 		target, err := url.Parse(a.Config.CockpitURL)
@@ -556,15 +560,17 @@ type Config struct {
 	CockpitURL   string
 	CockpitToken string
 	Environment  string
+	StorageAdapter string
 }
 
 func Load() Config {
 	return Config{
-		Port:         env("PORT", "8080"),
-		RedisURL:     env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"),
-		CockpitURL:   env("COCKPIT_URL", "http://__PROJECT__-cms:80"),
-		CockpitToken: os.Getenv("COCKPIT_API_TOKEN"),
-		Environment:  os.Getenv("APP_ENV"),
+		Port:           env("PORT", "8080"),
+		RedisURL:       env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"),
+		CockpitURL:     env("COCKPIT_URL", "http://__PROJECT__-cms:80"),
+		CockpitToken:   os.Getenv("COCKPIT_API_TOKEN"),
+		Environment:    os.Getenv("APP_ENV"),
+		StorageAdapter: env("STORAGE_ADAPTER", "local"),
 	}
 }
 
@@ -1430,6 +1436,9 @@ EOF
 FROM cockpithq/cockpit:core-2.14.0
 
 COPY cockpit/config.php /var/www/html/config/config.php
+
+# S3 storage adapter (optional — only loaded when STORAGE_ADAPTER=s3)
+RUN composer require league/flysystem-aws-s3-v3 --no-interaction
 EOF
 
   # Addons are optional (--no-addons scaffolds without cockpit/addons/), so the COPY
@@ -1509,6 +1518,14 @@ services:
       MONGO_HOST: "__MONGO_HOST__"
       MONGO_PORT: "__MONGO_PORT__"
       MONGO_DB: "__PROJECT__"
+      STORAGE_ADAPTER: "${STORAGE_ADAPTER}"
+      S3_ENDPOINT: "${S3_ENDPOINT}"
+      S3_BUCKET: "${S3_BUCKET}"
+      S3_REGION: "${S3_REGION}"
+      S3_KEY: "${S3_KEY}"
+      S3_SECRET: "${S3_SECRET}"
+      S3_USE_PATH_STYLE: "${S3_USE_PATH_STYLE}"
+      S3_PREFIX: "${S3_PREFIX}"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -1526,9 +1543,33 @@ services:
     networks:
       - gosite
 
+  minio:
+    image: minio/minio:latest
+    container_name: __PROJECT__-minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - __PROJECT__-minio-data:/data
+    ports:
+      - "__MINIO_API_PORT__:9000"
+      - "__MINIO_CONSOLE_PORT__:9001"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=__NETWORK__
+      - traefik.http.routers.__PROJECT__-minio.rule=Host(`minio.__DOMAIN__`)
+      - traefik.http.routers.__PROJECT__-minio.entrypoints=websecure
+      - traefik.http.routers.__PROJECT__-minio.tls=true
+      - traefik.http.services.__PROJECT__-minio.loadbalancer.server.port=9000
+    networks:
+      - gosite
+
 volumes:
   __PROJECT__-gomod:
   __PROJECT__-tmp:
+  __PROJECT__-minio-data:
 
 networks:
   gosite:
@@ -1607,6 +1648,15 @@ services:
       - MONGO_USER=${MONGO_USER}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
       - MONGO_DB=${MONGO_DB:-__PROJECT__}
+      # S3 storage (optional — only used when STORAGE_ADAPTER=s3)
+      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - S3_KEY=${S3_KEY}
+      - S3_SECRET=${S3_SECRET}
+      - S3_USE_PATH_STYLE=${S3_USE_PATH_STYLE:-false}
+      - S3_PREFIX=${S3_PREFIX}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
       # Config and addons are NOT mounted here: Dockerfile.cms bakes the
@@ -1698,6 +1748,26 @@ return [
     'session' => [
         'name' => '__PROJECT__',
     ],
+
+    // Storage adapter for assets (uploads, images, etc.).
+    // 'local' stores files in /var/www/html/storage/uploads (the default).
+    // 's3'  stores files in an S3-compatible bucket (MinIO in dev, AWS/Backblaze in prod).
+    'storage' => [
+        'adapter' => '${STORAGE_ADAPTER:-local}',
+        'clients' => [
+            's3' => [
+                'credentials' => [
+                    'key' => '${S3_KEY}',
+                    'secret' => '${S3_SECRET}',
+                ],
+                'region' => '${S3_REGION:-us-east-1}',
+                'endpoint' => '${S3_ENDPOINT}',
+                'use_path_style_endpoint' => filter_var('${S3_USE_PATH_STYLE:-false}', FILTER_VALIDATE_BOOLEAN),
+            ],
+        ],
+        'bucket' => '${S3_BUCKET}',
+        'prefix' => '${S3_PREFIX}',
+    ],
 ];
 EOF
 }
@@ -1712,6 +1782,18 @@ REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=__CMS_TOKEN__
 COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
+
+# S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
+# MinIO is included in the dev compose stack; these defaults point at it.
+# For production, set these from the Coolify dashboard (AWS S3, Backblaze, etc.).
+STORAGE_ADAPTER=local
+S3_ENDPOINT=http://__PROJECT__-minio:9000
+S3_BUCKET=assets
+S3_REGION=us-east-1
+S3_KEY=minioadmin
+S3_SECRET=minioadmin
+S3_USE_PATH_STYLE=true
+S3_PREFIX=
 EOF
 
   cat > "$1/.env.example" <<'EOF'
@@ -1724,6 +1806,17 @@ REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
 COCKPIT_URL=http://__PROJECT__-cms:80
 COCKPIT_API_TOKEN=change-me
 COCKPIT_SEC_KEY=change-me
+
+# S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
+# In production, use AWS S3, Backblaze B2, or any S3-compatible provider.
+# STORAGE_ADAPTER=s3
+# S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
+# S3_BUCKET=my-project-assets
+# S3_REGION=us-east-1
+# S3_KEY=AKIA...
+# S3_SECRET=...
+# S3_USE_PATH_STYLE=false
+# S3_PREFIX=production
 EOF
 
   # Marker file consumed by list/start/stop/remove.

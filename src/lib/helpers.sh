@@ -154,7 +154,12 @@ reserve_ports() {
   touch "${GOSITE_PORTS_FILE}"
   local tmp; tmp="$(mktemp)"
   grep -v -e "^$1	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
-  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "${tmp}"
+  printf '%s' "$1" >> "${tmp}"
+  shift
+  for col in "$@"; do
+    printf '\t%s' "${col}" >> "${tmp}"
+  done
+  printf '\n' >> "${tmp}"
   mv "${tmp}" "${GOSITE_PORTS_FILE}"
 }
 
@@ -167,7 +172,7 @@ release_ports() {
 
 _port_is_reserved() {
   [[ -f "${GOSITE_PORTS_FILE}" ]] || return 1
-  awk '{ print $2; print $3 }' "${GOSITE_PORTS_FILE}" | grep -qwF "$1"
+  awk '{ for (i = 2; i <= NF; i++) print $i }' "${GOSITE_PORTS_FILE}" | grep -qwF "$1"
 }
 
 # Find a free TCP port on the host inside the configured range. Checks three
