@@ -480,3 +480,133 @@ GOSITE_NETWORK=__NETWORK__
 GOSITE_ADDONS=__ADDONS__
 EOF
 }
+
+# -----------------------------------------------------------------------------
+# BUILD FILES. The Dockerfiles, .air.toml and .dockerignore that make the
+# compose files buildable. Shared by create and sync so a synced project always
+# has the files the re-rendered compose files reference (otherwise docker fails
+# with "/deploy: no such file or directory" on old scaffolds).
+# -----------------------------------------------------------------------------
+
+_write_air_config() {
+  cat > "$1/.air.toml" <<'EOF'
+# air - hot reload for local development inside the dev container.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd        = "go build -o ./tmp/main ./cmd/server"
+  entrypoint = "./tmp/main"
+  delay    = 300
+  include_ext  = ["go", "html", "css", "js"]
+  exclude_dir  = ["tmp", "static/vendor", ".git", "cockpit-storage"]
+  exclude_regex = ["_test\\.go"]
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "1s"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true
+EOF
+}
+
+_write_dockerfiles() {
+  mkdir -p "$1/deploy"
+
+  # Production image: compile a static binary, ship it on alpine.
+  cat > "$1/deploy/Dockerfile" <<'EOF'
+# syntax=docker/dockerfile:1
+
+# --- stage 1: build ----------------------------------------------------------
+FROM golang:1.26-alpine AS builder
+
+ARG GO_BUILD_CPUS=2
+
+RUN apk add --no-cache git ca-certificates
+WORKDIR /src
+
+# Dependencies first so the module cache survives source-only changes.
+COPY go.mod go.sum* ./
+RUN go mod download
+
+COPY . .
+
+# CGO_ENABLED=0 produces a fully static binary that runs on a bare alpine.
+# GOMAXPROCS + -p limit parallel compilation to 2 CPUs so the build does not
+# saturate a 6-core server. Override with GO_BUILD_CPUS=6 in Coolify if needed.
+RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=${GO_BUILD_CPUS} go build -p=${GO_BUILD_CPUS} \
+      -trimpath -ldflags="-s -w" \
+      -o /out/app ./cmd/server
+
+# --- stage 2: runtime --------------------------------------------------------
+FROM alpine:latest
+
+RUN apk add --no-cache ca-certificates tzdata wget \
+ && adduser -D -u 10001 app
+
+WORKDIR /app
+COPY --from=builder /out/app /app/app
+COPY --from=builder /src/static /app/static
+
+USER app
+ENV PORT=8080
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+
+ENTRYPOINT ["/app/app"]
+EOF
+
+  # Development image: toolchain + air, source is bind-mounted at runtime.
+  cat > "$1/deploy/Dockerfile.dev" <<'EOF'
+# syntax=docker/dockerfile:1
+# Local development only. The source tree is bind-mounted, so this image just
+# carries the toolchain and runs air for hot reload.
+FROM golang:1.26-alpine
+
+RUN apk add --no-cache git curl
+
+RUN go install github.com/air-verse/air@v1.67.4
+
+WORKDIR /app
+ENV PORT=8080 CGO_ENABLED=0
+EXPOSE 8080
+
+CMD ["air", "-c", ".air.toml"]
+EOF
+
+  # Production CMS image: the stock Cockpit core plus the committed
+  # cockpit/config.php and addons, baked in. Build from this instead of the
+  # stock image so the CMS container carries its own config and addons - the
+  # old approach of bind-mounting them (./cockpit/config.php, ./addons) breaks
+  # in Coolify, where relative paths resolve against the directory that stores
+  # the pasted compose file, not the repo checkout, silently mounting empty
+  # directories.
+  #
+  # No package installation happens at build time: the stock image already
+  # ships PHP, the Flysystem S3 adapter and the AWS SDK under lib/vendor/ (it
+  # has no composer binary, so a composer step would fail the build).
+  cat > "$1/deploy/Dockerfile.cms" <<'EOF'
+FROM cockpithq/cockpit:core-2.14.0
+
+COPY cockpit/config.php /var/www/html/config/config.php
+COPY cockpit/addons/ /var/www/html/addons/
+EOF
+
+  cat > "$1/.dockerignore" <<'EOF'
+.git
+.gitignore
+tmp/
+cockpit-storage/
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+deploy/
+README.md
+EOF
+}

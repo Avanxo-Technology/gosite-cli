@@ -82,8 +82,11 @@ USAGE
   ok "Sync complete. Start the project with 'gosite start $(basename "${dir}")'"
 }
 
-# Re-renders the two compose files and the Cockpit config.php, resolving the
-# __PLACEHOLDER__ tokens against the values recorded in .gosite.env.
+# Re-renders the compose files, the Cockpit config.php and the build files the
+# compose files reference (deploy/Dockerfile*, .air.toml, .dockerignore),
+# resolving the __PLACEHOLDER__ tokens against the values in .gosite.env. Old
+# scaffolds may lack deploy/ entirely, so it is written here - otherwise docker
+# fails with "/deploy: no such file or directory".
 _sync_compose() {
   local dir="$1"
   load_project_render_vars "${dir}"
@@ -95,7 +98,10 @@ _sync_compose() {
   render_placeholders "${dir}/docker-compose.prod.yml"
   render_placeholders "${dir}/cockpit/config.php"
 
-  ok "Re-rendered docker-compose.yml, docker-compose.prod.yml, cockpit/config.php"
+  _write_air_config "${dir}"
+  _write_dockerfiles "${dir}"
+
+  ok "Re-rendered compose files, cockpit/config.php, deploy/ build files"
 }
 
 # Refreshes every addon the project already has: the built-ins are always

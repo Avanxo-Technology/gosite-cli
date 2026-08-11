@@ -265,16 +265,17 @@ gosite remove my-site --keep-source  # tear down the stack, keep the directory
 
 ### Syncing templates into an existing project
 
-The templates that `create` writes are single-sourced: the compose files and
-the Cockpit config live in `src/lib/templates.sh`, and every addon ships in
+The templates that `create` writes are single-sourced: the compose files, the
+Cockpit config and the build files (`deploy/Dockerfile*`, `.air.toml`,
+`.dockerignore`) live in `src/lib/templates.sh`, and every addon ships in
 `src/addons/`. `gosite sync` re-applies those same sources to a project that
 already exists, without touching your work — it reads the project's
 `.gosite.env` marker, so it always renders the exact values the project was
 created with. This is how an existing site picks up gosite updates.
 
 ```bash
-gosite sync my-site              # compose + config.php + addons + .env keys
-gosite sync my-site --compose    # re-render docker-compose(.prod).yml and config.php
+gosite sync my-site              # compose + config.php + build files + addons + .env keys
+gosite sync my-site --compose    # re-render docker-compose(.prod).yml, config.php, deploy/ build files
 gosite sync my-site --addons     # refresh addons present, or --addons "Forms Replica"
 gosite sync my-site --env        # add keys missing from .env (never overwrites)
 gosite sync my-site --build      # ...then rebuild the local images
