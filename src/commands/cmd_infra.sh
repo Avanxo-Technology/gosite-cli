@@ -108,9 +108,30 @@ services:
       start_period: 20s
     networks: [gosite]
 
+  minio:
+    image: minio/minio:latest
+    container_name: gosite-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    volumes:
+      - gosite-miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [gosite]
+
 volumes:
   gosite-redisdata:
   gosite-mongodata:
+  gosite-miniodata:
 
 networks:
   gosite:
@@ -137,12 +158,20 @@ cmd_infra() {
       # The dashboard is served over HTTPS like everything else.
       ensure_project_cert "proxy" >/dev/null 2>&1 || true
 
-      info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST}, ${GOSITE_MONGO_HOST})"
+      info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST}, ${GOSITE_MONGO_HOST}, minio)"
       _infra_compose up -d
+
+      # Create the default bucket in MinIO so projects can use it immediately.
+      docker run --rm --network ${GOSITE_NETWORK} \
+        --entrypoint sh minio/mc:latest \
+        -c "mc alias set local http://gosite-minio:9000 minioadmin minioadmin && mc mb -p local/assets" \
+        >/dev/null 2>&1 || true
+
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
       ok "Redis     -> localhost:${GOSITE_REDIS_PORT}"
       ok "MongoDB   -> localhost:${GOSITE_MONGO_PORT}"
-      printf "${C_DIM}From a project container reach them by the hostnames '%s' and '%s'.${C_NC}\n" \
+      ok "MinIO     -> http://localhost:9002 (api) / http://localhost:9003 (console)"
+      printf "${C_DIM}From a project container reach them by the hostnames '%s', '%s' and 'gosite-minio'.${C_NC}\n" \
         "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}"
 
       dns_resolves || {
@@ -184,7 +213,7 @@ cmd_infra() {
       fi
 
       local svc
-      for svc in "${GOSITE_PROXY_HOST}" "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}"; do
+      for svc in "${GOSITE_PROXY_HOST}" "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}" "gosite-minio"; do
         if container_running "${svc}"; then
           ok "${svc}: running"
         elif container_exists "${svc}"; then

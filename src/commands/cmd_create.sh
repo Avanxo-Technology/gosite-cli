@@ -28,8 +28,6 @@ render_placeholders() {
     -e "s|__CMS_DOMAIN__|${CMS_DOMAIN}|g" \
     -e "s|__APP_PORT__|${APP_PORT}|g" \
     -e "s|__CMS_PORT__|${CMS_PORT}|g" \
-    -e "s|__MINIO_API_PORT__|${MINIO_API_PORT}|g" \
-    -e "s|__MINIO_CONSOLE_PORT__|${MINIO_CONSOLE_PORT}|g" \
     -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__MONGO_HOST__|${GOSITE_MONGO_HOST}|g" \
@@ -76,12 +74,10 @@ cmd_create() {
   [[ -e "${PROJECT_DIR}" ]] && fatal "'${PROJECT_DIR}' already exists."
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
-  local APP_PORT CMS_PORT MINIO_API_PORT MINIO_CONSOLE_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
+  local APP_PORT CMS_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
   APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
   CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
-  MINIO_API_PORT="$(find_free_port "$(( CMS_PORT + 1 ))")"
-  MINIO_CONSOLE_PORT="$(find_free_port "$(( MINIO_API_PORT + 1 ))")"
-  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}" "${MINIO_API_PORT}" "${MINIO_CONSOLE_PORT}"
+  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}"
   CMS_TOKEN="$(random_secret 24)"
   COCKPIT_SEC_KEY="$(random_secret 32)"
   APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
@@ -1543,33 +1539,9 @@ services:
     networks:
       - gosite
 
-  minio:
-    image: minio/minio:latest
-    container_name: __PROJECT__-minio
-    command: server /data --console-address ":9001"
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - __PROJECT__-minio-data:/data
-    ports:
-      - "__MINIO_API_PORT__:9000"
-      - "__MINIO_CONSOLE_PORT__:9001"
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=__NETWORK__
-      - traefik.http.routers.__PROJECT__-minio.rule=Host(`minio.__DOMAIN__`)
-      - traefik.http.routers.__PROJECT__-minio.entrypoints=websecure
-      - traefik.http.routers.__PROJECT__-minio.tls=true
-      - traefik.http.services.__PROJECT__-minio.loadbalancer.server.port=9000
-    networks:
-      - gosite
-
 volumes:
   __PROJECT__-gomod:
   __PROJECT__-tmp:
-  __PROJECT__-minio-data:
 
 networks:
   gosite:
@@ -1784,10 +1756,10 @@ COCKPIT_API_TOKEN=__CMS_TOKEN__
 COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
 
 # S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
-# MinIO is included in the dev compose stack; these defaults point at it.
+# MinIO runs in the shared gosite infra; these defaults point at it.
 # For production, set these from the Coolify dashboard (AWS S3, Backblaze, etc.).
 STORAGE_ADAPTER=local
-S3_ENDPOINT=http://__PROJECT__-minio:9000
+S3_ENDPOINT=http://gosite-minio:9000
 S3_BUCKET=assets
 S3_REGION=us-east-1
 S3_KEY=minioadmin

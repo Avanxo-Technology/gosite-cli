@@ -175,14 +175,14 @@ source.
 ### Asset storage
 
 Asset uploads can live in an S3-compatible bucket instead of on disk. By
-default each project uses local storage (`STORAGE_ADAPTER=local`); every dev
-stack also includes a `MinIO` container, and the CMS image ships Cockpit's
+default each project uses local storage (`STORAGE_ADAPTER=local`); the shared
+infrastructure runs a `MinIO` service, and the CMS image ships Cockpit's
 Flysystem S3 adapter, so switching environments is one variable:
 
 ```bash
-# .env (dev) — already points at the project's bundled MinIO
+# .env (dev) — already points at the shared gosite-minio
 STORAGE_ADAPTER=s3
-S3_ENDPOINT=http://my-site-minio:9000
+S3_ENDPOINT=http://gosite-minio:9000
 S3_BUCKET=assets
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
@@ -197,9 +197,10 @@ S3_SECRET=...
 S3_USE_PATH_STYLE=false
 ```
 
-The MinIO console is at `minio.<site>.test` and on two extra localhost ports
-allocated alongside the app. Set `STORAGE_ADAPTER=local` (or leave it unset) to
-keep files in `cockpit-storage/uploads` as before — backward compatible.
+The MinIO console is at `http://localhost:9003` (API on `9002`), started with
+the shared infrastructure via `gosite infra up`. Set `STORAGE_ADAPTER=local`
+(or leave it unset) to keep files in `cockpit-storage/uploads` as before —
+backward compatible.
 
 ### Logs
 
