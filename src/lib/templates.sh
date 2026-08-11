@@ -158,6 +158,7 @@ services:
       S3_SECRET: "${S3_SECRET}"
       S3_PREFIX: "${S3_PREFIX}"
       S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
+      S3_ACL: "${S3_ACL:-}"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -266,6 +267,7 @@ services:
       - S3_SECRET=${S3_SECRET}
       - S3_PREFIX=${S3_PREFIX}
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+      - S3_ACL=${S3_ACL:-}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
       # Config and addons are NOT mounted here: Dockerfile.cms bakes the
@@ -374,6 +376,10 @@ if (getenv('STORAGE_ADAPTER') === 's3') {
             'region' => getenv('S3_REGION') ?: 'auto',
             'bucket' => getenv('S3_BUCKET'),
             'prefix' => getenv('S3_PREFIX') ?: '',
+            // null = bucket policy handles access (required for "Bucket owner
+            // enforced" buckets where ACLs are disabled). Set S3_ACL=yes to
+            // switch to public-read ACL.
+            'visibility' => getenv('S3_ACL') === 'yes' ? 'public' : null,
             // Browser-reachable base for asset URLs: localhost:9002 for local
             // MinIO, a CDN or bucket endpoint in production. When unset the
             // addon keeps Cockpit's own /storage/uploads proxy (which only
@@ -445,6 +451,7 @@ COCKPIT_SEC_KEY=change-me
 # S3_SECRET=...
 # S3_PREFIX=production
 # S3_PUBLIC_URL=https://cdn.example.com/my-assets   # browser-reachable base for asset URLs
+# S3_ACL=yes          # set to "yes" to enable public-read ACL (default: null, bucket policy handles access)
 EOF
 
   # Marker file consumed by list/start/stop/remove.

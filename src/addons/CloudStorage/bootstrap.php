@@ -16,7 +16,7 @@
  *           'region' => getenv('S3_REGION') ?: 'auto',
  *           'bucket' => getenv('S3_BUCKET'),
  *           'prefix' => getenv('S3_PREFIX') ?: '',
- *           'visibility' => 'public',               // optional, default public
+ *           'visibility' => 'public',               // optional, default public (null = skip ACL)
  *       ],
  *   ],
  *
@@ -66,7 +66,9 @@ $this->on('app.filestorage.init', function (&$storages) {
                 $opts['bucket'],
                 $opts['prefix'] ?? '',
             ],
-            'visibility' => $opts['visibility'] ?? 'public',
+            // null visibility skips the ACL header, letting the bucket policy
+            // handle access (required for "Bucket owner enforced" buckets).
+            'visibility' => array_key_exists('visibility', $opts) ? $opts['visibility'] : 'public',
         ];
 
         // Browser-reachable URL for generated asset links. Without it Cockpit
