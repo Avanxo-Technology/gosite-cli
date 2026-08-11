@@ -182,7 +182,7 @@ find_free_port() {
   local start="${1:-${GOSITE_PORT_MIN}}" port
   for (( port = start; port <= GOSITE_PORT_MAX; port++ )); do
     lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1 && continue
-    docker ps --format '{{.Ports}}' 2>/dev/null | grep -qP '0\.0\.0\.0:'"${port}"'(->|/|$)' && continue
+    docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE '0\.0\.0\.0:'"${port}"'(->|/|$)' && continue
     _port_is_reserved "${port}" && continue
     printf "%s" "${port}"
     return 0

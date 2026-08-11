@@ -163,6 +163,8 @@ h2{font-family:var(--mono);font-weight:700;font-size:var(--step2);letter-spacing
   background:var(--accent-glow);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
 .ico svg{width:19px;height:19px;stroke:var(--accent);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .card h3{font-family:var(--mono);font-size:1rem;font-weight:600;margin:0 0 .5rem;letter-spacing:-.01em}
+.card h3 .tag{font-size:.58rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--violet);background:var(--muted);border:1px solid var(--border);padding:.18em .5em;border-radius:999px;margin-left:.45em;vertical-align:2px}
+.card h3 .tag.opt{color:var(--amber)}
 .card p{margin:0;color:var(--fg-muted);font-size:var(--step-1);font-weight:300;line-height:1.7}
 .card code{font-family:var(--mono);font-size:.9em;color:var(--fg);background:var(--muted);padding:.1em .38em;border-radius:4px}
 
@@ -432,35 +434,43 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
   <div class="wrap">
     <div class="head rv">
       <p class="eyebrow">Cockpit addons</p>
-      <h2>Forms and content sync, opt-in.</h2>
+      <h2>Addon modules, shipped with gosite.</h2>
       <p class="sub">
-        <code>gosite create</code> lets you pick from available
-        <code>Forms</code> and <code>Replica</code> addons during project
-        setup. They are fetched from the open-source
-        <code>cockpit-addons</code> repo into <code>addons/</code>, mounted into
-        the dev CMS container and baked into the production image by
-        <code>Dockerfile.cms</code>. Pass
-        <span class="flag">--addons "Forms Replica"</span> to install
-        non-interactively, or <span class="flag">--no-addons</span> to skip
-        entirely.
+        Addons are plain folders at <code>/var/www/html/addons</code> — bind-mounted
+        in dev, baked into the production image by <code>Dockerfile.cms</code> — so
+        nothing loads unless it exists. Every project ships three built-ins;
+        <code>Forms</code> and <code>Replica</code> are opt-in at setup
+        (<span class="flag">--addons "Forms Replica"</span>, or
+        <span class="flag">--no-addons</span> to skip). Refresh or add them later
+        with <code>gosite sync --addons</code>.
       </p>
     </div>
 
     <div class="cards cards-3">
       <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M6 9l6-6 6 6"/><path d="M4 21h16"/></svg></div>
+        <h3>AssetsUpload <span class="tag">built-in</span></h3>
+        <p>A public <code>POST /api/assets/upload</code> endpoint for dropping files straight into Cockpit's asset library, with optional folder targeting — no admin UI required.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6c0-1.1 3.6-2 8-2s8 .9 8 2-3.6 2-8 2-8-.9-8-2z"/><path d="M4 6v12c0 1.1 3.6 2 8 2s8-.9 8-2V6"/><path d="M4 12c0 1.1 3.6 2 8 2s8-.9 8-2"/></svg></div>
+        <h3>ModelManager <span class="tag">built-in</span></h3>
+        <p>REST CRUD for content models: list, save (create or update) and remove via <code>/models</code>, with ACL-aware filtering so each role only sees what it may edit.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div>
+        <h3>CloudStorage <span class="tag">built-in</span></h3>
+        <p>S3-compatible uploads for the core CMS: MinIO in dev, AWS / R2 / Backblaze in prod. Uses the Flysystem adapter the image already ships — no Pro license, no composer step.</p>
+      </article>
+      <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg></div>
-        <h3>Forms</h3>
+        <h3>Forms <span class="tag opt">optional</span></h3>
         <p>An inbox-style manager for website submissions: a public <code>POST /forms/api/submit</code> receiver with honeypot and rate-limit anti-spam, an admin screen per form, CSV export and mail/webhook notifications.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></div>
-        <h3>Replica</h3>
+        <h3>Replica <span class="tag opt">optional</span></h3>
         <p>Content replication between Cockpit instances: push/pull, multiple targets, mirror/merge conflict handling, dry runs, a CLI and an activity log — no commercial addon required.</p>
-      </article>
-      <article class="card rv">
-        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/></svg></div>
-        <h3>Optional, not mandatory</h3>
-        <p>Addons are plain folders at <code>/var/www/html/addons</code> - bind-mounted in dev, baked into the image for production - so nothing loads unless it exists. Add, update or remove them without touching the app; grant <code>forms/manage</code> and <code>replica/manage</code> per role.</p>
       </article>
     </div>
   </div>
