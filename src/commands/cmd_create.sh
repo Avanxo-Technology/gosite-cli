@@ -1471,6 +1471,13 @@ Choose the optional ones when creating (`--addons "Forms Replica"`, or
 `--no-addons` to skip). After the first login grant the permissions
 `forms/manage` and `replica/manage` in Settings > Roles.
 
+**API key role binding:** the Cockpit API key (`COCKPIT_API_TOKEN` in `.env`)
+must be bound to a role that has `replica/manage` and content read permissions.
+Without this, `GET /api/replica/manifest` returns 403 and falls back to
+transport=core (entries only, no assets or models). When creating the token in
+the Cockpit admin, assign it to the `api` role (or a role with those
+permissions), not "No role".
+
 ### Managing addons
 
 All addons come from gosite's addon library (`src/addons/`), so updating gosite
@@ -1735,6 +1742,12 @@ as the content API.
   mirror/merge, dry runs, CLI, activity log.
 
 Grant `forms/manage` and `replica/manage` in Settings > Roles after first login.
+
+**API key role binding:** the Cockpit API key (`COCKPIT_API_TOKEN` in `.env`)
+must be bound to a role with `replica/manage` and content read permissions. The
+Replica addon's `GET /api/replica/manifest` returns 403 without this, falling
+back to transport=core (entries only, no assets or models). Assign the token to
+the `api` role (or a custom role with those permissions), not "No role".
 
 #### Serving CMS assets
 

@@ -370,7 +370,7 @@ $config = [
 if (getenv('STORAGE_ADAPTER') === 's3') {
     $config['cloudStorage'] = [
         'uploads' => [
-            'url'    => getenv('S3_URL'),
+            'url'    => getenv('S3_URL') ?: null,
             'key'    => getenv('S3_KEY'),
             'secret' => getenv('S3_SECRET'),
             'region' => getenv('S3_REGION') ?: 'auto',
