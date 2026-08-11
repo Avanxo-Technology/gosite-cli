@@ -13,32 +13,11 @@
 # Note: __REDIS_PORT__ renders to the IN-NETWORK port (6379), not the
 # host-published one. Project containers always reach the shared services by
 # container name on gosite-network, never through the host.
-# Set by cmd_create, read by the view writers.
-TAILWIND=1
-ADDONS_ENABLED=1
 
-render_placeholders() {
-  local file="$1" tmp
-  tmp="$(mktemp)"
-  sed \
-    -e "s|__PROJECT__|${PROJECT_NAME}|g" \
-    -e "s|__MODULE__|${PROJECT_MODULE}|g" \
-    -e "s|__NETWORK__|${GOSITE_NETWORK}|g" \
-    -e "s|__DOMAIN__|${APP_DOMAIN}|g" \
-    -e "s|__CMS_DOMAIN__|${CMS_DOMAIN}|g" \
-    -e "s|__APP_PORT__|${APP_PORT}|g" \
-    -e "s|__CMS_PORT__|${CMS_PORT}|g" \
-    -e "s|__REDIS_HOST__|${GOSITE_REDIS_HOST}|g" \
-    -e "s|__REDIS_PORT__|6379|g" \
-    -e "s|__MONGO_HOST__|${GOSITE_MONGO_HOST}|g" \
-    -e "s|__MONGO_PORT__|${GOSITE_MONGO_PORT}|g" \
-    -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
-    -e "s|__COCKPIT_SEC_KEY__|${COCKPIT_SEC_KEY}|g" \
-    -e "s|__TAILWIND__|${TAILWIND}|g" \
-    -e "s|__ADDONS__|${ADDONS_ENABLED}|g" \
-    "${file}" > "${tmp}"
-  mv "${tmp}" "${file}"
-}
+# Template writers (placeholders, compose files, addons) are shared with `sync`
+# so an existing project can be re-rendered from the same sources of truth.
+# shellcheck source=../lib/templates.sh
+source "${GOSITE_ROOT}/lib/templates.sh"
 
 cmd_create() {
   local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
@@ -51,7 +30,7 @@ cmd_create() {
       --here)         here=1; shift ;;
       --no-tailwind)  TAILWIND=0; shift ;;
       --tailwind)     TAILWIND=1; shift ;;
-      --addons)       INSTALL_ADDONS=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
+      --addons)       INSTALL_ADDONS=1; ADDONS_ENABLED=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
       --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; ADDONS_PROMPT=0; shift ;;
       -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
@@ -133,8 +112,9 @@ cmd_create() {
   # GOFLAGS and refuses to compile without verified module checksums.
   _resolve_dependencies "${PROJECT_DIR}"
 
-  # Optional Cockpit addons. Defaults to Forms + Replica from the
-  # Avanxo-Technology/cockpit-addons repo; --no-addons skips the download.
+  # Optional Cockpit addons (Forms + Replica), copied from gosite's own
+  # src/addons/ library; --no-addons skips them. Built-in addons were already
+  # written by _write_builtin_addons.
   [[ "${INSTALL_ADDONS}" -eq 1 ]] && _install_addons "${PROJECT_DIR}" "${ADDONS}"
 
   # Issue the local TLS certificate covering <name>.test and cms.<name>.test.
@@ -185,11 +165,6 @@ _resolve_dependencies() {
 }
 
 # -----------------------------------------------------------------------------
-# Installs the optional Cockpit addons (default Forms + Replica) from the
-# Avanxo-Technology/cockpit-addons repo into <project>/addons/: bind-mounted
-# into the dev CMS container, baked into the production image by
-# Dockerfile.cms. A failure to reach the
-# network warns and continues, like _resolve_dependencies: the addons dir
 # Prompt the user to pick Cockpit addons interactively. When --no-addons or
 # --addons is used the prompt is skipped. If -y/--yes is set, skips with none.
 _prompt_addons() {
@@ -221,129 +196,10 @@ _prompt_addons() {
   fi
 }
 
-# Built-in Cockpit addons that ship with every scaffolded project.
-_write_builtin_addons() {
-
-  # --- AssetsUpload: POST /api/assets/upload -----------------------------------
-  mkdir -p "$1/cockpit/addons/AssetsUpload"
-  cat > "$1/cockpit/addons/AssetsUpload/bootstrap.php" <<'PHP'
-<?php
-
-$this->on('restApi.config', function($restApi) {
-    $restApi->addEndPoint('/assets/upload', [
-        'POST' => function($params, $app) {
-            $meta = ['folder' => $this->param('folder', '')];
-            return $this->module('assets')->upload('files', $meta);
-        }
-    ]);
-});
-PHP
-
-  # --- ModelManager: CRUD for content models -----------------------------------
-  mkdir -p "$1/cockpit/addons/ModelManager"
-  cat > "$1/cockpit/addons/ModelManager/bootstrap.php" <<'PHP'
-<?php
-
-$this->on('restApi.config', function($restApi) {
-
-    // List all content models
-    $restApi->addEndPoint('/models', [
-        'GET' => function($params, $app) {
-            $models = $app->module('content')->models();
-
-            if (!$app->helper('acl')->isSuperAdmin()) {
-                $acl = $app->helper('acl');
-                $models = array_filter($models, function($m) use($acl) {
-                    return $acl->isAllowed("content/{$m['name']}/read");
-                });
-            }
-
-            return array_values($models);
-        }
-    ]);
-
-    // Save (create or update) a content model
-    $restApi->addEndPoint('/models/save', [
-        'POST' => function($params, $app) {
-
-            $model = $app->param('model');
-
-            if (!$model || !isset($model['name'], $model['type']) || !trim($model['name']) || !trim($model['type'])) {
-                $app->response->status = 412;
-                return ['error' => 'Model data is missing or invalid'];
-            }
-
-            if (!in_array($model['type'], ['collection', 'singleton', 'tree'])) {
-                $app->response->status = 412;
-                return ['error' => 'Invalid model type'];
-            }
-
-            if (!$app->helper('acl')->isAllowed("content/:models/manage") && !$app->helper('acl')->isAllowed("content/{$model['name']}/manage")) {
-                $app->response->status = 401;
-                return ['error' => 'Permission denied'];
-            }
-
-            try {
-                $result = $app->module('content')->saveModel($model['name'], $model);
-                return $result;
-            } catch (\Throwable $e) {
-                $app->response->status = 500;
-                return ['error' => $e->getMessage()];
-            }
-        }
-    ]);
-
-    // Remove a content model
-    $restApi->addEndPoint('/models/remove', [
-        'POST' => function($params, $app) {
-
-            $name = $app->param('name');
-
-            if (!$name || !trim($name)) {
-                $app->response->status = 412;
-                return ['error' => 'Model name is missing'];
-            }
-
-            if (!$app->helper('acl')->isAllowed("content/:models/manage")) {
-                $app->response->status = 401;
-                return ['error' => 'Permission denied'];
-            }
-
-            try {
-                $app->module('content')->removeModel($name);
-                return ['success' => true];
-            } catch (\Throwable $e) {
-                $app->response->status = 500;
-                return ['error' => $e->getMessage()];
-            }
-        }
-    ]);
-});
-PHP
-}
-
-# stays empty and the project still scaffolds. Re-run the installer later to
-# fetch them:
-#   curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
-#     | sh -s -- Forms Replica --dir addons
-_install_addons() {
-  local dir="$1" names="$2" addons_dir="${1}/cockpit/addons"
-  info "Installing Cockpit addons: ${names}"
-  mkdir -p "${addons_dir}"
-
-  if ! curl -fsSL "https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh" \
-      | sh -s -- ${names} --dir "${addons_dir}"; then
-    warn "Addon install failed (offline?). The project still works without them."
-    warn "Re-run later: curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh | sh -s -- ${names} --dir ${addons_dir}"
-    return 0
-  fi
-
-  for name in ${names}; do
-    [[ -d "${addons_dir}/${name}" ]] \
-      || warn "Addon '${name}' did not land in ${addons_dir}; check the name and re-run."
-  done
-  ok "Addons installed into ${addons_dir}"
-}
+# Built-in Cockpit addons that ship with every scaffolded project. They are
+# real source files in src/addons/ (the single source of truth for all addons
+# Built-in and optional addons are written by _write_builtin_addons /
+# _install_addons from src/lib/templates.sh (shared with `gosite sync`).
 
 # -----------------------------------------------------------------------------
 _write_go_mod() {
@@ -1428,22 +1284,16 @@ EOF
   # the pasted compose file, not the repo checkout, silently mounting empty
   # directories. cockpit/config.php reads values through Cockpit's ${VAR}
   # resolution, so the environment variables in the compose file still win.
+  #
+  # No package installation happens at build time: the stock image already
+  # ships PHP, the Flysystem S3 adapter and the AWS SDK under lib/vendor/ (it
+  # has no composer binary, so a composer step would fail the build).
   cat > "$1/deploy/Dockerfile.cms" <<'EOF'
 FROM cockpithq/cockpit:core-2.14.0
 
 COPY cockpit/config.php /var/www/html/config/config.php
-
-# S3 storage adapter (optional — only loaded when STORAGE_ADAPTER=s3)
-RUN composer require league/flysystem-aws-s3-v3 --no-interaction
-EOF
-
-  # Addons are optional (--no-addons scaffolds without cockpit/addons/), so the COPY
-  # only makes it into the image when they exist.
-  if [[ "${ADDONS_ENABLED}" -eq 1 ]]; then
-    cat >> "$1/deploy/Dockerfile.cms" <<'EOF'
 COPY cockpit/addons/ /var/www/html/addons/
 EOF
-  fi
 
   cat > "$1/.dockerignore" <<'EOF'
 .git
@@ -1456,352 +1306,6 @@ cockpit-storage/
 docker-compose*.yml
 deploy/
 README.md
-EOF
-}
-
-# -----------------------------------------------------------------------------
-_write_compose_dev() {
-  # LOCAL ONLY: ports mapped to localhost, source bind-mounted, air hot reload,
-  # attached to the external shared network for Redis.
-  cat > "$1/docker-compose.yml" <<'EOF'
-# Local development stack for __PROJECT__.
-# Redis and MongoDB are NOT defined here: they are the shared gosite
-# infrastructure, reachable by container name on the external network.
-# Start them with `gosite infra up`.
-
-services:
-  app:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile.dev
-    container_name: __PROJECT__-app
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      PORT: "8080"
-      APP_ENV: development
-      REDIS_URL: "redis://__REDIS_HOST__:__REDIS_PORT__/0"
-      COCKPIT_URL: "http://__PROJECT__-cms:80"
-    # Host ports stay mapped as a fallback; the domain below is the main entry.
-    ports:
-      - "__APP_PORT__:8080"
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=__NETWORK__
-      - traefik.http.routers.__PROJECT__-app.rule=Host(`__DOMAIN__`)
-      - traefik.http.routers.__PROJECT__-app.entrypoints=websecure
-      - traefik.http.routers.__PROJECT__-app.tls=true
-      - traefik.http.services.__PROJECT__-app.loadbalancer.server.port=8080
-    volumes:
-      # Live source mount: air rebuilds on save.
-      - .:/app
-      # Named volumes keep the module cache and build artifacts off the host FS.
-      - __PROJECT__-gomod:/go/pkg/mod
-      - __PROJECT__-tmp:/app/tmp
-    depends_on:
-      - cms
-    networks:
-      - gosite
-
-  cms:
-    image: cockpithq/cockpit:core-2.14.0
-    container_name: __PROJECT__-cms
-    restart: unless-stopped
-    environment:
-      # Cockpit reads these through config.php's ${VAR} resolution.
-      COCKPIT_SESSION_NAME: "__PROJECT__"
-      COCKPIT_SEC_KEY: "${COCKPIT_SEC_KEY}"
-      MONGO_HOST: "__MONGO_HOST__"
-      MONGO_PORT: "__MONGO_PORT__"
-      MONGO_DB: "__PROJECT__"
-      STORAGE_ADAPTER: "${STORAGE_ADAPTER}"
-      S3_ENDPOINT: "${S3_ENDPOINT}"
-      S3_BUCKET: "${S3_BUCKET}"
-      S3_REGION: "${S3_REGION}"
-      S3_KEY: "${S3_KEY}"
-      S3_SECRET: "${S3_SECRET}"
-      S3_USE_PATH_STYLE: "${S3_USE_PATH_STYLE}"
-      S3_PREFIX: "${S3_PREFIX}"
-    ports:
-      - "__CMS_PORT__:80"
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=__NETWORK__
-      - traefik.http.routers.__PROJECT__-cms.rule=Host(`__CMS_DOMAIN__`)
-      - traefik.http.routers.__PROJECT__-cms.entrypoints=websecure
-      - traefik.http.routers.__PROJECT__-cms.tls=true
-      - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
-    volumes:
-      - ./cockpit/config.php:/var/www/html/config/config.php:ro
-      - ./cockpit-storage:/var/www/html/storage
-      # Cockpit addons (Forms + Replica), fetched at scaffold time.
-      - ./cockpit/addons:/var/www/html/addons
-    networks:
-      - gosite
-
-volumes:
-  __PROJECT__-gomod:
-  __PROJECT__-tmp:
-
-networks:
-  gosite:
-    external: true
-    name: __NETWORK__
-EOF
-}
-
-# -----------------------------------------------------------------------------
-_write_compose_prod() {
-  # COOLIFY: no host port mappings, Traefik labels, all config through env vars
-  # that are set from the Coolify UI.
-  cat > "$1/docker-compose.prod.yml" <<'EOF'
-# Production stack for __PROJECT__, in Coolify's native compose format.
-#
-# No host ports are published: Coolify's Traefik proxy routes to the container
-# port declared in the labels below. The stack is self-contained - it brings its
-# own MongoDB and Redis - so the only thing Coolify has to supply is the domain
-# names and the secrets.
-#
-# Required variables in Coolify:
-#   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
-#   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
-#   COCKPIT_API_TOKEN    shared token between the app and Cockpit
-#   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
-#                        default, so this must be set to something private
-#   MONGO_USER           MongoDB root user
-#   MONGO_PASSWORD       MongoDB root password
-#
-# Optional: MONGO_DB (defaults to the project name).
-
-services:
-  app:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-    restart: unless-stopped
-    environment:
-      - APP_ENV=production
-      - PORT=8080
-      - SERVICE_FQDN_APP
-      - REDIS_URL=redis://redis:6379/0
-      - COCKPIT_URL=http://cms:80
-      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
-    labels:
-      # Tells Coolify this service is built from the repository Dockerfile.
-      - coolify.managed=true
-      - coolify.image=true
-      - traefik.enable=true
-      - traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP}`)
-      - traefik.http.routers.__PROJECT__-app.entrypoints=https
-      - traefik.http.routers.__PROJECT__-app.tls=true
-      - traefik.http.routers.__PROJECT__-app.tls.certresolver=letsencrypt
-      - traefik.http.services.__PROJECT__-app.loadbalancer.server.port=8080
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    depends_on:
-      redis:
-        condition: service_healthy
-      cms:
-        condition: service_started
-
-  cms:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile.cms
-    restart: unless-stopped
-    environment:
-      # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
-      - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
-      - MONGO_HOST=mongo
-      - MONGO_PORT=27017
-      - MONGO_USER=${MONGO_USER}
-      - MONGO_PASSWORD=${MONGO_PASSWORD}
-      - MONGO_DB=${MONGO_DB:-__PROJECT__}
-      # S3 storage (optional — only used when STORAGE_ADAPTER=s3)
-      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
-      - S3_ENDPOINT=${S3_ENDPOINT}
-      - S3_BUCKET=${S3_BUCKET}
-      - S3_REGION=${S3_REGION}
-      - S3_KEY=${S3_KEY}
-      - S3_SECRET=${S3_SECRET}
-      - S3_USE_PATH_STYLE=${S3_USE_PATH_STYLE:-false}
-      - S3_PREFIX=${S3_PREFIX}
-    volumes:
-      # Uploads and cache still live on disk even when the data is in MongoDB.
-      # Config and addons are NOT mounted here: Dockerfile.cms bakes the
-      # committed cockpit/config.php and addons/ into the image. Relative bind
-      # mounts (./cockpit/config.php, ./addons) resolve against the directory
-      # where Coolify stores the pasted compose file, not the repo checkout, so
-      # they silently mount empty directories. After a deploy that changes an
-      # addon, clear storage/cache/modules.cache.php once so the CMS re-registers
-      # it on the next boot.
-      - cockpit-storage:/var/www/html/storage
-    labels:
-      - coolify.managed=true
-      - traefik.enable=true
-      - traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS}`)
-      - traefik.http.routers.__PROJECT__-cms.entrypoints=https
-      - traefik.http.routers.__PROJECT__-cms.tls=true
-      - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
-      - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
-    depends_on:
-      mongo:
-        condition: service_healthy
-
-  mongo:
-    image: mongo:8.0
-    restart: unless-stopped
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      # Gate the CMS on a real ping, not just the container being up: Cockpit
-      # fails at boot if it cannot reach the database.
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
-  redis:
-    image: redis:8-alpine
-    restart: unless-stopped
-    # Page cache only: evict rather than refuse writes when memory runs out.
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-
-volumes:
-  cockpit-storage:
-  mongo-data:
-  redis-data:
-EOF
-
-  # Cockpit configures its database in PHP, not through environment variables:
-  # the image has no COCKPIT_DATABASE_* handling. This file is merged over
-  # Cockpit's defaults at boot, and its ${VAR} references are resolved from the
-  # container environment.
-  mkdir -p "$1/cockpit"
-  cat > "$1/cockpit/config.php" <<'EOF'
-<?php
-
-// Cockpit configuration, merged over the defaults in bootstrap.php.
-// Used in both local development and production: local mounts this into the
-// CMS container; deployment bakes it into the image via Dockerfile.cms.
-//
-// ${VAR} placeholders are resolved from the environment by Cockpit's DotEnv.
-
-return [
-
-    // MongoDB. The mongodb PHP extension ships with the image, and the
-    // mongodb:// scheme is what selects the Mongo driver over mongolite.
-    // Locally this points at the shared gosite-mongo container; in production
-    // each project has its own MongoDB service in the compose stack.
-    'database' => [
-        'server' => 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}',
-        'options' => ['db' => '${MONGO_DB}'],
-        'driverOptions' => [],
-    ],
-
-    // The image ships a hardcoded, publicly known key. Overriding it is what
-    // stops anyone from forging a session against a deployed site.
-    'sec-key' => '${COCKPIT_SEC_KEY}',
-
-    'session' => [
-        'name' => '__PROJECT__',
-    ],
-
-    // Storage adapter for assets (uploads, images, etc.).
-    // 'local' stores files in /var/www/html/storage/uploads (the default).
-    // 's3'  stores files in an S3-compatible bucket (MinIO in dev, AWS/Backblaze in prod).
-    'storage' => [
-        'adapter' => '${STORAGE_ADAPTER:-local}',
-        'clients' => [
-            's3' => [
-                'credentials' => [
-                    'key' => '${S3_KEY}',
-                    'secret' => '${S3_SECRET}',
-                ],
-                'region' => '${S3_REGION:-us-east-1}',
-                'endpoint' => '${S3_ENDPOINT}',
-                'use_path_style_endpoint' => filter_var('${S3_USE_PATH_STYLE:-false}', FILTER_VALIDATE_BOOLEAN),
-            ],
-        ],
-        'bucket' => '${S3_BUCKET}',
-        'prefix' => '${S3_PREFIX}',
-    ],
-];
-EOF
-}
-
-# -----------------------------------------------------------------------------
-_write_env_files() {
-  cat > "$1/.env" <<'EOF'
-# Local development environment. Not committed.
-APP_ENV=development
-PORT=8080
-REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
-COCKPIT_URL=http://__PROJECT__-cms:80
-COCKPIT_API_TOKEN=__CMS_TOKEN__
-COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
-
-# S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
-# MinIO runs in the shared gosite infra; these defaults point at it.
-# For production, set these from the Coolify dashboard (AWS S3, Backblaze, etc.).
-STORAGE_ADAPTER=local
-S3_ENDPOINT=http://gosite-minio:9000
-S3_BUCKET=assets
-S3_REGION=us-east-1
-S3_KEY=minioadmin
-S3_SECRET=minioadmin
-S3_USE_PATH_STYLE=true
-S3_PREFIX=
-EOF
-
-  cat > "$1/.env.example" <<'EOF'
-# Copy to .env for local dev; set the same keys in the Coolify UI for prod.
-# Runtime environment. development/dev/local render the cache-purge button,
-# which posts without a token; anything else (or unset) means production.
-APP_ENV=production
-PORT=8080
-REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
-COCKPIT_URL=http://__PROJECT__-cms:80
-COCKPIT_API_TOKEN=change-me
-COCKPIT_SEC_KEY=change-me
-
-# S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
-# In production, use AWS S3, Backblaze B2, or any S3-compatible provider.
-# STORAGE_ADAPTER=s3
-# S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
-# S3_BUCKET=my-project-assets
-# S3_REGION=us-east-1
-# S3_KEY=AKIA...
-# S3_SECRET=...
-# S3_USE_PATH_STYLE=false
-# S3_PREFIX=production
-EOF
-
-  # Marker file consumed by list/start/stop/remove.
-  cat > "$1/${GOSITE_MARKER}" <<'EOF'
-GOSITE_PROJECT=__PROJECT__
-GOSITE_MODULE=__MODULE__
-GOSITE_APP_PORT=__APP_PORT__
-GOSITE_CMS_PORT=__CMS_PORT__
-GOSITE_TAILWIND=__TAILWIND__
-GOSITE_APP_DOMAIN=__DOMAIN__
-GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
-GOSITE_NETWORK=__NETWORK__
-GOSITE_ADDONS=__ADDONS__
 EOF
 }
 
@@ -2178,8 +1682,9 @@ or from inside the directory without it.
 | `gosite list` | Every project, its ports and container status |
 | `gosite cd __PROJECT__` | Jump to the directory (needs `eval "$(gosite shell-init)"`) |
 | `gosite path __PROJECT__` | Print the directory, for scripts |
-| `gosite remove __PROJECT__` | Delete everything; `--keep-source` keeps the code |
-| `gosite infra up` / `down` / `status` | Shared Traefik and Redis |
+ | `gosite remove __PROJECT__` | Delete everything; `--keep-source` keeps the code |
+ | `gosite sync __PROJECT__` | Re-apply gosite's templates: compose files, addons, missing `.env` keys |
+ | `gosite infra up` / `down` / `status` | Shared Traefik and Redis |
 | `gosite dns` | Check that `*.test` resolves to 127.0.0.1 |
 | `gosite doctor` | Check the local toolchain |
 

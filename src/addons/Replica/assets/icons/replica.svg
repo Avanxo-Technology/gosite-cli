@@ -1,0 +1,14 @@
+<svg width="100%" height="100%" viewBox="0 0 100 100" version="1.1" xmlns="http://www.w3.org/2000/svg" xml:space="preserve" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g>
+        <path d="M20,14L54,14C57.314,14 60,16.686 60,20L60,54C60,57.314 57.314,60 54,60L20,60C16.686,60 14,57.314 14,54L14,20C14,16.686 16.686,14 20,14ZM22,22L22,52L52,52L52,22L22,22Z" style="fill-rule:evenodd;"/>
+    </g>
+    <g>
+        <path d="M46,40L80,40C83.314,40 86,42.686 86,46L86,80C86,83.314 83.314,86 80,86L46,86C42.686,86 40,83.314 40,80L40,46C40,42.686 42.686,40 46,40ZM48,48L48,78L78,78L78,48L48,48Z" style="fill-rule:evenodd;"/>
+    </g>
+    <g>
+        <path d="M58,28L70,28C71.657,28 73,29.343 73,31C73,32.657 71.657,34 70,34L58,34C56.343,34 55,32.657 55,31C55,29.343 56.343,28 58,28Z" style="fill-rule:nonzero;"/>
+    </g>
+    <g>
+        <path d="M30,66L42,66C43.657,66 45,67.343 45,69C45,70.657 43.657,72 42,72L30,72C28.343,72 27,70.657 27,69C27,67.343 28.343,66 30,66Z" style="fill-rule:nonzero;"/>
+    </g>
+</svg>

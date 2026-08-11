@@ -29,6 +29,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   cd     <name>      Jump into a project directory (needs shell-init)
   path   <name>      Print a project's absolute path
   remove <name>      Delete a project entirely (--keep-source keeps the code)
+  sync   [name]      Re-apply gosite's templates (compose, addons, .env)
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
@@ -75,6 +76,7 @@ dispatch() {
     path)            load_command cd;     cmd_path   "$@" ;;
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
+    sync)            load_command sync;   cmd_sync   "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          require_dependencies --report ;;
     dns)             load_command dns; cmd_dns ;;

@@ -96,6 +96,7 @@ gosite open my-site           # open in Finder (macOS)
 gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
 gosite remove my-site          # deletes containers, cert and the directory
+gosite sync my-site            # re-apply gosite's templates to an existing project
 gosite infra down
 ```
 
@@ -253,6 +254,29 @@ gosite remove my-site                # everything, including the code
 gosite remove my-site --keep-source  # tear down the stack, keep the directory
 ```
 
+### Syncing templates into an existing project
+
+The templates that `create` writes are single-sourced: the compose files and
+the Cockpit config live in `src/lib/templates.sh`, and every addon ships in
+`src/addons/`. `gosite sync` re-applies those same sources to a project that
+already exists, without touching your work — it reads the project's
+`.gosite.env` marker, so it always renders the exact values the project was
+created with. This is how an existing site picks up gosite updates.
+
+```bash
+gosite sync my-site              # compose + config.php + addons + .env keys
+gosite sync my-site --compose    # re-render docker-compose(.prod).yml and config.php
+gosite sync my-site --addons     # refresh addons present, or --addons "Forms Replica"
+gosite sync my-site --env        # add keys missing from .env (never overwrites)
+gosite sync my-site --build      # ...then rebuild the local images
+gosite sync --list-addons        # show the addon library
+```
+
+`.env` merging only appends keys that the template has and the project lacks;
+existing values — including `COCKPIT_SEC_KEY` — are never overwritten. After an
+addon sync, Cockpit's module cache is cleared so the refreshed addons register
+on the next boot.
+
 ### Project registry
 
 Projects are indexed in `~/.gosite/projects.tsv` (`<name>\t<path>`) when they
@@ -274,9 +298,11 @@ gosite-cli/
     ├── lib/
     │   ├── config.sh             # workspace, network, ports, domains (env-overridable)
     │   ├── helpers.sh            # logging, validation, registry, docker helpers, dep checks
+    │   ├── templates.sh          # shared template writers (compose, env, addons) for create + sync
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     └── commands/
         ├── cmd_create.sh         # project scaffolding (Go, templates, Docker, compose)
+        ├── cmd_sync.sh           # re-apply gosite's templates to an existing project
         ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
