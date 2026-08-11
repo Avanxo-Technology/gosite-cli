@@ -338,7 +338,20 @@ EOF
 // Used in both local development and production: local mounts this into the
 // CMS container; deployment bakes it into the image via Dockerfile.cms.
 //
-// ${VAR} placeholders are resolved from the environment by Cockpit's DotEnv.
+// Values are read with getenv() directly. Cockpit's DotEnv ${VAR} resolution
+// does not run reliably on all images for values baked into config.php.
+
+$mongoUser = (string)getenv('MONGO_USER');
+$mongoPass = (string)getenv('MONGO_PASSWORD');
+$mongoHost = getenv('MONGO_HOST') ?: 'localhost';
+$mongoPort = getenv('MONGO_PORT') ?: '27017';
+
+// Credentials are optional: the shared gosite-mongo runs without auth, and an
+// empty user:pass@ in the URI makes the Mongo driver attempt SCRAM auth and
+// fail with "Authentication failed". Only append credentials when both exist.
+$mongoAuth = ($mongoUser !== '' && $mongoPass !== '')
+    ? rawurlencode($mongoUser).':'.rawurlencode($mongoPass).'@'
+    : '';
 
 $config = [
 
@@ -347,14 +360,14 @@ $config = [
     // Locally this points at the shared gosite-mongo container; in production
     // each project has its own MongoDB service in the compose stack.
     'database' => [
-        'server' => 'mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST}:${MONGO_PORT}',
-        'options' => ['db' => '${MONGO_DB}'],
+        'server' => 'mongodb://'.$mongoAuth.$mongoHost.':'.$mongoPort,
+        'options' => ['db' => getenv('MONGO_DB') ?: '__PROJECT__'],
         'driverOptions' => [],
     ],
 
     // The image ships a hardcoded, publicly known key. Overriding it is what
     // stops anyone from forging a session against a deployed site.
-    'sec-key' => '${COCKPIT_SEC_KEY}',
+    'sec-key' => getenv('COCKPIT_SEC_KEY') ?: '__COCKPIT_SEC_KEY__',
 
     'session' => [
         'name' => '__PROJECT__',
