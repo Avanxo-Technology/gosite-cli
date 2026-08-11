@@ -183,20 +183,29 @@ Flysystem S3 adapter, so switching environments is one variable:
 ```bash
 # .env (dev) — already points at the shared gosite-minio
 STORAGE_ADAPTER=s3
-S3_ENDPOINT=http://gosite-minio:9000
+S3_URL=http://gosite-minio:9000
 S3_BUCKET=assets
+S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
-S3_USE_PATH_STYLE=true
+S3_PUBLIC_URL=http://localhost:9002/assets   # browser-reachable base for asset URLs
 
 # production (Coolify dashboard) — any S3-compatible provider
 STORAGE_ADAPTER=s3
-S3_ENDPOINT=https://s3.us-east-1.amazonaws.com   # or Backblaze, etc.
+S3_URL=https://s3.us-east-1.amazonaws.com   # or Backblaze, etc.; leave unset for AWS virtual-hosted
 S3_BUCKET=my-site-assets
+S3_REGION=us-east-1
 S3_KEY=AKIA...
 S3_SECRET=...
-S3_USE_PATH_STYLE=false
+S3_PUBLIC_URL=https://cdn.example.com/my-assets
 ```
+
+With `S3_PUBLIC_URL` set, CMS assets (including generated thumbnails, served
+from `uploads://thumbs`) load directly from the bucket, CDN-style. Templates
+render them through the `assetURL` helper registered by
+`internal/views/render.go` — `{{assetURL (index .Content "field_name")}}` —
+which resolves against `S3_PUBLIC_URL` when S3 is on and against the local
+`/storage/uploads` proxy otherwise, so markup never needs a fallback.
 
 The MinIO console is at `http://localhost:9003` (API on `9002`), started with
 the shared infrastructure via `gosite infra up`. Set `STORAGE_ADAPTER=local`

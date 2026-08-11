@@ -157,6 +157,7 @@ services:
       S3_KEY: "${S3_KEY}"
       S3_SECRET: "${S3_SECRET}"
       S3_PREFIX: "${S3_PREFIX}"
+      S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -264,6 +265,7 @@ services:
       - S3_KEY=${S3_KEY}
       - S3_SECRET=${S3_SECRET}
       - S3_PREFIX=${S3_PREFIX}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
       # Config and addons are NOT mounted here: Dockerfile.cms bakes the
@@ -372,8 +374,20 @@ if (getenv('STORAGE_ADAPTER') === 's3') {
             'region' => getenv('S3_REGION') ?: 'auto',
             'bucket' => getenv('S3_BUCKET'),
             'prefix' => getenv('S3_PREFIX') ?: '',
+            // Browser-reachable base for asset URLs: localhost:9002 for local
+            // MinIO, a CDN or bucket endpoint in production. When unset the
+            // addon keeps Cockpit's own /storage/uploads proxy (which only
+            // works while files stay on disk).
+            'public_url' => getenv('S3_PUBLIC_URL') ?: '',
         ],
     ];
+
+    // Generated thumbnails go to S3 too, so the browser can load them through
+    // the public URL. The default `tmp://thumbs` storage resolves to a disk
+    // path because docs_root is unset on this image, and pointing it at the
+    // local `#uploads` mount would die with the S3 adapter. Requires the
+    // public_url above to be set.
+    $config['assets']['storage'] = 'uploads://thumbs';
 }
 
 return $config;
@@ -402,6 +416,11 @@ S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
 S3_PREFIX=
+# Public base for CMS asset URLs (used when STORAGE_ADAPTER=s3): localhost:9002
+# is MinIO's public S3 API, so the app and the browser load assets CDN-style
+# instead of through the /storage/uploads proxy. In production point this at a
+# CDN or bucket endpoint.
+S3_PUBLIC_URL=http://localhost:9002/assets
 EOF
 
   cat > "$1/.env.example" <<'EOF'
@@ -425,6 +444,7 @@ COCKPIT_SEC_KEY=change-me
 # S3_KEY=AKIA...
 # S3_SECRET=...
 # S3_PREFIX=production
+# S3_PUBLIC_URL=https://cdn.example.com/my-assets   # browser-reachable base for asset URLs
 EOF
 
   # Marker file consumed by list/start/stop/remove.

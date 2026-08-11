@@ -319,7 +319,7 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 	}
 	log.Info("redis connected", "addr", opts.Addr, "db", opts.DB)
 
-	renderer := views.NewRenderer()
+	renderer := views.NewRenderer(cfg.AssetBaseURL())
 
 	return &App{
 		Config:   cfg,
@@ -404,15 +404,19 @@ _write_config() {
 // Package config reads every environment-provided setting exactly once.
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
-	Port         string
-	RedisURL     string
-	CockpitURL   string
-	CockpitToken string
-	Environment  string
+	Port           string
+	RedisURL       string
+	CockpitURL     string
+	CockpitToken   string
+	Environment    string
 	StorageAdapter string
+	S3PublicURL    string
 }
 
 func Load() Config {
@@ -423,7 +427,19 @@ func Load() Config {
 		CockpitToken:   os.Getenv("COCKPIT_API_TOKEN"),
 		Environment:    os.Getenv("APP_ENV"),
 		StorageAdapter: env("STORAGE_ADAPTER", "local"),
+		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),
 	}
+}
+
+// AssetBaseURL is the base used to build browser-reachable URLs for CMS asset
+// paths. With S3 storage the assets live on a public bucket/endpoint, so the
+// page points at it directly (CDN-style) instead of proxying through this app.
+// Without S3 the base is the local /storage/uploads mount that router.go serves.
+func (c Config) AssetBaseURL() string {
+	if c.StorageAdapter == "s3" && strings.TrimSpace(c.S3PublicURL) != "" {
+		return strings.TrimRight(c.S3PublicURL, "/")
+	}
+	return "/storage/uploads"
 }
 
 // IsDev reports whether the app is running for development, where the
@@ -859,9 +875,11 @@ package views
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 )
@@ -880,11 +898,39 @@ type Renderer struct {
 
 // NewRenderer parses every template at startup and panics on a malformed one,
 // so a broken template fails the deploy instead of the first request.
-func NewRenderer() *Renderer {
+//
+// assetBase is the base URL for CMS assets (config.AssetBaseURL): with S3
+// storage it is the public bucket/endpoint so images load CDN-style; otherwise
+// it is the local /storage/uploads mount.
+func NewRenderer(assetBase string) *Renderer {
+
+	// assetURL turns a Cockpit asset object (a map with a "path") into a
+	// browser-reachable URL. It returns the empty string when the field is
+	// missing, so markup can always depend on CMS content.
+	// Views call it as {{assetURL (index .Content "hero_portrait")}}.
+	assetURL := func(asset any) string {
+		if m, ok := asset.(map[string]any); ok {
+			if p, ok := m["path"].(string); ok && p != "" {
+				return strings.TrimRight(assetBase, "/") + "/" + strings.TrimLeft(p, "/")
+			}
+		}
+		return ""
+	}
+
+	funcs := template.FuncMap{
+		"assetURL": assetURL,
+		// toJSON marshals a value for Alpine x-data. It returns a plain string
+		// so html/template escapes it in the attribute, keeping XSS out.
+		"toJSON": func(v any) (string, error) {
+			b, err := json.Marshal(v)
+			return string(b), err
+		},
+	}
+
 	// Every page is parsed as layout + that page + all components, so a page
 	// can use any component without declaring anything.
 	page := func(name string) *template.Template {
-		return template.Must(template.ParseFS(files,
+		return template.Must(template.New(name).Funcs(funcs).ParseFS(files,
 			"layout.html",
 			"pages/"+name+".html",
 			"components/*.html",
@@ -1224,6 +1270,8 @@ _write_dockerfiles() {
 # --- stage 1: build ----------------------------------------------------------
 FROM golang:1.26-alpine AS builder
 
+ARG GO_BUILD_CPUS=2
+
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 
@@ -1234,7 +1282,9 @@ RUN go mod download
 COPY . .
 
 # CGO_ENABLED=0 produces a fully static binary that runs on a bare alpine.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# GOMAXPROCS + -p limit parallel compilation to 2 CPUs so the build does not
+# saturate a 6-core server. Override with GO_BUILD_CPUS=6 in Coolify if needed.
+RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=${GO_BUILD_CPUS} go build -p=${GO_BUILD_CPUS} \
       -trimpath -ldflags="-s -w" \
       -o /out/app ./cmd/server
 
@@ -1338,7 +1388,7 @@ There is no JavaScript build step and no SPA.
 | CMS database | MongoDB (shared `__MONGO_HOST__` container locally, own MongoDB in production) |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
-| CMS addons | Forms + Replica in `cockpit/addons/`, installed at scaffold time (`--no-addons` skips) |
+| CMS addons | three built-ins + optional Forms/Replica in `cockpit/addons/` (from gosite's addon library) |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
@@ -1382,33 +1432,59 @@ There is no JavaScript build step and no SPA.
 
 ## Cockpit addons
 
-The CMS carries two optional addons installed at scaffold time from
-Avanxo-Technology/cockpit-addons. Locally the container mounts
-`cockpit/addons/`; in production `deploy/Dockerfile.cms` bakes them (plus
+Cockpit loads `cockpit/addons/` as first-class modules. Locally the container
+mounts the folder; in production `deploy/Dockerfile.cms` bakes them (plus
 `cockpit/config.php`) into the image, because relative bind mounts do not
-resolve to the repo checkout in Coolify:
+resolve to the repo checkout in Coolify.
+
+### Built-ins (always installed)
+
+- **AssetsUpload** - `POST /api/assets/upload` (multipart form, `api-key`
+  header, optional `folder` field). The REST-equivalent of the admin uploader;
+  the app uses it to push files into the CMS.
+- **ModelManager** - content-model CRUD over the REST API: `GET /api/models`,
+  `POST /api/models/save` (body `model` with `name` + `type` of collection /
+  singleton / tree), `POST /api/models/remove` (body `name`). Lets the app
+  create and evolve content schemas without the admin UI.
+- **CloudStorage** - S3-compatible asset storage, active only when
+  `STORAGE_ADAPTER=s3` (MinIO in dev, AWS/R2/Backblaze in prod). Uploads and
+  thumbnails are served from `S3_PUBLIC_URL`. The local `#uploads` mount is
+  intentionally NOT redirected to S3: core's thumbnail pipeline
+  (`makeAssetLocalAvailable()`) writes and re-reads that mount from disk, so
+  redirecting it 404s every generated thumbnail.
+
+All three authenticate with the same `api-key` header (`$COCKPIT_API_TOKEN`) as
+the content API. Render a CMS asset in a template with the `assetURL` helper
+(see `internal/views/render.go`): `{{assetURL (index .Content "field_name")}}`
+resolves against `S3_PUBLIC_URL` when S3 is on, otherwise against the local
+`/storage/uploads` proxy, and renders empty when the editor has not filled the
+field in.
+
+### Optional (opt-in at scaffold time)
 
 - **Forms** - inbox-style manager for website form submissions, with anti-spam,
   CSV export and notifications.
 - **Replica** - content replication between Cockpit instances (push/pull,
   multiple targets, mirror/merge).
 
-Skip them with `gosite create --no-addons`. After the first login grant the
-permissions `forms/manage` and `replica/manage` in Settings > Roles. Update or
-add addons later with:
+Choose the optional ones when creating (`--addons "Forms Replica"`, or
+`--no-addons` to skip). After the first login grant the permissions
+`forms/manage` and `replica/manage` in Settings > Roles.
+
+### Managing addons
+
+All addons come from gosite's addon library (`src/addons/`), so updating gosite
+keeps every future scaffold current. Update or add addons later with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
-  | sh -s -- all --dir cockpit/addons --force
-gosite restart __PROJECT__
+gosite sync --addons
 ```
 
-The installer clears the Cockpit module cache; the restart is needed so PHP does
-not serve the previous bootstrap from opcache. In production the module cache
-lives in the persistent `cockpit-storage` volume, so after a deploy that adds or
-updates an addon, clear `storage/cache/modules.cache.php` once inside the cms
-container (the image rebuild ships the files; the stale cache is what hides
-them).
+`sync` overwrites the addons in place and clears the Cockpit module cache. In
+production the module cache lives in the persistent `cockpit-storage` volume, so
+after a deploy that ships new or updated addons, clear
+`storage/cache/modules.cache.php` once inside the cms container (the image
+rebuild ships the files; the stale cache is what hides them).
 EOF
 
   # Styling differs per project, so state the truth for this one.
@@ -1474,7 +1550,7 @@ internal/            Application packages (not importable by external code).
   app/               App struct, NewApp, NewRouter (wiring).
 cockpit/             Cockpit CMS configuration.
   config.php         Production config (baked into Dockerfile.cms).
-  addons/            Cockpit addons (Forms, Replica).
+  addons/            Cockpit addons (three built-ins + optional Forms/Replica).
 deploy/              Dockerfiles for production, dev, and CMS images.
 static/              Assets served at /static.
 ```
@@ -1622,8 +1698,36 @@ To add a field: add it in Cockpit, then read it in the template with a fallback
 
 The CMS container mounts `cockpit/addons/` into `/var/www/html/addons`, which
 Cockpit core loads as first-class modules (bootstrap.php includes it in
-`modulesPaths`). `gosite create` installs two by default from
-Avanxo-Technology/cockpit-addons:
+`modulesPaths`). Every scaffold ships with three built-in addons and, when opted
+in at scaffold time, two optional ones. All of them come from gosite's addon
+library (`src/addons/`), so `gosite sync --addons` pulls newer versions into an
+existing project.
+
+#### Built-ins (always installed)
+
+- **AssetsUpload** - `POST /api/assets/upload` (multipart, `api-key` header,
+  optional `folder` field). REST upload for the CMS; mirrors the admin
+  uploader. See `src/addons/AssetsUpload/bootstrap.php`.
+- **ModelManager** - content-model CRUD over the REST API:
+  `GET /api/models` (list), `POST /api/models/save` (`model` body with `name`
+  + `type` = collection/singleton/tree), `POST /api/models/remove` (`name`
+  body). ACL-guarded (`content/:models/manage`). The app uses it to create or
+  evolve content schemas without the admin UI. See
+  `src/addons/ModelManager/bootstrap.php`.
+- **CloudStorage** - S3/S3-compatible storage for assets, active only when
+  `STORAGE_ADAPTER=s3` (MinIO in dev; AWS S3 / R2 / Backblaze in prod).
+  Config lives in the `cloudStorage` block of `cockpit/config.php` and follows
+  the Cockpit Pro shape. Generated thumbnails are served from `uploads://thumbs`
+  so they stay browser-reachable; the local `#uploads` mount is deliberately
+  NOT redirected to S3 because core's thumbnail pipeline
+  (`makeAssetLocalAvailable()`) copies to and re-reads from that disk mount,
+  and redirecting it 404s every thumbnail. See
+  `src/addons/CloudStorage/bootstrap.php`.
+
+All three authenticate with the same `api-key` header (`$COCKPIT_API_TOKEN`)
+as the content API.
+
+#### Optional (opt-in)
 
 - **Forms** - public `POST /forms/api/submit` receiver (anti-spam honeypot +
   rate limit), per-form admin screen, CSV export, mail/webhook notifications.
@@ -1632,11 +1736,24 @@ Avanxo-Technology/cockpit-addons:
 
 Grant `forms/manage` and `replica/manage` in Settings > Roles after first login.
 
+#### Serving CMS assets
+
+`internal/views/render.go` registers an `assetURL` helper:
+`{{assetURL (index .Content "field_name")}}`. It takes the Cockpit asset object
+(a map with a `path`) and returns a browser-reachable URL based on
+`config.AssetBaseURL` (`S3_PUBLIC_URL` when `STORAGE_ADAPTER=s3`, otherwise the
+local `/storage/uploads` proxy that router.go serves). An unfilled field renders
+as an empty string, so markup never depends on a fallback copy. `toJSON` is also
+available for feeding a value to Alpine `x-data` (it returns a string, which
+`html/template` escapes safely in the attribute).
+
+#### Managing addons
+
 Addons are plain directories, so an addon is added by dropping its folder into
-`cockpit/addons/` (or re-running the repo installer) and recreating the CMS
-container.
+`cockpit/addons/` or running `gosite sync --addons <name>` and recreating the
+CMS container.
 In non-debug mode Cockpit caches the module list in
-`storage/cache/modules.cache.php`; the installer clears it, and the container
+`storage/cache/modules.cache.php`; `gosite sync` clears it, and the container
 must restart because opcache holds the compiled bootstrap.
 
 ## htmx and Alpine
@@ -1788,7 +1905,7 @@ internal/            Application packages (not importable by external code).
   app/               App struct, NewApp, NewRouter (wiring).
 cockpit/             Cockpit CMS configuration.
   config.php         Production config (baked into Dockerfile.cms).
-  addons/            Cockpit addons (Forms, Replica).
+  addons/            Cockpit addons (three built-ins + optional Forms/Replica).
 deploy/              Dockerfiles for production, dev, and CMS images.
 static/              Assets served at /static.
 ```
@@ -1854,20 +1971,21 @@ needed unless the template needs to render the new data.
 
 Locally the CMS container mounts `cockpit/addons/`; in production
 `deploy/Dockerfile.cms` bakes `cockpit/config.php` and `cockpit/addons/` into
-the image. Scaffolding installs two optional addons by default:
+the image. Every scaffold ships with three built-ins (asset upload API, model
+manager, S3 storage) and the optional addons chosen at scaffold time
+(`--addons "Forms Replica"`, `--no-addons` to skip):
 
 - **Forms** — inbox-style manager for website form submissions: public receiver
   endpoint with anti-spam, an admin screen, CSV export and notifications.
 - **Replica** — content replication between Cockpit instances: push/pull,
   multiple targets, mirror/merge conflict handling, dry runs and a CLI.
 
-Skip them with `gosite create --no-addons`. After first login, grant
-`forms/manage` and `replica/manage` in Settings > Roles. To update or add more:
+After first login, grant `forms/manage` and `replica/manage` in Settings >
+Roles. To update the addons or add more:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Avanxo-Technology/cockpit-addons/main/install.sh \
-  | sh -s -- all --dir cockpit/addons --force
-gosite restart
+gosite sync --addons            # refresh built-ins + any optional addons already present
+gosite sync --addons Forms      # install or replace a single optional addon
 ```
 
 ## Local development

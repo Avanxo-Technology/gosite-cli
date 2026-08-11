@@ -24,8 +24,12 @@
  * - A custom `url` implies path-style addressing, which is what MinIO,
  *   DigitalOcean Spaces, Cloudflare R2 and Backblaze B2 expect. AWS S3 uses
  *   virtual-hosted addressing (no `url`).
- * - When `uploads` is configured the `#uploads` storage is mirrored too:
- *   Cockpit writes generated thumbnails to `#uploads://`.
+ * - `#uploads` is intentionally NOT mirrored to S3: core's thumbnail pipeline
+ *   (`makeAssetLocalAvailable()`) copies the original to the local `#uploads`
+ *   disk mount and re-reads it via `app->path("#uploads:...")`, so redirecting
+ *   that mount to S3 breaks every generated thumbnail (404).
+ * - Set `assets/storage` (config.php) to a storage with a browser-reachable
+ *   URL (e.g. `uploads://thumbs`) or the thumbnails point at a disk path.
  * - `type: azure` is not supported on core (the adapter is not bundled) and
  *   is skipped.
  */
@@ -65,14 +69,16 @@ $this->on('app.filestorage.init', function (&$storages) {
             'visibility' => $opts['visibility'] ?? 'public',
         ];
 
+        // Browser-reachable URL for generated asset links. Without it Cockpit
+        // keeps the default /storage/uploads proxy, which only works while the
+        // files stay on the container's disk.
+        if (!empty($opts['public_url'])) {
+            $s3['url'] = rtrim($opts['public_url'], '/');
+        }
+
         // Preserve mount/url from the bootstrap defaults so serving through
         // the CMS and the /storage/uploads proxy keeps working.
         $existing = $storages[$name] ?? [];
         $storages[$name] = array_merge($existing, $s3);
-
-        if ($name === 'uploads') {
-            $thumb = $storages['#uploads'] ?? [];
-            $storages['#uploads'] = array_merge($thumb, $s3);
-        }
     }
 });
