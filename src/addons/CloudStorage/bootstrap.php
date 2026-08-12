@@ -30,6 +30,9 @@
  *   that mount to S3 breaks every generated thumbnail (404).
  * - Set `assets/storage` (config.php) to a storage with a browser-reachable
  *   URL (e.g. `uploads://thumbs`) or the thumbnails point at a disk path.
+ * - `S3_VERIFY` controls TLS certificate verification on the HTTP client
+ *   (default true). Set it to false for endpoints with self-signed certs such
+ *   as the local MinIO that ships with the gosite infrastructure (mkcert).
  * - `type: azure` is not supported on core (the adapter is not bundled) and
  *   is skipped.
  */
@@ -57,6 +60,11 @@ $this->on('app.filestorage.init', function (&$storages) {
             ],
             'endpoint' => $opts['url'] ?? null,
             'use_path_style_endpoint' => !empty($opts['url']),
+            // Self-signed certs (local MinIO with mkcert) fail the default
+            // verification, so the check is configurable via S3_VERIFY.
+            'http' => [
+                'verify' => filter_var(getenv('S3_VERIFY') ?: 'true', FILTER_VALIDATE_BOOLEAN),
+            ],
         ]);
 
         $s3 = [

@@ -597,7 +597,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M3 8l6-4h6l6 4"/></svg></div>
         <h3>MinIO locally</h3>
-        <p>The shared infrastructure runs a <code>gosite-minio</code> container on the network, routed through Traefik over HTTPS: S3 API at <code>https://minio.test</code>, console at <code>https://minio-console.test</code> (plain-HTTP fallbacks on <code>9002</code>/<code>9003</code>). Start it once with <code>gosite infra up</code>. Set <code>S3_PUBLIC_URL=https://minio.test/assets</code> so assets and thumbnails load straight from the bucket.</p>
+        <p>The shared infrastructure runs a <code>gosite-minio</code> container with <strong>native TLS</strong>: <code>gosite infra up</code> issues an mkcert certificate and mounts it, and Traefik exposes the S3 API at <code>https://minio.test</code> and the console at <code>https://minio-console.test</code> (plain-HTTP fallbacks on <code>9002</code>/<code>9003</code>). Set <code>S3_VERIFY=false</code> and <code>S3_PUBLIC_URL=https://minio.test/assets</code> so assets and thumbnails load straight from the bucket.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 4-7 4-7-4 7-4Z"/><path d="M5 13l7 4 7-4"/><path d="M5 17l7 4 7-4"/></svg></div>

@@ -27,6 +27,7 @@ render_placeholders() {
     -e "s|__REDIS_PORT__|6379|g" \
     -e "s|__MONGO_HOST__|${GOSITE_MONGO_HOST}|g" \
     -e "s|__MONGO_PORT__|${GOSITE_MONGO_PORT}|g" \
+    -e "s|__MINIO_HOST__|${GOSITE_MINIO_HOST}|g" \
     -e "s|__CMS_TOKEN__|${CMS_TOKEN}|g" \
     -e "s|__COCKPIT_SEC_KEY__|${COCKPIT_SEC_KEY}|g" \
     -e "s|__TAILWIND__|${TAILWIND}|g" \
@@ -425,17 +426,22 @@ COCKPIT_API_TOKEN=__CMS_TOKEN__
 COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
 
 # S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
-# MinIO runs in the shared gosite infra; these defaults point at it.
-# For production, set these from the Coolify dashboard (AWS S3, Backblaze, etc.).
+# MinIO runs in the shared gosite infra (native TLS with mkcert certs); these
+# defaults point at it. For production, set these from the Coolify dashboard
+# (AWS S3, Backblaze, etc.).
 # A custom S3_URL implies path-style addressing (MinIO, R2, Backblaze); leave
 # S3_URL unset for AWS S3 virtual-hosted addressing.
 STORAGE_ADAPTER=local
-S3_URL=http://gosite-minio:9000
+S3_URL=https://__MINIO_HOST__:9000
 S3_BUCKET=assets
 S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
 S3_PREFIX=
+# S3_VERIFY=false is required for the local MinIO (self-signed mkcert cert, not
+# in the CMS container's trust store). Set it to true (or unset) in production
+# when the bucket endpoint has a valid TLS certificate.
+S3_VERIFY=false
 # Public base for CMS asset URLs (used when STORAGE_ADAPTER=s3). For local
 # MinIO this is the HTTPS Traefik route (minio.__TLD__), so the app and the
 # browser load assets CDN-style instead of through the /storage/uploads proxy.
@@ -466,6 +472,7 @@ COCKPIT_SEC_KEY=change-me
 # S3_PREFIX=production
 # S3_PUBLIC_URL=https://cdn.example.com/my-assets   # browser-reachable base for asset URLs
 # S3_ACL=yes          # set to "yes" to enable public-read ACL (default: null, bucket policy handles access)
+# S3_VERIFY=true      # TLS cert verification for the bucket endpoint (default true)
 EOF
 
   # Marker file consumed by list/start/stop/remove.
@@ -489,8 +496,28 @@ EOF
 # with "/deploy: no such file or directory" on old scaffolds).
 # -----------------------------------------------------------------------------
 
+# Writes a file only when its content changed. On an overwrite of an existing
+# file the previous version is kept as <file>.gosite.bak, so a gosite sync
+# never silently destroys a user-customized Dockerfile or .air.toml.
+write_if_changed() {
+  local dest="$1"
+  local content
+  content="$(cat)"
+
+  if [[ -f "${dest}" ]] && printf '%s' "${content}" | cmp -s - "${dest}"; then
+    return 0
+  fi
+
+  if [[ -f "${dest}" ]]; then
+    cp -f "${dest}" "${dest}.gosite.bak"
+    warn "Backed up previous '${dest}' to '${dest}.gosite.bak'"
+  fi
+  mkdir -p "$(dirname "${dest}")"
+  printf '%s' "${content}" > "${dest}"
+}
+
 _write_air_config() {
-  cat > "$1/.air.toml" <<'EOF'
+  write_if_changed "$1/.air.toml" <<'EOF'
 # air - hot reload for local development inside the dev container.
 root = "."
 tmp_dir = "tmp"
@@ -518,7 +545,7 @@ _write_dockerfiles() {
   mkdir -p "$1/deploy"
 
   # Production image: compile a static binary, ship it on alpine.
-  cat > "$1/deploy/Dockerfile" <<'EOF'
+  write_if_changed "$1/deploy/Dockerfile" <<'EOF'
 # syntax=docker/dockerfile:1
 
 # --- stage 1: build ----------------------------------------------------------
@@ -563,7 +590,7 @@ ENTRYPOINT ["/app/app"]
 EOF
 
   # Development image: toolchain + air, source is bind-mounted at runtime.
-  cat > "$1/deploy/Dockerfile.dev" <<'EOF'
+  write_if_changed "$1/deploy/Dockerfile.dev" <<'EOF'
 # syntax=docker/dockerfile:1
 # Local development only. The source tree is bind-mounted, so this image just
 # carries the toolchain and runs air for hot reload.
@@ -588,17 +615,21 @@ EOF
   # the pasted compose file, not the repo checkout, silently mounting empty
   # directories.
   #
-  # No package installation happens at build time: the stock image already
-  # ships PHP, the Flysystem S3 adapter and the AWS SDK under lib/vendor/ (it
-  # has no composer binary, so a composer step would fail the build).
-  cat > "$1/deploy/Dockerfile.cms" <<'EOF'
+  # mongodb is asserted explicitly: if the base image ever drops it, the build
+  # fails loudly instead of the CMS silently falling back to mongolite. The
+  # stock image ships install-php-extensions and the Flysystem S3 adapter + AWS
+  # SDK under lib/vendor/ (it has no composer binary, so a composer step would
+  # fail the build).
+  write_if_changed "$1/deploy/Dockerfile.cms" <<'EOF'
 FROM cockpithq/cockpit:core-2.14.0
+
+RUN install-php-extensions mongodb
 
 COPY cockpit/config.php /var/www/html/config/config.php
 COPY cockpit/addons/ /var/www/html/addons/
 EOF
 
-  cat > "$1/.dockerignore" <<'EOF'
+  write_if_changed "$1/.dockerignore" <<'EOF'
 .git
 .gitignore
 tmp/

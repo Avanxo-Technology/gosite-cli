@@ -181,13 +181,14 @@ infrastructure runs a `MinIO` service, and the CMS image ships Cockpit's
 Flysystem S3 adapter, so switching environments is one variable:
 
 ```bash
-# .env (dev) — already points at the shared gosite-minio
+# .env (dev) — already points at the shared gosite-minio (native TLS)
 STORAGE_ADAPTER=s3
-S3_URL=http://gosite-minio:9000
+S3_URL=https://gosite-minio:9000
 S3_BUCKET=assets
 S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
+S3_VERIFY=false                    # local MinIO uses a self-signed mkcert cert
 S3_PUBLIC_URL=https://minio.test/assets   # browser-reachable base for asset URLs
 
 # production (Coolify dashboard) — any S3-compatible provider
@@ -197,6 +198,7 @@ S3_BUCKET=my-site-assets
 S3_REGION=us-east-1
 S3_KEY=AKIA...
 S3_SECRET=...
+S3_VERIFY=true                     # only set false for self-signed endpoints
 S3_PUBLIC_URL=https://cdn.example.com/my-assets
 ```
 
@@ -207,10 +209,14 @@ render them through the `assetURL` helper registered by
 which resolves against `S3_PUBLIC_URL` when S3 is on and against the local
 `/storage/uploads` proxy otherwise, so markup never needs a fallback.
 
-MinIO is routed through the shared Traefik proxy like the projects: the S3 API
-at `https://minio.test` and the console at `https://minio-console.test` (both
-with the mkcert certificate, so the browser trusts them). Plain-HTTP fallbacks
-stay on ports `9002`/`9003`. It starts with the shared infrastructure via
+MinIO serves **native TLS**: `gosite infra up` issues an mkcert certificate
+(covering the container hostname, `minio.test`, `minio-console.test` and
+`localhost`) and mounts it into the container, so CMS-to-MinIO traffic is HTTPS
+too. It is also routed through the shared Traefik proxy like the projects: S3
+API at `https://minio.test`, console at `https://minio-console.test` (the same
+certificate, so the browser trusts them). Plain-HTTP fallbacks stay on ports
+`9002`/`9003`. Because the mkcert cert is not in the CMS container's trust
+store, local projects set `S3_VERIFY=false`. It all starts with
 `gosite infra up`. Set `STORAGE_ADAPTER=local` (or leave it unset) to keep files
 in `cockpit-storage/uploads` as before — backward compatible.
 
