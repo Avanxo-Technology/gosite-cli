@@ -130,6 +130,18 @@ compose() {
   fi
 }
 
+# Wraps a URL in an OSC 8 terminal hyperlink when stdout is a TTY, so the
+# rendered text is clickable (iTerm2, Kitty, gnome-terminal, VS Code, ...).
+# Without a TTY it prints the label unchanged.
+hyperlink() {
+  local url="$1" label="$2"
+  if [[ -n "${C_NC}" ]]; then
+    printf '\033]8;;%s\033\\%s\033]8;;\033\\' "${url}" "${label}"
+  else
+    printf '%s' "${label}"
+  fi
+}
+
 docker_running()   { docker info >/dev/null 2>&1; }
 network_exists()   { docker network inspect "$1" >/dev/null 2>&1; }
 container_exists() { [[ -n "$(docker ps -aq -f "name=^$1$")" ]]; }

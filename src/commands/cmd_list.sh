@@ -32,8 +32,8 @@ cmd_list() {
 
       printf "\n${C_BOLD}%s${C_NC}  %s %s\n" \
         "${GOSITE_PROJECT}" "${app_status}" "${cms_status}"
-      printf "  ${C_DIM}Site: https://%s${C_NC}\n" "${GOSITE_APP_DOMAIN}"
-      printf "  ${C_DIM}CMS:  https://%s${C_NC}\n" "${GOSITE_CMS_DOMAIN}"
+      printf "  ${C_DIM}Site: %s${C_NC}\n" "$(hyperlink "https://${GOSITE_APP_DOMAIN}" "https://${GOSITE_APP_DOMAIN}")"
+      printf "  ${C_DIM}CMS:  %s${C_NC}\n" "$(hyperlink "https://${GOSITE_CMS_DOMAIN}" "https://${GOSITE_CMS_DOMAIN}")"
     )
     found=$(( found + 1 ))
   done < <(registry_entries)
