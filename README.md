@@ -188,7 +188,7 @@ S3_BUCKET=assets
 S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
-S3_PUBLIC_URL=http://localhost:9002/assets   # browser-reachable base for asset URLs
+S3_PUBLIC_URL=https://minio.test/assets   # browser-reachable base for asset URLs
 
 # production (Coolify dashboard) — any S3-compatible provider
 STORAGE_ADAPTER=s3
@@ -207,10 +207,12 @@ render them through the `assetURL` helper registered by
 which resolves against `S3_PUBLIC_URL` when S3 is on and against the local
 `/storage/uploads` proxy otherwise, so markup never needs a fallback.
 
-The MinIO console is at `http://localhost:9003` (API on `9002`), started with
-the shared infrastructure via `gosite infra up`. Set `STORAGE_ADAPTER=local`
-(or leave it unset) to keep files in `cockpit-storage/uploads` as before —
-backward compatible.
+MinIO is routed through the shared Traefik proxy like the projects: the S3 API
+at `https://minio.test` and the console at `https://minio-console.test` (both
+with the mkcert certificate, so the browser trusts them). Plain-HTTP fallbacks
+stay on ports `9002`/`9003`. It starts with the shared infrastructure via
+`gosite infra up`. Set `STORAGE_ADAPTER=local` (or leave it unset) to keep files
+in `cockpit-storage/uploads` as before — backward compatible.
 
 ### Logs
 

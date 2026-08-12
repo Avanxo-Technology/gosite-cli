@@ -31,6 +31,7 @@ render_placeholders() {
     -e "s|__COCKPIT_SEC_KEY__|${COCKPIT_SEC_KEY}|g" \
     -e "s|__TAILWIND__|${TAILWIND}|g" \
     -e "s|__ADDONS__|${ADDONS_ENABLED}|g" \
+    -e "s|__TLD__|${GOSITE_TLD}|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
 }
@@ -393,9 +394,9 @@ if (getenv('STORAGE_ADAPTER') === 's3') {
             // enforced" buckets where ACLs are disabled). Set S3_ACL=yes to
             // switch to public-read ACL.
             'visibility' => getenv('S3_ACL') === 'yes' ? 'public' : null,
-            // Browser-reachable base for asset URLs: localhost:9002 for local
-            // MinIO, a CDN or bucket endpoint in production. When unset the
-            // addon keeps Cockpit's own /storage/uploads proxy (which only
+            // Browser-reachable base for asset URLs: https://minio.<TLD> for
+            // local MinIO, a CDN or bucket endpoint in production. When unset
+            // the addon keeps Cockpit's own /storage/uploads proxy (which only
             // works while files stay on disk).
             'public_url' => getenv('S3_PUBLIC_URL') ?: '',
         ],
@@ -435,11 +436,11 @@ S3_REGION=us-east-1
 S3_KEY=minioadmin
 S3_SECRET=minioadmin
 S3_PREFIX=
-# Public base for CMS asset URLs (used when STORAGE_ADAPTER=s3): localhost:9002
-# is MinIO's public S3 API, so the app and the browser load assets CDN-style
-# instead of through the /storage/uploads proxy. In production point this at a
-# CDN or bucket endpoint.
-S3_PUBLIC_URL=http://localhost:9002/assets
+# Public base for CMS asset URLs (used when STORAGE_ADAPTER=s3). For local
+# MinIO this is the HTTPS Traefik route (minio.__TLD__), so the app and the
+# browser load assets CDN-style instead of through the /storage/uploads proxy.
+# In production point this at a CDN or bucket endpoint.
+S3_PUBLIC_URL=https://minio.__TLD__/assets
 EOF
 
   cat > "$1/.env.example" <<'EOF'

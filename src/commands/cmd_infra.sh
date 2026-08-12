@@ -116,9 +116,27 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      # Public URLs for reverse-proxy mode so the console links back to the
+      # right host (S3 API behind minio.<TLD>, console behind minio-console.<TLD>).
+      MINIO_SERVER_URL: "https://minio.${GOSITE_TLD}"
+      MINIO_BROWSER_REDIRECT_URL: "https://minio-console.${GOSITE_TLD}"
     ports:
+      # Plain-HTTP fallbacks; HTTPS is served through Traefik below.
       - "9002:9000"
       - "9003:9001"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=gosite
+      - traefik.http.services.gosite-minio-s3.loadbalancer.server.port=9000
+      - traefik.http.routers.gosite-minio-s3.rule=Host(\`minio.${GOSITE_TLD}\`)
+      - traefik.http.routers.gosite-minio-s3.entrypoints=websecure
+      - traefik.http.routers.gosite-minio-s3.tls=true
+      - traefik.http.routers.gosite-minio-s3.service=gosite-minio-s3
+      - traefik.http.services.gosite-minio-console.loadbalancer.server.port=9001
+      - traefik.http.routers.gosite-minio-console.rule=Host(\`minio-console.${GOSITE_TLD}\`)
+      - traefik.http.routers.gosite-minio-console.entrypoints=websecure
+      - traefik.http.routers.gosite-minio-console.tls=true
+      - traefik.http.routers.gosite-minio-console.service=gosite-minio-console
     volumes:
       - gosite-miniodata:/data
     healthcheck:
@@ -157,6 +175,10 @@ cmd_infra() {
 
       # The dashboard is served over HTTPS like everything else.
       ensure_project_cert "proxy" >/dev/null 2>&1 || true
+      # MinIO is HTTPS-routed through Traefik too: S3 API and console each get
+      # their own host + certificate.
+      ensure_project_cert "minio" >/dev/null 2>&1 || true
+      ensure_project_cert "minio-console" >/dev/null 2>&1 || true
 
       info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST}, ${GOSITE_MONGO_HOST}, minio)"
       _infra_compose up -d
@@ -170,7 +192,7 @@ cmd_infra() {
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
       ok "Redis     -> localhost:${GOSITE_REDIS_PORT}"
       ok "MongoDB   -> localhost:${GOSITE_MONGO_PORT}"
-      ok "MinIO     -> http://localhost:9002 (api) / http://localhost:9003 (console)"
+      ok "MinIO     -> https://minio.${GOSITE_TLD} (S3 API) / https://minio-console.${GOSITE_TLD} (console)"
       printf "${C_DIM}From a project container reach them by the hostnames '%s', '%s' and 'gosite-minio'.${C_NC}\n" \
         "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}"
 
