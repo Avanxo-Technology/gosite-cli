@@ -222,6 +222,17 @@ cmd_infra() {
       _infra_write_traefik_config
       _infra_write_compose
 
+      # Self-heal a proxy that lost its network: if gosite-network was removed
+      # and recreated while the proxy kept running, docker compose sees no
+      # config change and never reattaches it - then Traefik cannot see any
+      # project container. Reattach here, non-destructively.
+      if container_exists "${GOSITE_PROXY_HOST}" \
+          && ! container_on_network "${GOSITE_PROXY_HOST}" "${GOSITE_NETWORK}"; then
+        warn "Proxy is not attached to '${GOSITE_NETWORK}'; reattaching so it can route projects."
+        docker network connect "${GOSITE_NETWORK}" "${GOSITE_PROXY_HOST}" >/dev/null 2>&1 \
+          || info "Reattach failed; 'gosite infra restart' will recreate the proxy."
+      fi
+
       # The dashboard is served over HTTPS like everything else.
       ensure_project_cert "proxy" >/dev/null 2>&1 || true
       # MinIO: one combined mkcert certificate for the container hostname (used

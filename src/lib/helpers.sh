@@ -146,6 +146,7 @@ docker_running()   { docker info >/dev/null 2>&1; }
 network_exists()   { docker network inspect "$1" >/dev/null 2>&1; }
 container_exists() { [[ -n "$(docker ps -aq -f "name=^$1$")" ]]; }
 container_running(){ [[ -n "$(docker ps -q  -f "name=^$1$")" ]]; }
+container_on_network(){ docker inspect "$1" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | grep -qw "$2"; }
 
 ensure_network() {
   if network_exists "${GOSITE_NETWORK}"; then
