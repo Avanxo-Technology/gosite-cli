@@ -1294,6 +1294,12 @@ There is no JavaScript build step and no SPA.
    collections, fields) are defined in the Cockpit admin UI and stored in
    MongoDB. No migration files or SQL schemas exist in this repo - add fields
    in Cockpit, then render them in the template with a fallback.
+9. **Every image attribute in a content model must be type `asset`.** Define
+   image fields as type `asset` (not `image`), so the value is the full asset
+   object (`path`, `url`, ...) that the `assetURL` helper renders with
+   `{{assetURL (index .Content "field")}}`. The `image` type does not give
+   `assetURL` what it needs - a model with images is only correct when each
+   image attribute is an `asset`.
 
 ## Common tasks
 
