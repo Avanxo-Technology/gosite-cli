@@ -21,10 +21,15 @@ source "${GOSITE_ROOT}/lib/templates.sh"
 
 cmd_create() {
   local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
+  local STORAGE_PROMPT=1 DATABASE_PROMPT=1
   # Tailwind is on by default; --no-tailwind swaps it for a small stylesheet.
   # Either way the generated markup is clean: no orphan utility classes.
   TAILWIND=1
   ADDONS_ENABLED=0
+  # S3/MinIO uploads and the shared MongoDB are the defaults; the prompts below
+  # can switch them per project.
+  STORAGE_ADAPTER=s3
+  DATABASE=mongodb
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --here)         here=1; shift ;;
@@ -32,7 +37,9 @@ cmd_create() {
       --tailwind)     TAILWIND=1; shift ;;
       --addons)       INSTALL_ADDONS=1; ADDONS_ENABLED=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
       --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; ADDONS_PROMPT=0; shift ;;
-      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons)" ;;
+      --storage)      [[ -n "${2:-}" ]] || fatal "--storage needs a value (s3|local)"; STORAGE_ADAPTER="$2"; STORAGE_PROMPT=0; shift 2 ;;
+      --database)     [[ -n "${2:-}" ]] || fatal "--database needs a value (mongodb|local)"; DATABASE="$2"; DATABASE_PROMPT=0; shift 2 ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons, --storage, --database)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
@@ -40,6 +47,8 @@ cmd_create() {
   validate_project_name "${PROJECT_NAME}"
   require_dependencies
   _prompt_addons
+  _prompt_storage
+  _prompt_database
 
   # Sites live together under the workspace so they are easy to find and list.
   # --here overrides that for a one-off project in the current directory.
@@ -194,6 +203,48 @@ _prompt_addons() {
   else
     info "No addons selected."
   fi
+}
+
+# -----------------------------------------------------------------------------
+# Ask where uploaded assets live. Default is S3/MinIO (shared infra); 'local'
+# keeps uploads on the project disk. Skipped by --storage or -y/--yes.
+_prompt_storage() {
+  [[ "${STORAGE_PROMPT}" -eq 0 ]] && return 0
+  [[ "${GOSITE_ASSUME_YES}" -eq 1 ]] && return 0
+
+  printf "\n"
+  printf "${C_BOLD}Asset uploads${C_NC}\n"
+  printf "  ${C_DIM}Where the CMS keeps uploaded files.${C_NC}\n"
+
+  printf "${C_YELLOW}?${C_NC} Uploads ${C_DIM}(default: S3/MinIO)${C_NC} [S3/local] "
+  local reply
+  read -r reply
+  case "${reply}" in
+    l|L|local) STORAGE_ADAPTER=local ;;
+    *)         STORAGE_ADAPTER=s3 ;;
+  esac
+  ok "Asset uploads: ${STORAGE_ADAPTER}"
+}
+
+# -----------------------------------------------------------------------------
+# Ask where content lives. Default is MongoDB (shared infra); 'local' uses the
+# self-contained mongolite storage. Skipped by --database or -y/--yes.
+_prompt_database() {
+  [[ "${DATABASE_PROMPT}" -eq 0 ]] && return 0
+  [[ "${GOSITE_ASSUME_YES}" -eq 1 ]] && return 0
+
+  printf "\n"
+  printf "${C_BOLD}Content database${C_NC}\n"
+  printf "  ${C_DIM}Where Cockpit stores content models and entries.${C_NC}\n"
+
+  printf "${C_YELLOW}?${C_NC} Database ${C_DIM}(default: MongoDB)${C_NC} [Mongo/local] "
+  local reply
+  read -r reply
+  case "${reply}" in
+    l|L|local) DATABASE=local ;;
+    *)         DATABASE=mongodb ;;
+  esac
+  ok "Database: ${DATABASE}"
 }
 
 # Built-in Cockpit addons that ship with every scaffolded project. They are

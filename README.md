@@ -129,6 +129,18 @@ gosite create my-site                 # Tailwind utility classes
 gosite create my-site --no-tailwind   # semantic classes + static/styles.css
 ```
 
+`gosite create` also asks two questions (both answerable with a flag to skip the
+prompt): where uploaded assets live (`--storage s3|local`, default **s3** /
+MinIO) and where content lives (`--database mongodb|local`, default
+**mongodb** / the shared infra). Everything else defaults automatically, and
+`-y/--yes` accepts all defaults.
+
+```bash
+gosite create my-site                      # prompts; defaults: s3 + mongodb
+gosite create my-site --storage local      # uploads on disk, no MinIO
+gosite create my-site --database local     # self-contained mongolite storage
+```
+
 The generated markup differs between the two on purpose. With Tailwind the
 components carry utility classes; without it they carry semantic class names
 (`panel`, `page-header`, `button`) styled by a stylesheet that uses custom

@@ -410,7 +410,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <caption class="sr">gosite commands and what they do</caption>
         <thead><tr><th scope="col">Command</th><th scope="col">What it does</th></tr></thead>
         <tbody>
-          <tr><td>gosite create &lt;name&gt;</td><td>Scaffold a project in <code>~/gosites</code>, issue its certificate, and prompt for Cockpit addons. <span class="flag">--no-tailwind</span> for plain CSS, <span class="flag">--here</span> for the current directory, <span class="flag">--addons "A B"</span> to install specific addons, <span class="flag">--no-addons</span> to skip the prompt.</td></tr>
+          <tr><td>gosite create &lt;name&gt;</td><td>Scaffold a project in <code>~/gosites</code>, issue its certificate, and prompt for Cockpit addons, the asset uploads backend (<code>--storage s3|local</code>, default <strong>s3</strong>/MinIO) and the content database (<code>--database mongodb|local</code>, default <strong>mongodb</strong>). <span class="flag">--no-tailwind</span>, <span class="flag">--here</span>, <span class="flag">--addons "A B"</span>, <span class="flag">--no-addons</span>.</td></tr>
           <tr><td>gosite start</td><td>Start the Go app under air hot reload plus its Cockpit container.</td></tr>
           <tr><td>gosite restart</td><td>Recreate the containers after an <code>.env</code>, compose or Dockerfile change. <span class="flag">--build</span> rebuilds the image.</td></tr>
           <tr><td>gosite logs</td><td>Follow both containers, or pass <code>app</code> / <code>cms</code>. <span class="flag">-n</span> and <span class="flag">--no-follow</span> supported.</td></tr>

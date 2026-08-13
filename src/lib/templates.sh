@@ -33,6 +33,8 @@ render_placeholders() {
     -e "s|__TAILWIND__|${TAILWIND}|g" \
     -e "s|__ADDONS__|${ADDONS_ENABLED}|g" \
     -e "s|__TLD__|${GOSITE_TLD}|g" \
+    -e "s|__DATABASE__|${DATABASE:-mongodb}|g" \
+    -e "s|__STORAGE_ADAPTER__|${STORAGE_ADAPTER:-s3}|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
 }
@@ -53,6 +55,8 @@ load_project_render_vars() {
   APP_DOMAIN="${GOSITE_APP_DOMAIN}"
   CMS_DOMAIN="${GOSITE_CMS_DOMAIN}"
   ADDONS_ENABLED="${GOSITE_ADDONS:-0}"
+  DATABASE="${GOSITE_DATABASE:-mongodb}"
+  STORAGE_ADAPTER="${STORAGE_ADAPTER:-s3}"
   # CMS_TOKEN/COCKPIT_SEC_KEY live in .env; without them render them to their
   # .env placeholders so a re-render never clobbers secrets with blanks.
   CMS_TOKEN="${CMS_TOKEN:-__CMS_TOKEN__}"
@@ -156,6 +160,7 @@ services:
       COCKPIT_SESSION_NAME: "__PROJECT__"
       COCKPIT_SEC_KEY: "${COCKPIT_SEC_KEY}"
       COCKPIT_MEMORY_SERVER: "redis://__REDIS_HOST__:6379"
+      COCKPIT_DATABASE: "__DATABASE__"
       MONGO_HOST: "__MONGO_HOST__"
       MONGO_PORT: "__MONGO_PORT__"
       MONGO_DB: "__PROJECT__"
@@ -270,6 +275,7 @@ services:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
       - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
       - COCKPIT_MEMORY_SERVER=redis://redis:6379
+      - COCKPIT_DATABASE=${COCKPIT_DATABASE:-mongodb}
       - MONGO_HOST=mongo
       - MONGO_PORT=27017
       - MONGO_USER=${MONGO_USER}
@@ -370,43 +376,53 @@ $mongoAuth = ($mongoUser !== '' && $mongoPass !== '')
     ? rawurlencode($mongoUser).':'.rawurlencode($mongoPass).'@'
     : '';
 
+// Storage engine chosen at scaffold time: 'mongodb' (default, the shared infra
+// or the project's own Mongo) or 'local' (mongolite files inside the
+// container's storage/data - handy for throwaway tests with no infra).
+$useLocal = getenv('COCKPIT_DATABASE') === 'local';
+$mongoDb  = getenv('MONGO_DB') ?: '__PROJECT__';
+
 $config = [
 
-    // MongoDB. The mongodb PHP extension ships with the image, and the
-    // mongodb:// scheme is what selects the Mongo driver over mongolite.
-    // Locally this points at the shared gosite-mongo container; in production
-    // each project has its own MongoDB service in the compose stack. Content
-    // models and entries live here, never in local files.
-    'database' => [
-        'server' => 'mongodb://'.$mongoAuth.$mongoHost.':'.$mongoPort,
-        'options' => ['db' => getenv('MONGO_DB') ?: '__PROJECT__'],
-        'driverOptions' => [],
-    ],
+    // Content storage. MongoDB: models and entries live on the shared infra
+    // (gosite-mongo in dev, own Mongo in prod), never in local files. Local:
+    // mongolite sqlite under storage/data, fully self-contained.
+    'database' => $useLocal
+        ? [
+            'server' => 'mongolite:///var/www/html/storage/data',
+            'options' => ['db' => $mongoDb],
+            'driverOptions' => [],
+        ]
+        : [
+            'server' => 'mongodb://'.$mongoAuth.$mongoHost.':'.$mongoPort,
+            'options' => ['db' => $mongoDb],
+            'driverOptions' => [],
+        ],
 
-    // Store content model definitions in MongoDB instead of Cockpit's default
-    // local files (storage/content/*.model.php). Models and their entries all
-    // live on the shared infrastructure, never on the container's disk.
+    // Store content model definitions alongside the data (in MongoDB when not
+    // in local mode, in storage/content files when local), never as a mix.
     'content' => [
         'models' => [
-            'storage' => 'database',
+            'storage' => $useLocal ? 'files' : 'database',
         ],
     ],
 
-    // App memory/options: routed to the shared infrastructure instead of
-    // Cockpit's default local redislite file (storage/data/app.memory.sqlite),
-    // so nothing project-wide is created on the container disk. Cockpit core's
-    // memory driver only supports redislite or Redis (not MongoDB), so the
-    // infra Redis is used - dev on the shared gosite-redis (DB 1, off the app's
-    // page-cache DB 0), production on the project's own redis service. A
+    // App memory/options: on the shared infrastructure instead of Cockpit's
+    // default local redislite file (storage/data/app.memory.sqlite). Cockpit
+    // core's memory driver only supports redislite or Redis (not MongoDB), so
+    // the infra Redis is used - dev on the shared gosite-redis (DB 1, off the
+    // app's page-cache DB 0), production on the project's own redis service. A
     // per-project key prefix stops projects sharing the infra Redis from
-    // colliding.
-    'memory' => [
-        'server' => getenv('COCKPIT_MEMORY_SERVER') ?: 'redis://gosite-redis:6379',
-        'options' => [
-            'database' => 1,
-            'prefix' => (getenv('MONGO_DB') ?: '__PROJECT__').':',
+    // colliding. In local mode memory stays in the redislite file.
+    'memory' => $useLocal
+        ? ['server' => 'redislite:///var/www/html/storage/data/app.memory.sqlite', 'options' => []]
+        : [
+            'server' => getenv('COCKPIT_MEMORY_SERVER') ?: 'redis://gosite-redis:6379',
+            'options' => [
+                'database' => 1,
+                'prefix' => $mongoDb.':',
+            ],
         ],
-    ],
 
     // The image ships a hardcoded, publicly known key. Overriding it is what
     // stops anyone from forging a session against a deployed site.
@@ -472,7 +488,7 @@ COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
 # (AWS S3, Backblaze, etc.).
 # A custom S3_URL implies path-style addressing (MinIO, R2, Backblaze); leave
 # S3_URL unset for AWS S3 virtual-hosted addressing.
-STORAGE_ADAPTER=local
+STORAGE_ADAPTER=__STORAGE_ADAPTER__
 S3_URL=https://__MINIO_HOST__:9000
 S3_BUCKET=assets
 S3_REGION=us-east-1
@@ -527,6 +543,7 @@ GOSITE_APP_DOMAIN=__DOMAIN__
 GOSITE_CMS_DOMAIN=__CMS_DOMAIN__
 GOSITE_NETWORK=__NETWORK__
 GOSITE_ADDONS=__ADDONS__
+GOSITE_DATABASE=__DATABASE__
 EOF
 }
 
