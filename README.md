@@ -15,13 +15,16 @@ library's `html/template` - no code generation, no build step.
 
 | Layer | Scope | Contents |
 | --- | --- | --- |
-| Shared infrastructure | One per machine | Traefik proxy + Redis on the `gosite-network` Docker network |
+| Shared infrastructure | One per machine | Traefik proxy + Redis + MongoDB + MinIO on the `gosite-network` Docker network |
 | Per project | One per site | Its own Go app container (air hot reload) + its own Cockpit container |
 
-Projects never define Redis. They attach to `gosite-network` as an **external**
-network and reach it by container name (`gosite-redis`) on its in-network port.
-Cockpit uses its file-backed database locally, so development needs no database
-container at all; production brings its own MongoDB.
+Projects never define Redis, MongoDB or MinIO. They attach to
+`gosite-network` as an **external** network and reach the shared services by
+container name (`gosite-redis`, `gosite-mongo`, `gosite-minio`) on their
+in-network ports. Cockpit stores its content models and entries in MongoDB and
+its app memory on the infra Redis (DB 1), so nothing project-wide is written to
+local files; production brings its own MongoDB and Redis inside the compose
+stack.
 
 ## Install
 

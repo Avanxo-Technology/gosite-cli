@@ -67,18 +67,23 @@ _seed_home_model() {
   db="${GOSITE_PROJECT}"
   base="https://${GOSITE_CMS_DOMAIN}"
 
-  # Wait for the CMS to accept connections (first boot builds the container).
-  # Prefer the Traefik HTTPS host (works whether or not the host port is
-  # published); fall back to the mapped localhost port.
+  # Wait for the CMS API to actually serve requests - the root responds long
+  # before FrankenPHP finishes wiring the REST routes on first boot. Prefer the
+  # Traefik HTTPS host (works whether or not the host port is published); fall
+  # back to the mapped localhost port. 200/401/412 mean the API is up.
   local i code=000
-  for i in $(seq 1 30); do
-    code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' "${base}/" 2>/dev/null)"
-    [[ "${code}" != "000" ]] && break
-    code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' "http://localhost:${cms_port}/" 2>/dev/null)"
-    [[ "${code}" != "000" ]] && { base="http://localhost:${cms_port}"; break; }
+  for i in $(seq 1 45); do
+    code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null)"
+    case "${code}" in
+      200|401|412) break ;;
+    esac
+    code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "http://localhost:${cms_port}/api/models" 2>/dev/null)"
+    case "${code}" in
+      200|401|412) base="http://localhost:${cms_port}"; break ;;
+    esac
     sleep 2
   done
-  [[ "${code}" == "000" ]] && { warn "CMS not reachable yet; starter content not seeded."; return 0; }
+  [[ "${code}" == "000" ]] && { warn "CMS API not reachable yet; starter content not seeded."; return 0; }
 
   # Make sure the token is a registered admin API key (ModelManager ACLs on
   # /api/models/save require it). Upsert never touches an existing key.
@@ -91,8 +96,20 @@ _seed_home_model() {
     return 0  # already seeded
   fi
 
-  curl -sk --max-time 5 -X POST -H "api-key: ${tok}" -H 'Content-Type: application/json' \
-    -d '{"model":{"name":"home","type":"singleton","fields":[{"name":"headline","type":"text"},{"name":"intro","type":"textarea"}]}}' \
-    "${base}/api/models/save" >/dev/null 2>&1 \
-    && ok "Created starter 'home' singleton (headline + intro). Edit it in the CMS."
+  # The CMS can answer HTTP before it has fully wired its modules, so the
+  # first save can fail silently. Retry until the model shows up in the API.
+  local attempt=0
+  while [[ "${attempt}" -lt 5 ]]; do
+    attempt=$(( attempt + 1 ))
+    curl -sk --max-time 5 -X POST -H "api-key: ${tok}" -H 'Content-Type: application/json' \
+      -d '{"model":{"name":"home","type":"singleton","fields":[{"name":"headline","type":"text"},{"name":"intro","type":"textarea"}]}}' \
+      "${base}/api/models/save" >/dev/null 2>&1
+    if curl -sk --max-time 5 -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null \
+        | grep -q '"name":"home"'; then
+      ok "Created starter 'home' singleton (headline + intro). Edit it in the CMS."
+      return 0
+    fi
+    sleep 3
+  done
+  warn "Could not create the starter 'home' singleton; create it in the CMS admin."
 }

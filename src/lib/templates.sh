@@ -149,6 +149,7 @@ services:
       # Cockpit reads these through config.php's ${VAR} resolution.
       COCKPIT_SESSION_NAME: "__PROJECT__"
       COCKPIT_SEC_KEY: "${COCKPIT_SEC_KEY}"
+      COCKPIT_MEMORY_SERVER: "redis://__REDIS_HOST__:6379"
       MONGO_HOST: "__MONGO_HOST__"
       MONGO_PORT: "__MONGO_PORT__"
       MONGO_DB: "__PROJECT__"
@@ -255,6 +256,7 @@ services:
     environment:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
       - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
+      - COCKPIT_MEMORY_SERVER=redis://redis:6379
       - MONGO_HOST=mongo
       - MONGO_PORT=27017
       - MONGO_USER=${MONGO_USER}
@@ -360,11 +362,37 @@ $config = [
     // MongoDB. The mongodb PHP extension ships with the image, and the
     // mongodb:// scheme is what selects the Mongo driver over mongolite.
     // Locally this points at the shared gosite-mongo container; in production
-    // each project has its own MongoDB service in the compose stack.
+    // each project has its own MongoDB service in the compose stack. Content
+    // models and entries live here, never in local files.
     'database' => [
         'server' => 'mongodb://'.$mongoAuth.$mongoHost.':'.$mongoPort,
         'options' => ['db' => getenv('MONGO_DB') ?: '__PROJECT__'],
         'driverOptions' => [],
+    ],
+
+    // Store content model definitions in MongoDB instead of Cockpit's default
+    // local files (storage/content/*.model.php). Models and their entries all
+    // live on the shared infrastructure, never on the container's disk.
+    'content' => [
+        'models' => [
+            'storage' => 'database',
+        ],
+    ],
+
+    // App memory/options: routed to the shared infrastructure instead of
+    // Cockpit's default local redislite file (storage/data/app.memory.sqlite),
+    // so nothing project-wide is created on the container disk. Cockpit core's
+    // memory driver only supports redislite or Redis (not MongoDB), so the
+    // infra Redis is used - dev on the shared gosite-redis (DB 1, off the app's
+    // page-cache DB 0), production on the project's own redis service. A
+    // per-project key prefix stops projects sharing the infra Redis from
+    // colliding.
+    'memory' => [
+        'server' => getenv('COCKPIT_MEMORY_SERVER') ?: 'redis://gosite-redis:6379',
+        'options' => [
+            'database' => 1,
+            'prefix' => (getenv('MONGO_DB') ?: '__PROJECT__').':',
+        ],
     ],
 
     // The image ships a hardcoded, publicly known key. Overriding it is what
