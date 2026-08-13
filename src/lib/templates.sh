@@ -118,6 +118,12 @@ services:
       APP_ENV: development
       REDIS_URL: "redis://__REDIS_HOST__:__REDIS_PORT__/0"
       COCKPIT_URL: "http://__PROJECT__-cms:80"
+      # The app carries the Mongo connection parts too, so direct database
+      # access (if added) uses the shared infra with the same credentials
+      # logic as cockpit/config.php.
+      MONGO_HOST: "__MONGO_HOST__"
+      MONGO_PORT: "__MONGO_PORT__"
+      MONGO_DB: "__PROJECT__"
     # Host ports stay mapped as a fallback; the domain below is the main entry.
     ports:
       - "__APP_PORT__:8080"
@@ -227,6 +233,13 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - COCKPIT_URL=http://cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+      # Mongo parts so the app can build a credential-aware URI (see
+      # buildMongoURI in internal/config) exactly like the CMS does.
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_DB=${MONGO_DB:-__PROJECT__}
     labels:
       # Tells Coolify this service is built from the repository Dockerfile.
       - coolify.managed=true
