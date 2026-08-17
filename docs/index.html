@@ -156,6 +156,7 @@ h2{font-family:var(--mono);font-weight:700;font-size:var(--step2);letter-spacing
 .cards{display:grid;gap:1rem;grid-template-columns:1fr}
 @media (min-width:680px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media (min-width:1000px){.cards-3{grid-template-columns:repeat(3,1fr)}}
+@media (min-width:1000px){.cards-4{grid-template-columns:repeat(4,1fr)}}
 .card{padding:1.6rem;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);
   transition:border-color .25s ease,transform .25s ease,background .25s ease}
 .card:hover{border-color:var(--border-bright);transform:translateY(-3px);background:var(--surface-2)}
@@ -438,7 +439,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <p class="sub">
         Addons are plain folders at <code>/var/www/html/addons</code> — bind-mounted
         in dev, baked into the production image by <code>Dockerfile.cms</code> — so
-        nothing loads unless it exists. Every project ships three built-ins;
+        nothing loads unless it exists. Every project ships four built-ins;
         <code>Forms</code> and <code>Replica</code> are opt-in at setup
         (<span class="flag">--addons "Forms Replica"</span>, or
         <span class="flag">--no-addons</span> to skip). Refresh or add them later
@@ -446,7 +447,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       </p>
     </div>
 
-    <div class="cards cards-3">
+    <div class="cards cards-4">
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M6 9l6-6 6 6"/><path d="M4 21h16"/></svg></div>
         <h3>AssetsUpload <span class="tag">built-in</span></h3>
@@ -461,6 +462,11 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div>
         <h3>CloudStorage <span class="tag">built-in</span></h3>
         <p>S3-compatible uploads for the core CMS: MinIO in dev, AWS / R2 / Backblaze in prod. Uses the Flysystem adapter the image already ships — no Pro license, no composer step.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></div>
+        <h3>AssetPathFix <span class="tag">built-in</span></h3>
+        <p>Strips the leading slash from uploaded asset paths so S3 public URLs don't get a double-slash (<code>//</code>) that breaks admin previews.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg></div>

@@ -1340,7 +1340,7 @@ There is no JavaScript build step and no SPA.
 | CMS database | MongoDB (shared `__MONGO_HOST__` container locally, own MongoDB in production) |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
-| CMS addons | three built-ins + optional Forms/Replica in `cockpit/addons/` (from gosite's addon library) |
+| CMS addons | four built-ins + optional Forms/Replica in `cockpit/addons/` (from gosite's addon library) |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
@@ -1515,7 +1515,7 @@ internal/            Application packages (not importable by external code).
   app/               App struct, NewApp, NewRouter (wiring).
 cockpit/             Cockpit CMS configuration.
   config.php         Production config (baked into Dockerfile.cms).
-  addons/            Cockpit addons (three built-ins + optional Forms/Replica).
+  addons/            Cockpit addons (four built-ins + optional Forms/Replica).
 deploy/              Dockerfiles for production, dev, and CMS images.
 static/              Assets served at /static.
 ```
@@ -1876,7 +1876,7 @@ internal/            Application packages (not importable by external code).
   app/               App struct, NewApp, NewRouter (wiring).
 cockpit/             Cockpit CMS configuration.
   config.php         Production config (baked into Dockerfile.cms).
-  addons/            Cockpit addons (three built-ins + optional Forms/Replica).
+  addons/            Cockpit addons (four built-ins + optional Forms/Replica).
 deploy/              Dockerfiles for production, dev, and CMS images.
 static/              Assets served at /static.
 ```
@@ -1942,8 +1942,8 @@ needed unless the template needs to render the new data.
 
 Locally the CMS container mounts `cockpit/addons/`; in production
 `deploy/Dockerfile.cms` bakes `cockpit/config.php` and `cockpit/addons/` into
-the image. Every scaffold ships with three built-ins (asset upload API, model
-manager, S3 storage) and the optional addons chosen at scaffold time
+the image. Every scaffold ships with four built-ins (asset upload API, model
+manager, S3 storage, asset path fix) and the optional addons chosen at scaffold time
 (`--addons "Forms Replica"`, `--no-addons` to skip):
 
 - **Forms** — inbox-style manager for website form submissions: public receiver

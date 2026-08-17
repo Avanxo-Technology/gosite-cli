@@ -71,7 +71,7 @@ _write_builtin_addons() {
   local addons_src="${GOSITE_ROOT}/addons"
   local target="$1/cockpit/addons"
 
-  for name in AssetsUpload ModelManager CloudStorage; do
+  for name in AssetsUpload ModelManager CloudStorage AssetPathFix; do
     mkdir -p "${target}/${name}"
     cp -R "${addons_src}/${name}/." "${target}/${name}/"
   done
