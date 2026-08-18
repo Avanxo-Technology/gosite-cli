@@ -317,8 +317,8 @@ cmd_infra() {
       _infra_write_compose
       ensure_minio_certs || true
 
-      info "Recreating proxy with new config..."
-      _infra_compose up -d --force-recreate proxy
+      info "Recreating all services with new config..."
+      _infra_compose up -d --force-recreate
       ok "Infrastructure configs repaired and proxy recreated."
       ;;
     *)
