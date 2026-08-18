@@ -142,14 +142,14 @@ services:
       # proxy trusts no CA, the mkcert cert is only in the CMS/browser trust.
       - traefik.http.services.gosite-minio-s3.loadbalancer.server.port=9000
       - traefik.http.services.gosite-minio-s3.loadbalancer.server.scheme=https
-      - traefik.http.services.gosite-minio-s3.loadbalancer.serverstransport=insecure@internal
+      - traefik.http.services.gosite-minio-s3.loadbalancer.serverstransport=default@internal
       - traefik.http.routers.gosite-minio-s3.rule=Host(\`minio.${GOSITE_TLD}\`)
       - traefik.http.routers.gosite-minio-s3.entrypoints=websecure
       - traefik.http.routers.gosite-minio-s3.tls=true
       - traefik.http.routers.gosite-minio-s3.service=gosite-minio-s3
       - traefik.http.services.gosite-minio-console.loadbalancer.server.port=9001
       - traefik.http.services.gosite-minio-console.loadbalancer.server.scheme=https
-      - traefik.http.services.gosite-minio-console.loadbalancer.serverstransport=insecure@internal
+      - traefik.http.services.gosite-minio-console.loadbalancer.serverstransport=default@internal
       - traefik.http.routers.gosite-minio-console.rule=Host(\`minio-console.${GOSITE_TLD}\`)
       - traefik.http.routers.gosite-minio-console.entrypoints=websecure
       - traefik.http.routers.gosite-minio-console.tls=true
