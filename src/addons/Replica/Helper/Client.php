@@ -431,8 +431,9 @@ class Client extends \Lime\Helper {
 
             $response = $this->request('GET', "/api/replica/assets/file/{$id}");
 
-            if ($response['status'] === 200 && isset($response['body']['fileData'])) {
-                $asset['fileData'] = $response['body']['fileData'];
+            $fileData = $response['body']['asset']['fileData'] ?? $response['body']['fileData'] ?? null;
+            if ($response['status'] === 200 && $fileData !== null) {
+                $asset['fileData'] = $fileData;
             }
         }
 
