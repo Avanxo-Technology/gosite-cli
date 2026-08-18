@@ -88,7 +88,7 @@ USAGE
   }
 
   # --- download tarball -------------------------------------------------------
-  local tar_url="https://codeload.github.com/${repo}/tar.gz/${ref}"
+  local tar_url="https://api.github.com/repos/${repo}/tarball/${ref}"
   local tmp_root
 
   tmp_root="$(mktemp -d)"
@@ -104,6 +104,11 @@ USAGE
   fi
 
   [[ -f "${tmp_root}/src/main.sh" ]] || fatal "Downloaded archive does not contain src/main.sh."
+
+  local extracted_version
+  extracted_version="$(cat "${tmp_root}/src/VERSION" 2>/dev/null | tr -d '[:space:]')"
+  [[ "${extracted_version}" == "${remote_version}" ]] || \
+    fatal "Downloaded archive version (${extracted_version}) doesn't match expected (${remote_version}). Try again."
 
   # --- determine privilege level ----------------------------------------------
   local sudo_cmd=""
