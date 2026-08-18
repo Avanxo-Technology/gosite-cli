@@ -272,7 +272,9 @@ cmd_infra() {
       # Create the default bucket in MinIO so projects can use it immediately.
       docker run --rm --network ${GOSITE_NETWORK} \
         --entrypoint sh minio/mc:latest \
-        -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 minioadmin minioadmin --insecure && mc mb -p local/assets" \
+        -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 minioadmin minioadmin --insecure \
+            && mc mb -p local/assets \
+            && mc anonymous set download local/assets" \
         >/dev/null 2>&1 || true
 
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
@@ -344,7 +346,16 @@ cmd_infra() {
 
       info "Recreating all services with new config..."
       _infra_compose up -d --force-recreate
-      ok "Infrastructure configs repaired and proxy recreated."
+
+      # Ensure the assets bucket exists and has a public-read policy.
+      docker run --rm --network ${GOSITE_NETWORK} \
+        --entrypoint sh minio/mc:latest \
+        -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 minioadmin minioadmin --insecure \
+            && mc mb -p local/assets \
+            && mc anonymous set download local/assets" \
+        >/dev/null 2>&1 || true
+
+      ok "Infrastructure configs repaired and services recreated."
       ;;
     *)
       fatal "Unknown 'infra' action: ${action} (expected up|down|restart|status|logs|repair)"

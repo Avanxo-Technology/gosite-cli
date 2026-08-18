@@ -173,6 +173,7 @@ services:
       S3_PREFIX: "${S3_PREFIX}"
       S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
       S3_ACL: "${S3_ACL:-}"
+      S3_VERIFY: "${S3_VERIFY:-true}"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -291,6 +292,7 @@ services:
       - S3_PREFIX=${S3_PREFIX}
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
       - S3_ACL=${S3_ACL:-}
+      - S3_VERIFY=${S3_VERIFY:-true}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
       # Config and addons are NOT mounted here: Dockerfile.cms bakes the
