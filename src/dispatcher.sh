@@ -38,6 +38,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   infra restart      Restart shared infrastructure
   infra status       Show shared infrastructure health
   infra logs [svc]   Tail shared infrastructure logs
+  infra repair       Regenerate configs and recreate proxy (fix stale Traefik)
   dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
 
 $(printf "${C_BOLD}OTHER${C_NC}")

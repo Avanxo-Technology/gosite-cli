@@ -310,8 +310,19 @@ cmd_infra() {
       [[ -f "${GOSITE_INFRA_DIR}/docker-compose.yml" ]] || fatal "Infrastructure was never created."
       _infra_compose logs -f --tail=100 "$@"
       ;;
+    repair)
+      [[ -f "${GOSITE_INFRA_DIR}/docker-compose.yml" ]] || fatal "Infrastructure was never created. Run 'gosite infra up'."
+      info "Regenerating Traefik and compose configs..."
+      _infra_write_traefik_config
+      _infra_write_compose
+      ensure_minio_certs || true
+
+      info "Recreating proxy with new config..."
+      _infra_compose up -d --force-recreate proxy
+      ok "Infrastructure configs repaired and proxy recreated."
+      ;;
     *)
-      fatal "Unknown 'infra' action: ${action} (expected up|down|status|logs)"
+      fatal "Unknown 'infra' action: ${action} (expected up|down|restart|status|logs|repair)"
       ;;
   esac
 }
