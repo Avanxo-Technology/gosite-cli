@@ -44,11 +44,21 @@ USAGE
   # --- fetch remote version ---------------------------------------------------
   local remote_version=""
   local raw_url="https://raw.githubusercontent.com/${repo}/${ref}/src/VERSION"
+  local api_url="https://api.github.com/repos/${repo}/contents/src/VERSION?ref=${ref}"
 
   info "Checking latest version from ${repo}@${ref}..."
 
   if command -v curl >/dev/null 2>&1; then
+    # Try raw URL first; fall back to GitHub API if the CDN is stale.
     remote_version="$(curl -fsSL "${raw_url}" 2>/dev/null | tr -d '[:space:]')" || true
+    if [[ -n "${remote_version}" ]] && command -v python3 >/dev/null 2>&1; then
+      local api_version
+      api_version="$(curl -fsSL "${api_url}" 2>/dev/null \
+        | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode().strip())" 2>/dev/null)" || true
+      if [[ -n "${api_version}" && "${api_version}" != "${remote_version}" ]]; then
+        remote_version="${api_version}"
+      fi
+    fi
   elif command -v wget >/dev/null 2>&1; then
     remote_version="$(wget -qO- "${raw_url}" 2>/dev/null | tr -d '[:space:]')" || true
   else
