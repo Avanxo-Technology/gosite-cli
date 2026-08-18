@@ -244,6 +244,31 @@ cmd_infra() {
       info "Starting shared infrastructure (proxy, ${GOSITE_REDIS_HOST}, ${GOSITE_MONGO_HOST}, ${GOSITE_MINIO_HOST})"
       _infra_compose up -d
 
+      # --- self-heal stale labels -------------------------------------------------
+      # `docker compose up -d` does not recreate containers when only labels
+      # change, so after an update the proxy/minio containers can keep the old
+      # (broken) Traefik labels. Detect this and force-recreate when needed.
+      local stale=0
+      if container_running "${GOSITE_PROXY_HOST}"; then
+        if ! container_label_matches "${GOSITE_PROXY_HOST}" \
+            "traefik.http.routers.gosite-dashboard.rule" "Host(\`proxy.${GOSITE_TLD}\`)"; then
+          stale=1
+        fi
+      fi
+      if container_running "${GOSITE_MINIO_HOST}"; then
+        if ! container_label_matches "${GOSITE_MINIO_HOST}" \
+            "traefik.http.services.gosite-minio-s3.loadbalancer.serverstransport" "default@internal"; then
+          stale=1
+        fi
+      fi
+      if [[ "${stale}" -eq 1 ]]; then
+        warn "Detected stale Traefik labels; force-recreating proxy and MinIO..."
+        _infra_compose up -d --force-recreate proxy minio
+      fi
+
+      # Clean up stale dynamic config that older gosite versions generated.
+      rm -f "${GOSITE_DYNAMIC_DIR}/minio-console.yml"
+
       # Create the default bucket in MinIO so projects can use it immediately.
       docker run --rm --network ${GOSITE_NETWORK} \
         --entrypoint sh minio/mc:latest \

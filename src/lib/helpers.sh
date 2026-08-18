@@ -148,6 +148,17 @@ container_exists() { [[ -n "$(docker ps -aq -f "name=^$1$")" ]]; }
 container_running(){ [[ -n "$(docker ps -q  -f "name=^$1$")" ]]; }
 container_on_network(){ docker inspect "$1" --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | grep -qw "$2"; }
 
+# Checks whether a running container has a specific label value. Returns 0
+# (true) when the label matches, 1 when it is missing or differs. Used by
+# `gosite infra up` to detect stale Traefik labels that `docker compose up`
+# would not trigger a recreation for.
+container_label_matches() {
+  local container="$1" label="$2" expected="$3"
+  local actual
+  actual="$(docker inspect "${container}" --format "{{index .Config.Labels \"${label}\"}}" 2>/dev/null)" || return 1
+  [[ "${actual}" == "${expected}" ]]
+}
+
 ensure_network() {
   if network_exists "${GOSITE_NETWORK}"; then
     debug "Network '${GOSITE_NETWORK}' already exists."
