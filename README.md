@@ -121,8 +121,9 @@ gosite create scratch --here                 # -> ./scratch
 
 ### Styling
 
-Tailwind CSS is included by default, loaded from a CDN so local development
-needs no build step. `--no-tailwind` swaps it for a small `static/styles.css`:
+Every project includes a CSS reset ([`@aprinciple/modern-reset`](https://github.com/aprinciple/modern-reset))
+via CDN. Tailwind CSS is offered as an interactive prompt during creation
+(enabled by default, answer **n** for plain CSS):
 
 ```bash
 gosite create my-site                 # Tailwind utility classes
@@ -136,7 +137,8 @@ MinIO) and where content lives (`--database mongodb|local`, default
 `-y/--yes` accepts all defaults.
 
 ```bash
-gosite create my-site                      # prompts; defaults: s3 + mongodb
+gosite create my-site                      # prompts; defaults: tailwind + s3 + mongodb
+gosite create my-site --no-tailwind        # plain CSS
 gosite create my-site --storage local      # uploads on disk, no MinIO
 gosite create my-site --database local     # self-contained mongolite storage
 ```

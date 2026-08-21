@@ -1,19 +1,45 @@
 #!/usr/bin/env bash
 #
-# Pre-commit hook: enforce version bump when source files change.
+# Pre-commit hook for gosite-dev:
+#   1. Reject hardcoded asset URLs (all .go / .html files).
+#   2. Enforce VERSION bump when user-facing source files change.
 #
 set -euo pipefail
 
 VERSION_FILE="src/VERSION"
 
-# Get the list of staged files (excluding deleted ones)
+# ── Shared: staged files ─────────────────────────────────────────────────────
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
-
-# If nothing staged, skip
 [[ -z "${staged}" ]] && exit 0
 
-# Check if any of the staged files are user-facing source files
-# (not just the version file itself or docs)
+# ── Check 1: No hardcoded asset URLs ─────────────────────────────────────────
+# Catches /static/assets/, hardcoded MinIO / S3 URLs — these break when the
+# app runs in a different environment because the domain or bucket differs.
+# docs/ is excluded: it documents the infrastructure, not app code.
+asset_check=$(echo "${staged}" | grep -E '\.(go|html)$' | grep -v '^docs/' || true)
+
+if [[ -n "${asset_check}" ]]; then
+  violations=$(echo "${asset_check}" | xargs grep -n \
+    -e '/static/assets/' \
+    -e 'https\?://minio\.' \
+    -e 'https\?://.*\.s3\.' \
+    2>/dev/null || true)
+
+  if [[ -n "${violations}" ]]; then
+    echo ""
+    echo "  🚫 Hardcoded asset URLs detected in staged files:"
+    echo ""
+    echo "${violations}" | head -20
+    echo ""
+    echo "  Use assetBase config or the assetURL template func instead."
+    echo "  Override with: git commit --no-verify"
+    echo ""
+    exit 1
+  fi
+fi
+
+# ── Check 2: Version bump ────────────────────────────────────────────────────
+# Only applies when user-facing source files (src/*, docs, README, etc.) change.
 has_source_change=0
 while IFS= read -r f; do
   case "$f" in
@@ -27,29 +53,26 @@ while IFS= read -r f; do
       break
       ;;
   esac
-done <<< "$staged"
+done <<< "${staged}"
 
 if [[ "${has_source_change}" -eq 0 ]]; then
   exit 0
 fi
 
-# Read the current (staged) version
-staged_version=$(git diff --cached "$VERSION_FILE" 2>/dev/null | grep '^+[0-9]' | sed 's/^+//' || true)
-if [[ -z "$staged_version" ]]; then
-  # VERSION may not be staged — read from working tree or HEAD
-  staged_version=$(head -1 "$VERSION_FILE" 2>/dev/null || true)
+staged_version=$(git diff --cached "${VERSION_FILE}" 2>/dev/null | grep '^+[0-9]' | sed 's/^+//' || true)
+if [[ -z "${staged_version}" ]]; then
+  staged_version=$(head -1 "${VERSION_FILE}" 2>/dev/null || true)
 fi
 
-# Read the version from the last commit
-head_version=$(git show HEAD:"$VERSION_FILE" 2>/dev/null || echo "")
+head_version=$(git show HEAD:"${VERSION_FILE}" 2>/dev/null || echo "")
 
-if [[ "$staged_version" == "$head_version" ]]; then
+if [[ "${staged_version}" == "${head_version}" ]]; then
   echo ""
-  echo "  ⚠️  Version not bumped. Source files changed but $VERSION_FILE"
-  echo "     is still $staged_version (same as HEAD)."
+  echo "  ⚠️  Version not bumped. Source files changed but ${VERSION_FILE}"
+  echo "     is still ${staged_version} (same as HEAD)."
   echo ""
   echo "     If this is intentional, override with: git commit --no-verify"
-  echo "     Otherwise, bump the version in $VERSION_FILE."
+  echo "     Otherwise, bump the version in ${VERSION_FILE}."
   echo ""
   exit 1
 fi

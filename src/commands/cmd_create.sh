@@ -21,9 +21,9 @@ source "${GOSITE_ROOT}/lib/templates.sh"
 
 cmd_create() {
   local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
-  local STORAGE_PROMPT=1 DATABASE_PROMPT=1
-  # Tailwind is on by default; --no-tailwind swaps it for a small stylesheet.
-  # Either way the generated markup is clean: no orphan utility classes.
+  local STORAGE_PROMPT=1 DATABASE_PROMPT=1 TAILWIND_PROMPT=1
+  # Tailwind is on by default but prompted; --no-tailwind swaps it for a small
+  # stylesheet. Either way the generated markup is clean: no orphan utility classes.
   TAILWIND=1
   ADDONS_ENABLED=0
   # S3/MinIO uploads and the shared MongoDB are the defaults; the prompts below
@@ -33,19 +33,20 @@ cmd_create() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --here)         here=1; shift ;;
-      --no-tailwind)  TAILWIND=0; shift ;;
-      --tailwind)     TAILWIND=1; shift ;;
+      --no-tailwind)  TAILWIND=0; TAILWIND_PROMPT=0; shift ;;
+      --tailwind)     TAILWIND=1; TAILWIND_PROMPT=0; shift ;;
       --addons)       INSTALL_ADDONS=1; ADDONS_ENABLED=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
       --no-addons)    INSTALL_ADDONS=0; ADDONS_ENABLED=0; ADDONS_PROMPT=0; shift ;;
       --storage)      [[ -n "${2:-}" ]] || fatal "--storage needs a value (s3|local)"; STORAGE_ADAPTER="$2"; STORAGE_PROMPT=0; shift 2 ;;
       --database)     [[ -n "${2:-}" ]] || fatal "--database needs a value (mongodb|local)"; DATABASE="$2"; DATABASE_PROMPT=0; shift 2 ;;
-      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --no-addons, --addons, --storage, --database)" ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --tailwind, --no-addons, --addons, --storage, --database)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
 
   validate_project_name "${PROJECT_NAME}"
   require_dependencies
+  _prompt_tailwind
   _prompt_addons
   _prompt_storage
   _prompt_database
@@ -171,6 +172,30 @@ _resolve_dependencies() {
 
   warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ${dir} before deploying."
   return 0
+}
+
+# -----------------------------------------------------------------------------
+# Prompt the user about Tailwind CSS interactively. When --no-tailwind or
+# --tailwind is used the prompt is skipped. If -y/--yes is set, skips with
+# the default (Tailwind on).
+_prompt_tailwind() {
+  [[ "${TAILWIND_PROMPT}" -eq 0 ]] && return 0
+  [[ "${GOSITE_ASSUME_YES}" -eq 1 ]] && return 0
+
+  printf "\n"
+  printf "${C_BOLD}Styling${C_NC}\n"
+  printf "  ${C_DIM}A CSS reset is always included via CDN.${C_NC}\n"
+
+  printf "${C_YELLOW}?${C_NC} Use Tailwind CSS ${C_DIM}(utility-first CSS framework, loaded from CDN)${C_NC} [Y/n] "
+  local reply
+  read -r reply
+  if [[ "${reply}" =~ ^[Nn]$ ]]; then
+    TAILWIND=0
+    info "Using plain CSS (static/styles.css)."
+  else
+    TAILWIND=1
+    ok "Tailwind CSS enabled."
+  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -518,9 +543,8 @@ func (c Config) AssetBaseURL() string {
 	return "/storage/uploads"
 }
 
-// IsDev reports whether the app is running for development, where the
-// cache-purge button is shown without authentication. The default keeps
-// production safe when APP_ENV is not set.
+// IsDev reports whether the app is running for development. In dev mode the
+// cache-purge button skips token authentication.
 func (c Config) IsDev() bool {
 	switch c.Environment {
 	case "development", "dev", "local":
@@ -584,7 +608,10 @@ EOF
 package handlers
 
 import (
+	"fmt"
+	"html"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 )
@@ -633,11 +660,28 @@ func (r Response) JSON(status int, body any) error {
 // Fail logs the real error and returns a generic message to the client, so
 // internal details never leak and no handler has to remember to do both.
 // Echo's error handler turns the returned HTTPError into the response.
+// For browser requests, a minimal HTML page is served instead of JSON.
 func (r Response) Fail(status int, message string, err error) error {
 	if err != nil {
 		r.h.Log.Error(message, "err", err, "path", r.c.Request().URL.Path)
 	}
+	if strings.Contains(r.c.Request().Header.Get("Accept"), "text/html") {
+		return r.c.HTML(status, errorPage(status, message, err))
+	}
 	return echo.NewHTTPError(status, message)
+}
+
+// errorPage returns a minimal, self-contained HTML error page. In dev mode
+// the real error is shown so the developer can diagnose without checking logs.
+func errorPage(status int, message string, err error) string {
+	var detail string
+	if err != nil {
+		detail = fmt.Sprintf("<p class=\"err\">%s</p>", html.EscapeString(err.Error()))
+	}
+	return fmt.Sprintf(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>%d</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}main{text-align:center;max-width:480px;padding:2rem}h1{font-size:4rem;margin:0;opacity:.4}p{margin:.5rem 0}h2{margin:0;font-size:1.25rem}h2+p{color:#94a3b8}.err{font:12px/1.4 ui-monospace,monospace;color:#f87171;margin-top:1.5rem;padding:1rem;background:#1e293b;border-radius:8px;text-align:left;word-break:break-all}</style></head>
+<body><main><h1>%d</h1><h2>%s</h2><p>Intenta de nuevo en unos segundos.</p>%s</main></body></html>`,
+		status, status, html.EscapeString(message), detail)
 }
 EOF
 
@@ -647,6 +691,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -673,14 +718,29 @@ func (h *Handlers) Home(c *echo.Context) error {
 // rather than the request's: a cold render is shared by every request waiting
 // on it, so if the one caller that happened to trigger it disconnects, that
 // must not cancel the work everyone else is waiting for.
+//
+// The CMS client already retries once on transient failures. If both attempts
+// fail the content will be empty and this method returns an error so the cache
+// layer discards the render instead of poisoning the page for 10 minutes.
 func (h *Handlers) renderHome() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	content := h.CMS.Singleton(ctx, "home")
+
+	// Guard: if the CMS returned no content at all (unreachable, wrong
+	// credentials, etc.) the templates render every text block from hardcoded
+	// strings but all image src attributes become empty. Caching that HTML
+	// poisons the page until the next TTL expiry, which is exactly the bug
+	// users see. Return an error so the cache layer discards the render.
+	if len(content) == 0 {
+		return nil, fmt.Errorf("cockpit returned empty content for home singleton")
+	}
+
 	var buf bytes.Buffer
 	err := h.Renderer.Page(&buf, "home", map[string]any{
 		"Title":   "__PROJECT__",
-		"Content": h.CMS.Singleton(ctx, "home"),
+		"Content": content,
 		"IsDev":   h.Config.IsDev(),
 	})
 	return buf.Bytes(), err
@@ -769,6 +829,11 @@ import (
 // fresh enough for editorial work. Publishing calls /cache/purge anyway.
 const ttl = 10 * time.Minute
 
+// staleTTL keeps a good render around beyond the fresh TTL so visitors see
+// slightly outdated content rather than a 502 when the CMS is temporarily
+// unreachable.
+const staleTTL = 24 * time.Hour
+
 type Cache struct {
 	rdb *redis.Client
 	log *slog.Logger
@@ -784,11 +849,17 @@ func New(rdb *redis.Client, log *slog.Logger, dev bool) *Cache {
 	return &Cache{rdb: rdb, log: log, dev: dev}
 }
 
+// staleKey appends ":stale" so the long-lived copy lives beside the fresh one.
+func staleKey(key string) string { return key + ":stale" }
+
 // HTML returns the cached bytes for key, calling render only on a miss:
 //
-//  1. GET the key. On a hit, return immediately - no CMS call, no rendering.
+//  1. GET the key. On a hit, return immediately — no CMS call, no rendering.
 //  2. On a miss, run render behind single-flight, SET the result with a TTL
 //     and return it. Concurrent misses of the same key share that one render.
+//
+// If a render fails, the stale copy (if any) is served instead so visitors
+// never see a 502 while the CMS warms up (stale-if-error).
 //
 // A Redis failure is never fatal: render still runs and the request is just
 // slower, which keeps the site up when the cache is down.
@@ -820,16 +891,26 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 	v, err, shared := c.sf.Do(key, func() (any, error) {
 		fresh, err := render()
 		if err != nil {
-			// single-flight discards failed results, so the next caller retries
-			// instead of inheriting this error. No Forget needed.
+			// Render failed — serve the last good copy so visitors don't see
+			// a 502 while the CMS warms up. single-flight discards this
+			// result so the next caller retries the render.
+			stale, staleErr := c.rdb.Get(context.Background(), staleKey(key)).Bytes()
+			if staleErr == nil {
+				c.log.Warn("render failed, serving stale", "key", key, "err", err)
+				return stale, nil
+			}
 			return nil, err
 		}
 
-		// Write with a background context, not the request one: the caller that
-		// happened to win the race may disconnect, and that must not stop the
-		// cache from being warmed for everyone else waiting on this render.
-		if err := c.rdb.Set(context.Background(), key, fresh, ttl).Err(); err != nil {
+		// Write with a background context, not the request one: the caller
+		// that happened to win the race may disconnect, and that must not
+		// stop the cache from being warmed for everyone else.
+		bg := context.Background()
+		if err := c.rdb.Set(bg, key, fresh, ttl).Err(); err != nil {
 			c.log.Warn("cache write failed", "key", key, "err", err)
+		}
+		if err := c.rdb.Set(bg, staleKey(key), fresh, staleTTL).Err(); err != nil {
+			c.log.Warn("stale cache write failed", "key", key, "err", err)
 		}
 		return fresh, nil
 	})
@@ -841,9 +922,14 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 	return v.([]byte), false, nil
 }
 
-// Purge removes keys, so an editor never has to wait out the TTL.
+// Purge removes fresh and stale keys so an editor never has to wait out the
+// TTL and stale content is cleared alongside fresh content.
 func (c *Cache) Purge(ctx context.Context, keys ...string) error {
-	return c.rdb.Del(ctx, keys...).Err()
+	all := make([]string, 0, len(keys)*2)
+	for _, k := range keys {
+		all = append(all, k, staleKey(k))
+	}
+	return c.rdb.Del(ctx, all...).Err()
 }
 EOF
 }
@@ -865,6 +951,7 @@ import (
 	"time"
 
 	"__MODULE__/internal/config"
+	"golang.org/x/sync/singleflight"
 )
 
 type Client struct {
@@ -872,6 +959,10 @@ type Client struct {
 	token   string
 	http    *http.Client
 	log     *slog.Logger
+
+	// sf deduplicates concurrent fetches for the same singleton or collection,
+	// so a cache stampede never turns into N parallel Cockpit requests.
+	sf singleflight.Group
 }
 
 func New(cfg config.Config, log *slog.Logger) *Client {
@@ -900,12 +991,14 @@ type Content map[string]any
 // logged warning rather than an error page: the site still renders with the
 // fallbacks in the template.
 func (c *Client) Singleton(ctx context.Context, name string) Content {
-	content, err := c.fetch(ctx, "/api/content/item/"+name)
+	v, err, _ := c.sf.Do("singleton:"+name, func() (any, error) {
+		return c.fetch(ctx, "/api/content/item/"+name)
+	})
 	if err != nil {
 		c.log.Warn("cockpit unavailable, using template fallbacks", "item", name, "err", err)
 		return Content{}
 	}
-	return content
+	return v.(Content)
 }
 
 func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
@@ -975,6 +1068,11 @@ type Renderer struct {
 // NewRenderer parses every template at startup and panics on a malformed one,
 // so a broken template fails the deploy instead of the first request.
 //
+// It also forces the html/template contextual-escaping pass at boot. Without
+// this, a template that parses fine can still fail every request with errors
+// like "'" in attribute name (Alpine + Go template quoting conflicts). The
+// error is cached by html/template and only a process restart clears it.
+//
 // assetBase is the base URL for CMS assets (config.AssetBaseURL): with S3
 // storage it is the public bucket/endpoint so images load CDN-style; otherwise
 // it is the local /storage/uploads mount.
@@ -1013,11 +1111,27 @@ func NewRenderer(assetBase string) *Renderer {
 		))
 	}
 
-	return &Renderer{
-		pages: map[string]*template.Template{
-			"home": page("home"),
-		},
+	pages := map[string]*template.Template{
+		"home": page("home"),
 	}
+
+	// Force the contextual-escaping pass now so a broken template panics
+	// at boot instead of silently failing every request. probeData must
+	// include every top-level key the handler passes to Page(); missing
+	// keys cause "index of untyped nil" — add them here.
+	probeData := map[string]any{
+		"Title":   "",
+		"Content": map[string]any{},
+		"IsDev":   true,
+	}
+	for name, t := range pages {
+		if err := t.ExecuteTemplate(io.Discard, "layout", probeData); err != nil {
+			panic(fmt.Sprintf("views: page %q failed at startup: %v\n"+
+				"If this is a data error, add the missing key to probeData in render.go.", name, err))
+		}
+	}
+
+	return &Renderer{pages: pages}
 }
 
 // Render satisfies echo.Renderer, so handlers can use c.Render directly.
@@ -1047,7 +1161,7 @@ EOF
 _write_views_tailwind() {
   cat > "$1/internal/views/layout.html" <<'EOF'
 {{/*
-  Base HTML document: Tailwind CSS, htmx and Alpine.js, and nothing else.
+  Base HTML document: CSS reset, Tailwind CSS, htmx and Alpine.js.
   Every page fills in the "content" block.
 
   The libraries are loaded from a CDN to keep local development build-free.
@@ -1060,6 +1174,7 @@ _write_views_tailwind() {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}}</title>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@aprinciple/modern-reset@0.1.1/reset.min.css">
 	<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
 	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
 	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
@@ -1100,11 +1215,9 @@ EOF
 EOF
 
   cat > "$1/internal/views/components/button.html" <<'EOF'
-{{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
-   production, and it carries its own <style> block so it can be copied into any
-   project without touching the shared stylesheet. */}}
+{{/* Purges the cached page and reloads. It carries its own <style> block so it
+   can be copied into any project without touching the shared stylesheet. */}}
 {{define "purge-button"}}
-{{if .IsDev}}
 <button
   type="button"
   class="dev-purge"
@@ -1140,7 +1253,6 @@ EOF
 .dev-purge:disabled { opacity: 0.6; cursor: wait; }
 </style>
 {{end}}
-{{end}}
 EOF
 }
 
@@ -1148,8 +1260,8 @@ EOF
 _write_views_plain() {
   cat > "$1/internal/views/layout.html" <<'EOF'
 {{/*
-  Base HTML document: one stylesheet, htmx and Alpine.js. Every page fills in
-  the "content" block.
+  Base HTML document: CSS reset, one stylesheet, htmx and Alpine.js.
+  Every page fills in the "content" block.
 
   htmx and Alpine are loaded from a CDN to keep local development build-free.
   Before going to production, vendor them into /static so the site does not
@@ -1161,6 +1273,7 @@ _write_views_plain() {
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}}</title>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@aprinciple/modern-reset@0.1.1/reset.min.css">
 	<link rel="stylesheet" href="/static/styles.css">
 	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
 	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
@@ -1198,11 +1311,9 @@ EOF
 EOF
 
   cat > "$1/internal/views/components/button.html" <<'EOF'
-{{/* Purges the cached page and reloads. Dev-only: it is not rendered at all in
-   production, and it carries its own <style> block so it can be copied into any
-   project without touching the shared stylesheet. */}}
+{{/* Purges the cached page and reloads. It carries its own <style> block so it
+   can be copied into any project without touching the shared stylesheet. */}}
 {{define "purge-button"}}
-{{if .IsDev}}
 <button
   type="button"
   class="dev-purge"
@@ -1237,7 +1348,6 @@ EOF
 .dev-purge:hover { background: var(--dev-purge-hover, rgba(37, 99, 235, 0.85)); }
 .dev-purge:disabled { opacity: 0.6; cursor: wait; }
 </style>
-{{end}}
 {{end}}
 EOF
 
@@ -1274,7 +1384,6 @@ body {
 	background: var(--bg);
 	color: var(--text);
 	font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
-	-webkit-font-smoothing: antialiased;
 }
 
 .container { max-width: 48rem; margin: 0 auto; padding: 3rem 1.5rem; }
@@ -1458,15 +1567,17 @@ EOF
 
 ## Styling
 
-Tailwind CSS, loaded from a CDN in `internal/views/layout.html`. Components
-carry utility classes. There is no Tailwind build or config file; before
-production, vendor the CDN script into `/static`.
+CSS reset via CDN (`@aprinciple/modern-reset`) in `internal/views/layout.html`.
+Tailwind CSS loaded from CDN for utility-first styling. Components carry utility
+classes. There is no Tailwind build or config file; before production, vendor
+the CDN scripts into `/static`.
 EOF
   else
     cat >> "$1/MEMORY.md" <<'EOF'
 
 ## Styling
 
+CSS reset via CDN (`@aprinciple/modern-reset`) in `internal/views/layout.html`.
 Plain CSS in `static/styles.css`, built on custom properties with a dark-mode
 block. Components carry semantic class names (`panel`, `page-header`,
 `button`). No Tailwind, no build step - add rules to that stylesheet.
@@ -1823,11 +1934,79 @@ EOF
 # -----------------------------------------------------------------------------
 _write_meta_files() {
   cat > "$1/.gitignore" <<'EOF'
+# Environment
 .env
-tmp/
-cockpit-storage/
+.env.local
+.env.*.local
+
+# Build output
 /app
+tmp/
+
+# CMS storage
+cockpit-storage/
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+._*
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
 EOF
+
+  # Pre-commit hook: reject hardcoded asset URLs that break cross-env deploys.
+  mkdir -p "$1/.githooks"
+  cat > "$1/.githooks/pre-commit" <<'HOOK'
+#!/usr/bin/env bash
+#
+# Pre-commit: reject hardcoded asset URLs in Go and HTML template files.
+# These break when the app runs in a different environment (QA, prod)
+# because the domain or bucket differs.  Use the assetBase config variable
+# or the assetURL template func instead.
+#
+set -euo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[[ -z "${staged}" ]] && exit 0
+
+# Only check Go and HTML files.
+check=$(echo "${staged}" | grep -E '\.(go|html)$' || true)
+[[ -z "${check}" ]] && exit 0
+
+# Patterns that indicate hardcoded asset paths or environment-specific URLs.
+violations=$(echo "${check}" | xargs grep -n \
+  -e '/static/assets/' \
+  -e 'https\?://minio\.' \
+  -e 'https\?://.*\.s3\.' \
+  2>/dev/null || true)
+
+if [[ -n "${violations}" ]]; then
+  echo ""
+  echo "  🚫 Hardcoded asset URLs detected in staged files:"
+  echo ""
+  echo "${violations}" | head -20
+  echo ""
+  echo "  Use assetBase config or the assetURL template func instead."
+  echo "  Override with: git commit --no-verify"
+  echo ""
+  exit 1
+fi
+HOOK
+  chmod +x "$1/.githooks/pre-commit"
+
+  # Activate the hook if the repo already exists.
+  if [[ -d "$1/.git" ]]; then
+    git -C "$1" config core.hooksPath .githooks
+  fi
 
   cat > "$1/Makefile" <<'EOF'
 .PHONY: dev build tidy
@@ -1845,7 +2024,7 @@ EOF
   cat > "$1/README.md" <<'EOF'
 # __PROJECT__
 
-Go (Echo + htmx + Alpine.js + Templ + Tailwind) + Cockpit CMS monolith, with
+Go (Echo + htmx + Alpine.js + Templ) + Cockpit CMS monolith, with
 Redis cache-aside in front of the CMS.
 
 ## Structure

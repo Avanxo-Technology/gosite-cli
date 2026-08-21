@@ -20,7 +20,7 @@ $(printf "${C_BOLD}USAGE${C_NC}")
 
 $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   create <name>      Scaffold a new project in ${GOSITE_WORKSPACE}
-                     flags: --here (cwd), --no-tailwind (plain CSS)
+                     flags: --here (cwd), --no-tailwind / --tailwind
                             --addons "A B" (specific), --no-addons (skip prompt)
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack

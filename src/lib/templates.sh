@@ -421,8 +421,9 @@ $config = [
         : [
             'server' => getenv('COCKPIT_MEMORY_SERVER') ?: 'redis://gosite-redis:6379',
             'options' => [
+                'auth'     => parse_url(getenv('COCKPIT_MEMORY_SERVER') ?: 'redis://localhost')['pass'] ?? null,
                 'database' => 1,
-                'prefix' => $mongoDb.':',
+                'prefix'   => $mongoDb.':',
             ],
         ],
 
