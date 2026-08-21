@@ -192,7 +192,7 @@ _sync_list_addons() {
     [[ -d "${d}" ]] || continue
     local name; name="$(basename "${d}")"
     case "${name}" in
-      AssetsUpload|ModelManager|CloudStorage|AssetPathFix) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
+      AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
       *) printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons)" ;;
     esac
   done
