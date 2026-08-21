@@ -71,7 +71,7 @@ _write_builtin_addons() {
   local addons_src="${GOSITE_ROOT}/addons"
   local target="$1/cockpit/addons"
 
-  for name in AssetsUpload ModelManager CloudStorage AssetPathFix; do
+  for name in AssetsUpload ModelManager CloudStorage AssetPathFix CachePurge; do
     mkdir -p "${target}/${name}"
     cp -R "${addons_src}/${name}/." "${target}/${name}/"
   done
@@ -174,6 +174,10 @@ services:
       S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
       S3_ACL: "${S3_ACL:-}"
       S3_VERIFY: "${S3_VERIFY:-true}"
+      # CachePurge addon: the Go app's internal address and shared token so
+      # Cockpit can POST to /cache/purge when content changes or Replica syncs.
+      APP_URL: "http://app:8080"
+      COCKPIT_API_TOKEN: "${COCKPIT_API_TOKEN}"
     ports:
       - "__CMS_PORT__:80"
     labels:
@@ -293,6 +297,10 @@ services:
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
       - S3_ACL=${S3_ACL:-}
       - S3_VERIFY=${S3_VERIFY:-true}
+      # CachePurge addon: the Go app's internal address and shared token so
+      # Cockpit can POST to /cache/purge when content changes or Replica syncs.
+      - APP_URL=http://app:8080
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
       # Config and addons are NOT mounted here: Dockerfile.cms bakes the
