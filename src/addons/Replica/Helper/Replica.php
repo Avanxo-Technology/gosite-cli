@@ -1179,10 +1179,17 @@ class Replica extends \Lime\Helper {
 
         // Purge the app cache after replication so the site serves fresh
         // content without waiting out the TTL. The CachePurge addon
-        // registers this helper; if it is not installed, the call is a no-op.
+        // registers a closure; access it directly from the helpers array
+        // because $app->helper() has a Helper return type that rejects
+        // closures.
         if (!$dryRun && ($result['created'] + $result['updated']) > 0) {
-            if ($purge = $this->app->helper('cachepurge')) {
-                $purge();
+            try {
+                $purge = $this->app->helpers['cachepurge'] ?? null;
+                if (is_callable($purge)) {
+                    $purge();
+                }
+            } catch (\Throwable $e) {
+                // Cache purge is best-effort; never let it break the response.
             }
         }
 
