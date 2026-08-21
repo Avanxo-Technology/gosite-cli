@@ -444,6 +444,10 @@ class Client extends \Lime\Helper {
      * Upserts assets and folders remotely. Peer transport only. The payload
      * already carries the file bytes (base64 fileData), attached by the caller
      * through Helper\Replica::attachAssetData().
+     *
+     * Batches assets so each request stays comfortably under the remote's
+     * post_max_size. The endpoint is idempotent per asset (upserts by _id),
+     * so sending in multiple POSTs is safe.
      */
     public function pushAssets(array $payload, string $mode): array {
 
@@ -451,9 +455,59 @@ class Client extends \Lime\Helper {
             throw new \Exception('Remote does not run Replica: assets cannot be transferred.');
         }
 
+        $assets  = $payload['assets'] ?? [];
+        $folders = $payload['folders'] ?? [];
+        $total   = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
+
+        // ~30MB raw per batch ≈ 40MB base64+json — well under post_max_size (100M).
+        $batchRawLimit = 30 * 1024 * 1024;
+
+        if (count($folders)) {
+            $response = $this->request('POST', '/api/replica/assets', [
+                'assets'  => [],
+                'folders' => $folders,
+                'mode'    => $mode,
+            ]);
+
+            if ($response['status'] !== 200) {
+                throw new \Exception('Remote folder write failed: '.($response['error'] ?: 'HTTP '.$response['status']));
+            }
+
+            $this->mergeAssetResult($total, $response['body'] ?? []);
+        }
+
+        $batch = [];
+        $batchRaw = 0;
+
+        foreach ($assets as $asset) {
+
+            $rawSize = isset($asset['fileData']) ? (int)(strlen($asset['fileData']) * 3 / 4) : 0;
+
+            if (count($batch) && $batchRaw + $rawSize > $batchRawLimit) {
+                $this->sendAssetBatch($batch, $mode, $total);
+                $batch = [];
+                $batchRaw = 0;
+            }
+
+            $batch[]   = $asset;
+            $batchRaw += $rawSize;
+        }
+
+        if (count($batch)) {
+            $this->sendAssetBatch($batch, $mode, $total);
+        }
+
+        return $total;
+    }
+
+    /**
+     * POSTs one batch of assets to the remote and merges the result.
+     */
+    protected function sendAssetBatch(array $assets, string $mode, array &$total): void {
+
         $response = $this->request('POST', '/api/replica/assets', [
-            'assets'  => $payload['assets'] ?? [],
-            'folders' => $payload['folders'] ?? [],
+            'assets'  => $assets,
+            'folders' => [],
             'mode'    => $mode,
         ]);
 
@@ -461,7 +515,21 @@ class Client extends \Lime\Helper {
             throw new \Exception('Remote asset write failed: '.($response['error'] ?: 'HTTP '.$response['status']));
         }
 
-        return $response['body'] ?? [];
+        $this->mergeAssetResult($total, $response['body'] ?? []);
+    }
+
+    /**
+     * Accumulates a single batch result into the running total.
+     */
+    protected function mergeAssetResult(array &$total, array $batch): void {
+
+        foreach (['created', 'updated', 'skipped', 'errors'] as $key) {
+            $total[$key] += (int)($batch[$key] ?? 0);
+        }
+
+        if (isset($batch['messages']) && is_array($batch['messages'])) {
+            $total['messages'] = array_merge($total['messages'], $batch['messages']);
+        }
     }
 
     // ------------------------------------------------------------------ http
