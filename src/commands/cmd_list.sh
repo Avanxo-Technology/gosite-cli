@@ -7,6 +7,15 @@
 #
 
 cmd_list() {
+  local do_prune=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --prune) do_prune=1; shift ;;
+      -*)      fatal "Unknown flag for 'list': $1 (expected --prune)" ;;
+      *)       shift ;;
+    esac
+  done
+
   require_dependencies
 
   # Pick up any project below the cwd that is not indexed yet (a fresh clone,
@@ -16,11 +25,26 @@ cmd_list() {
     registry_register "$(cd "$(dirname "${marker}")" && pwd)"
   done < <(find "${GOSITE_WORKSPACE}" "${PWD}" -maxdepth 3 -name "${GOSITE_MARKER}" -type f 2>/dev/null)
 
+  # Pruning is an explicit maintenance step - never a side effect of listing.
+  if [[ "${do_prune}" -eq 1 ]]; then
+    info "Pruning registry entries whose directory no longer exists"
+    registry_prune
+  fi
+
   info "Registered projects"
 
-  local found=0 name dir
-  while IFS=$'\t' read -r name dir; do
+  local found=0 missing=0 name dir state
+  while IFS=$'\t' read -r name dir state; do
     [[ -n "${name}" ]] || continue
+
+    # Registered but vanished: report and continue, never rewrite here.
+    if [[ "${state}" == "unavailable" ]]; then
+      printf "\n${C_BOLD}%s${C_NC}  ${C_DIM}unavailable${C_NC}\n" "${name}"
+      printf "  ${C_DIM}${dir} (directory is gone; remove this entry with 'gosite list --prune')${C_NC}\n"
+      missing=$(( missing + 1 ))
+      continue
+    fi
+
     (
       # Subshell so one project's marker never leaks into the next.
       # shellcheck source=/dev/null
@@ -38,7 +62,7 @@ cmd_list() {
     found=$(( found + 1 ))
   done < <(registry_entries)
 
-  if [[ "${found}" -eq 0 ]]; then
+  if [[ "${found}" -eq 0 && "${missing}" -eq 0 ]]; then
     printf "\n${C_DIM}No projects found. Create one with 'gosite create <name>'.${C_NC}\n"
     return 0
   fi
@@ -50,7 +74,10 @@ cmd_list() {
 # Keeps the PATH column readable by collapsing $HOME to ~.
 _short_path() {
   case "$1" in
-    "${HOME}"/*) printf '~/%s' "${1#"${HOME}"/}" ;;
+    "${HOME}"/*)
+      # '~' is a display shorthand for the user, not an expansion.
+      # shellcheck disable=SC2088
+      printf '~/%s' "${1#"${HOME}"/}" ;;
     *)           printf '%s' "$1" ;;
   esac
 }

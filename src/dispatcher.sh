@@ -29,7 +29,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   cd     <name>      Jump into a project directory (needs shell-init)
   path   <name>      Print a project's absolute path
   remove <name>      Delete a project entirely (--keep-source keeps the code)
-  sync   [name]      Re-apply gosite's templates (compose, addons, .env)
+  sync   [name]      Re-apply gosite's templates (compose, addons, .env); never writes docker-compose.prod.yml
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
@@ -43,7 +43,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
 
 $(printf "${C_BOLD}OTHER${C_NC}")
   open   <name>         Open a project directory in Finder
-  doctor             Verify local dependencies (go, air, docker, compose)
+  doctor             Verify dependencies + audit security defaults (--strict)
   update             Update gosite to the latest version from GitHub
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
   help               Show this help
@@ -79,7 +79,7 @@ dispatch() {
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     sync)            load_command sync;   cmd_sync   "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
-    doctor)          require_dependencies --report ;;
+    doctor)          load_command doctor; cmd_doctor "$@" ;;
     dns)             load_command dns; cmd_dns ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;
     help|"")         usage ;;

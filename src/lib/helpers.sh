@@ -30,18 +30,109 @@ validate_project_name() {
 
 is_gosite_project() { [[ -f "${1:-.}/${GOSITE_MARKER}" ]]; }
 
+# --- locking ------------------------------------------------------------------
+# Portable mutual exclusion built on mkdir(2), which is atomic on POSIX and
+# available on macOS, where flock(1) does not ship. A lock is a directory
+# "<target>.lock" holding the owner pid; release removes it. Locks left behind
+# by dead processes are reclaimed by checking the pid (kill -0) and, as a
+# fallback for owners that died before writing their pid, the lock's age.
+
+# Seconds to wait for a contended lock before giving up with a clear error.
+: "${GOSITE_LOCK_TIMEOUT:=30}"
+
+# A lock older than this whose pid is gone (or was never written) is orphaned.
+readonly GOSITE_LOCK_STALE_SECONDS=600
+
+_lock_release() {
+  rm -rf "$1"
+  debug "Lock released: $1"
+}
+
+# Returns 0 when the lock was reclaimed (removed), 1 while an owner may live.
+_lock_reclaim() {
+  local lockdir="$1" pid mtime now
+  [[ -d "${lockdir}" ]] || return 0
+
+  pid="$(cat "${lockdir}/pid" 2>/dev/null || true)"
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    return 1
+  fi
+
+  # Pid gone or never written. Only reclaim past an age bound so a live owner
+  # still between mkdir and its pid write keeps its lock.
+  now="$(date +%s)"
+  mtime="$(stat -f %m "${lockdir}" 2>/dev/null || stat -c %Y "${lockdir}" 2>/dev/null || echo "${now}")"
+  if (( now - mtime < GOSITE_LOCK_STALE_SECONDS )); then
+    return 1
+  fi
+
+  debug "Reclaiming orphaned lock ${lockdir} (pid '${pid:-?}' is gone, age $((now - mtime))s)."
+  rm -rf "${lockdir}"
+}
+
+# with_lock <state-file> <function> [args...]
+#
+# Runs <function> while holding an exclusive lock on <state-file>. Acquiring
+# is mkdir (atomic), release happens through a trap even if <function> fails,
+# exits or is interrupted. Contention waits up to GOSITE_LOCK_TIMEOUT seconds.
+with_lock() {
+  local target="$1" fn="$2"; shift 2
+  local lockdir="${target}.lock" start=$SECONDS pid="?"
+
+  until mkdir "${lockdir}" 2>/dev/null; do
+    _lock_reclaim "${lockdir}" && continue
+    if (( SECONDS - start >= GOSITE_LOCK_TIMEOUT )); then
+      pid="$(cat "${lockdir}/pid" 2>/dev/null || printf '?')"
+      err "Timed out after ${GOSITE_LOCK_TIMEOUT}s waiting for lock ${lockdir} (held by pid ${pid})."
+      return 1
+    fi
+    sleep 0.25
+  done
+  printf '%s\n' "$$" > "${lockdir}/pid"
+  debug "Lock acquired: ${lockdir}"
+
+  # Release no matter how the wrapped function ends: failure, exit() or signal.
+  # Double quotes are deliberate: the CURRENT lockdir is baked into the trap
+  # when it is armed, not whatever the variable holds when it fires.
+  # shellcheck disable=SC2064
+  trap "_lock_release '${lockdir}'" EXIT
+  set +e
+  "${fn}" "$@"
+  local rc=$?
+  set -e
+  _lock_release "${lockdir}"
+  trap - EXIT
+  return "${rc}"
+}
+
+# Publishes stdin to <file> atomically: write a temp file in the destination's
+# own directory (same filesystem, so mv(2) is a rename) and rename it into
+# place. An interruption therefore leaves either the old or the new complete
+# content, never a partial file.
+publish_atomic() {
+  local dest="$1" tmp
+  tmp="$(mktemp "$(dirname "${dest}")/.gosite.XXXXXX")"
+  cat > "${tmp}"
+  mv "${tmp}" "${dest}"
+}
+
 # --- project registry --------------------------------------------------------
 # A flat "<name>\t<path>" index so projects can be resolved by name from any
-# directory. Written on create/start, self-healing on read.
+# directory. Written on create/start under a lock; reading never rewrites.
 
 registry_register() {
   local dir="$1" name
   is_gosite_project "${dir}" || return 0
   name="$(basename "${dir}")"
   mkdir -p "$(dirname "${GOSITE_REGISTRY}")"
-  touch "${GOSITE_REGISTRY}"
-  # Drop any previous entry for this name, then append the current path.
-  local tmp; tmp="$(mktemp)"
+  [[ -f "${GOSITE_REGISTRY}" ]] || touch "${GOSITE_REGISTRY}"
+  with_lock "${GOSITE_REGISTRY}" _registry_register_locked "${name}" "${dir}"
+}
+
+_registry_register_locked() {
+  local name="$1" dir="$2" tmp
+  # Drop any previous entry for this name, append the current path.
+  tmp="$(mktemp "$(dirname "${GOSITE_REGISTRY}")/.gosite.XXXXXX")"
   grep -v -e "^${name}	" "${GOSITE_REGISTRY}" > "${tmp}" 2>/dev/null || true
   printf '%s\t%s\n' "${name}" "${dir}" >> "${tmp}"
   sort -o "${tmp}" "${tmp}"
@@ -50,29 +141,68 @@ registry_register() {
 
 registry_forget() {
   [[ -f "${GOSITE_REGISTRY}" ]] || return 0
-  local tmp; tmp="$(mktemp)"
-  grep -v -e "^$1	" "${GOSITE_REGISTRY}" > "${tmp}" 2>/dev/null || true
+  with_lock "${GOSITE_REGISTRY}" _registry_forget_locked "$1"
+}
+
+_registry_forget_locked() {
+  local name="$1" tmp
+  tmp="$(mktemp "$(dirname "${GOSITE_REGISTRY}")/.gosite.XXXXXX")"
+  grep -v -e "^${name}	" "${GOSITE_REGISTRY}" > "${tmp}" 2>/dev/null || true
   mv "${tmp}" "${GOSITE_REGISTRY}"
 }
 
-# Prints "<name>\t<path>" for every registered project that still exists,
-# rewriting the registry to drop entries whose directory is gone.
+# Prints "<name>\t<path>\t<available|unavailable>" for every registered
+# project. Pure read: entries whose directory has disappeared are reported as
+# unavailable instead of being silently rewritten out of existence - pruning
+# only happens through registry_prune ('gosite list --prune'), under lock.
 registry_entries() {
   [[ -f "${GOSITE_REGISTRY}" ]] || return 0
-  local tmp; tmp="$(mktemp)"
-  local name path
-  while IFS=$'\t' read -r name path; do
+  # The third var absorbs any trailing columns so a stray tab can never end
+  # up inside the path.
+  local name path rest state
+  while IFS=$'\t' read -r name path rest; do
     [[ -n "${name}" ]] || continue
     if is_gosite_project "${path}"; then
-      printf '%s\t%s\n' "${name}" "${path}" >> "${tmp}"
+      state="available"
+    else
+      state="unavailable"
     fi
+    printf '%s\t%s\t%s\n' "${name}" "${path}" "${state}"
   done < "${GOSITE_REGISTRY}"
-  mv "${tmp}" "${GOSITE_REGISTRY}"
-  cat "${GOSITE_REGISTRY}"
 }
 
 registry_lookup() {
   registry_entries | awk -F'\t' -v n="$1" '$1 == n { print $2; exit }'
+}
+
+# Removes registry entries whose project directory no longer exists. The only
+# maintenance path that mutates the registry on account of missing dirs, and
+# it runs under the registry lock.
+registry_prune() {
+  [[ -f "${GOSITE_REGISTRY}" ]] || return 0
+  with_lock "${GOSITE_REGISTRY}" _registry_prune_locked
+}
+
+_registry_prune_locked() {
+  local name path rest removed=0
+  while IFS=$'\t' read -r name path rest; do
+    [[ -n "${name}" ]] || continue
+    if ! is_gosite_project "${path}"; then
+      warn "Pruning '${name}' from the registry: ${path} no longer exists."
+      removed=$(( removed + 1 ))
+    fi
+  done < "${GOSITE_REGISTRY}"
+
+  (( removed > 0 )) || return 0
+  local tmp
+  tmp="$(mktemp "$(dirname "${GOSITE_REGISTRY}")/.gosite.XXXXXX")"
+  {
+    while IFS=$'\t' read -r name path rest; do
+      [[ -n "${name}" ]] || continue
+      is_gosite_project "${path}" && printf '%s\t%s\n' "${name}" "${path}"
+    done < "${GOSITE_REGISTRY}"
+  } | sort > "${tmp}"
+  mv "${tmp}" "${GOSITE_REGISTRY}"
 }
 
 # Resolve a project directory. Resolution order:
@@ -173,13 +303,71 @@ ensure_network() {
 # A persistent "<project>\t<app_port>\t<cms_port>" file that prevents port
 # collisions between concurrent creations and survives daemon restarts.
 
-reserve_ports() {
+# Chooses the app and CMS ports and records their reservation inside a single
+# critical section, so two concurrent `gosite create` runs can never select
+# the same port: selection reads the reservation file under the same lock the
+# write holds, making pick-and-record one indivisible operation.
+#
+# On success the ports are in GOSITE_ALLOCATED_PORTS ("app cms") - a
+# documented interface global read by cmd_create.
+# shellcheck disable=SC2034
+allocate_ports() {
+  local project="$1" start="${2:-${GOSITE_PORT_MIN}}"
+  GOSITE_ALLOCATED_PORTS=""
   mkdir -p "$(dirname "${GOSITE_PORTS_FILE}")"
-  touch "${GOSITE_PORTS_FILE}"
-  local tmp; tmp="$(mktemp)"
-  grep -v -e "^$1	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
-  printf '%s' "$1" >> "${tmp}"
-  shift
+  [[ -f "${GOSITE_PORTS_FILE}" ]] || touch "${GOSITE_PORTS_FILE}"
+  with_lock "${GOSITE_PORTS_FILE}" _allocate_ports_locked "${project}" "${start}"
+}
+
+_allocate_ports_locked() {
+  local project="$1" start="$2" port app_port="" cms_port=""
+
+  # One docker ps for the whole scan; published-port checks below use it.
+  GOSITE_DOCKER_PUBLISHED="$(docker ps --format '{{.Ports}}' 2>/dev/null || true)"
+
+  for (( port = start; port <= GOSITE_PORT_MAX; port++ )); do
+    _port_in_use "${port}" && continue
+    app_port="${port}"
+    break
+  done
+  if [[ -z "${app_port}" ]]; then
+    err "No free port available in range ${start}-${GOSITE_PORT_MAX}; cannot create '${project}'."
+    return 1
+  fi
+
+  for (( port = app_port + 1; port <= GOSITE_PORT_MAX; port++ )); do
+    _port_in_use "${port}" && continue
+    cms_port="${port}"
+    break
+  done
+  if [[ -z "${cms_port}" ]]; then
+    err "No second free port available after ${app_port} (range ${start}-${GOSITE_PORT_MAX})."
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp "$(dirname "${GOSITE_PORTS_FILE}")/.gosite.XXXXXX")"
+  grep -v -e "^${project}	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
+  printf '%s\t%s\t%s\n' "${project}" "${app_port}" "${cms_port}" >> "${tmp}"
+  mv "${tmp}" "${GOSITE_PORTS_FILE}"
+
+  # Interface global read by cmd_create ("app cms").
+  # shellcheck disable=SC2034
+  GOSITE_ALLOCATED_PORTS="${app_port} ${cms_port}"
+}
+
+reserve_ports() {
+  local project="$1"; shift
+  mkdir -p "$(dirname "${GOSITE_PORTS_FILE}")"
+  [[ -f "${GOSITE_PORTS_FILE}" ]] || touch "${GOSITE_PORTS_FILE}"
+  with_lock "${GOSITE_PORTS_FILE}" _reserve_ports_locked "${project}" "$@"
+}
+
+_reserve_ports_locked() {
+  local project="$1"; shift col tmp
+  tmp="$(mktemp "$(dirname "${GOSITE_PORTS_FILE}")/.gosite.XXXXXX")"
+  grep -v -e "^${project}	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
+  printf '%s' "${project}" >> "${tmp}"
   for col in "$@"; do
     printf '\t%s' "${col}" >> "${tmp}"
   done
@@ -189,8 +377,13 @@ reserve_ports() {
 
 release_ports() {
   [[ -f "${GOSITE_PORTS_FILE}" ]] || return 0
-  local tmp; tmp="$(mktemp)"
-  grep -v -e "^$1	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
+  with_lock "${GOSITE_PORTS_FILE}" _release_ports_locked "$1"
+}
+
+_release_ports_locked() {
+  local project="$1" tmp
+  tmp="$(mktemp "$(dirname "${GOSITE_PORTS_FILE}")/.gosite.XXXXXX")"
+  grep -v -e "^${project}	" "${GOSITE_PORTS_FILE}" > "${tmp}" 2>/dev/null || true
   mv "${tmp}" "${GOSITE_PORTS_FILE}"
 }
 
@@ -199,26 +392,24 @@ _port_is_reserved() {
   awk '{ for (i = 2; i <= NF; i++) print $i }' "${GOSITE_PORTS_FILE}" | grep -qwF "$1"
 }
 
-# Find a free TCP port on the host inside the configured range. Checks three
-# independent sources so it works even when Docker Desktop hides its mappings
-# from lsof.
-find_free_port() {
-  local start="${1:-${GOSITE_PORT_MIN}}" port
-  for (( port = start; port <= GOSITE_PORT_MAX; port++ )); do
-    lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1 && continue
-    docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE '0\.0\.0\.0:'"${port}"'(->|/|$)' && continue
-    _port_is_reserved "${port}" && continue
-    printf "%s" "${port}"
-    return 0
-  done
-  fatal "No free port available in range ${GOSITE_PORT_MIN}-${GOSITE_PORT_MAX}."
+_port_is_docker_mapped() {
+  printf '%s\n' "${GOSITE_DOCKER_PUBLISHED:-}" | grep -qE '0\.0\.0\.0:'"$1"'(->|/|$)'
+}
+
+# A port is unusable when something is listening on it, Docker has a container
+# publishing it (Docker Desktop hides mappings from lsof), or gosite itself has
+# reserved it.
+_port_in_use() {
+  lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  _port_is_docker_mapped "$1" && return 0
+  _port_is_reserved "$1"
 }
 
 # --- dependency checks -------------------------------------------------------
 # Required tools break the CLI outright; optional ones only degrade the local
 # workflow (you can still run everything inside containers).
 readonly GOSITE_REQUIRED_DEPS=(docker)
-readonly GOSITE_OPTIONAL_DEPS=(go air git openssl)
+readonly GOSITE_OPTIONAL_DEPS=(go air git openssl yq)
 
 dep_hint() {
   case "$1" in
@@ -227,6 +418,7 @@ dep_hint() {
     air)    echo "go install github.com/air-verse/air@latest" ;;
     git)    echo "https://git-scm.com/downloads" ;;
     openssl) echo "used to generate project secrets" ;;
+    yq)      echo "brew install yq (mikefarah v4) - enables structural YAML drift reports in 'sync --report'" ;;
     *)      echo "" ;;
   esac
 }

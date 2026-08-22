@@ -18,6 +18,8 @@
 # so an existing project can be re-rendered from the same sources of truth.
 # shellcheck source=../lib/templates.sh
 source "${GOSITE_ROOT}/lib/templates.sh"
+# shellcheck source=../lib/manifest.sh
+source "${GOSITE_ROOT}/lib/manifest.sh"
 
 cmd_create() {
   local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
@@ -25,6 +27,8 @@ cmd_create() {
   # Tailwind is on by default but prompted; --no-tailwind swaps it for a small
   # stylesheet. Either way the generated markup is clean: no orphan utility classes.
   TAILWIND=1
+  # Render var: templates.sh expands __ADDONS__ from it.
+  # shellcheck disable=SC2034
   ADDONS_ENABLED=0
   # S3/MinIO uploads and the shared MongoDB are the defaults; the prompts below
   # can switch them per project.
@@ -64,18 +68,26 @@ cmd_create() {
 
   local PROJECT_MODULE="${GOSITE_MODULE_PREFIX:-github.com/example}/${PROJECT_NAME}"
   local APP_PORT CMS_PORT CMS_TOKEN COCKPIT_SEC_KEY APP_DOMAIN CMS_DOMAIN
-  APP_PORT="$(find_free_port "${GOSITE_PORT_MIN}")"
-  CMS_PORT="$(find_free_port "$(( APP_PORT + 1 ))")"
-  reserve_ports "${PROJECT_NAME}" "${APP_PORT}" "${CMS_PORT}"
+  # Selection and reservation are one locked operation, so two concurrent
+  # creations can never pick the same port.
+  if ! allocate_ports "${PROJECT_NAME}" "${GOSITE_PORT_MIN}"; then
+    exit 1
+  fi
+  read -r APP_PORT CMS_PORT <<< "${GOSITE_ALLOCATED_PORTS}"
+  # Render vars: templates.sh reads these while expanding __PLACEHOLDER__
+  # tokens, so they are assigned-but-unused from this file's point of view.
+  # shellcheck disable=SC2034
   CMS_TOKEN="$(random_secret 24)"
+  # shellcheck disable=SC2034
   COCKPIT_SEC_KEY="$(random_secret 32)"
   APP_DOMAIN="$(project_domain "${PROJECT_NAME}")"
   CMS_DOMAIN="$(project_cms_domain "${PROJECT_NAME}")"
 
   # A failed scaffold used to leave a half-written directory behind that
   # `gosite remove` could not clean up, because the marker file is written last.
-  # Remove it on any non-zero exit instead.
-  trap 'rm -rf "${PROJECT_DIR}"; err "Scaffold failed; removed ${PROJECT_DIR}."' ERR
+  # Remove it on any non-zero exit instead - and release the port reservation,
+  # so a failed create does not leak reserved ports.
+  trap 'rc=$?; rm -rf "${PROJECT_DIR}"; release_ports "${PROJECT_NAME}"; err "Scaffold failed; removed ${PROJECT_DIR}."' ERR
 
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
@@ -129,6 +141,10 @@ cmd_create() {
 
   # Issue the local TLS certificate covering <name>.test and cms.<name>.test.
   ensure_project_cert "${PROJECT_NAME}" || true
+
+  # Record what gosite just wrote, so future syncs can tell untouched files
+  # apart from hand-edited ones.
+  manifest_write_from_dir "${PROJECT_DIR}"
 
   # Index the project so it can be reached by name from any directory.
   registry_register "${PROJECT_DIR}"
@@ -2194,7 +2210,8 @@ template render entirely. The `X-Cache` response header reports `HIT` or
 
 The purge button on the page posts to `/cache/purge`; point a Cockpit publish
 webhook at the same route (header `X-Api-Key: $COCKPIT_API_TOKEN`) so editors
-never wait out the TTL.
+never wait out the TTL. Outside development the endpoint fails closed: no
+configured token means 503, a wrong token means 401.
 
 The mechanics live in `cache.go` as a single `Cache.HTML(key, render)` helper,
 so caching another page is one call, not another copy of the same Get/Set

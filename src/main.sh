@@ -15,14 +15,23 @@ while [[ -L "${__source}" ]]; do
   __source="$(readlink "${__source}")"
   [[ "${__source}" != /* ]] && __source="${__dir}/${__source}"
 done
-readonly GOSITE_ROOT="$(cd -P "$(dirname "${__source}")" && pwd)"
+# Assign first, readonly after: `readonly X` on an unset variable would make
+# the following assignment fail, and `readonly X="$(...)"` (SC2155) masks the
+# command's failure. An empty GOSITE_ROOT still fails loudly at the first
+# source below.
+GOSITE_ROOT="$(cd -P "$(dirname "${__source}")" && pwd)"
+readonly GOSITE_ROOT
 export GOSITE_ROOT
 
 # --- metadata ----------------------------------------------------------------
-readonly GOSITE_VERSION="$(cat "${GOSITE_ROOT}/VERSION" 2>/dev/null || echo "0.0.0")"
+GOSITE_VERSION="$(cat "${GOSITE_ROOT}/VERSION" 2>/dev/null || echo "0.0.0")"
+readonly GOSITE_VERSION
 export GOSITE_VERSION
 
 # --- colors (disabled when not a TTY or when NO_COLOR is set) ----------------
+# The C_* variables are this CLI's cross-module interface: assigned here,
+# consumed by every sourced module's output helpers.
+# shellcheck disable=SC2034
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   readonly C_RED='\033[0;31m'
   readonly C_GREEN='\033[0;32m'
@@ -72,7 +81,9 @@ parse_global_flags() {
 
 main() {
   parse_global_flags "$@"
-  dispatch "${GOSITE_ARGS[@]:-}"
+  # "${arr[@]+"${arr[@]}"}" keeps an empty array from injecting one empty
+  # argument under bash 3.2 + set -u, where "${arr[@]:-}" expands to a single "".
+  dispatch "${GOSITE_ARGS[@]+"${GOSITE_ARGS[@]}"}"
 }
 
 main "$@"

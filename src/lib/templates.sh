@@ -93,7 +93,7 @@ _write_builtin_addons() {
 # project dir already has them, a re-run overwrites the files in place (useful
 # for pulling newer addon versions into an existing project).
 _install_addons() {
-  local dir="$1" names="$2" addons_dir="${1}/cockpit/addons"
+  local names="$2" addons_dir="${1}/cockpit/addons"
   info "Installing Cockpit addons: ${names}"
   mkdir -p "${addons_dir}"
 
