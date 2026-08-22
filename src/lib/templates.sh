@@ -14,6 +14,14 @@
 
 render_placeholders() {
   local file="$1" tmp
+  # Project .env files receive the installation's real MinIO credentials (see
+  # resolve_minio_credentials in helpers.sh). Resolved once per run; the first
+  # call persists generated credentials into the infra directory.
+  if [[ -z "${S3_KEY:-}" || -z "${S3_SECRET:-}" ]]; then
+    resolve_minio_credentials
+    S3_KEY="${MINIO_ROOT_USER}"
+    S3_SECRET="${MINIO_ROOT_PASSWORD}"
+  fi
   tmp="$(mktemp)"
   sed \
     -e "s|__PROJECT__|${PROJECT_NAME}|g" \
@@ -35,6 +43,8 @@ render_placeholders() {
     -e "s|__TLD__|${GOSITE_TLD}|g" \
     -e "s|__DATABASE__|${DATABASE:-mongodb}|g" \
     -e "s|__STORAGE_ADAPTER__|${STORAGE_ADAPTER:-s3}|g" \
+    -e "s|__S3_KEY__|${S3_KEY}|g" \
+    -e "s|__S3_SECRET__|${S3_SECRET}|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
 }
@@ -222,7 +232,8 @@ _write_compose_prod() {
 # Required variables in Coolify:
 #   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
 #   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
-#   COCKPIT_API_TOKEN    shared token between the app and Cockpit
+#   COCKPIT_API_TOKEN    MANDATORY: shared token between the app and Cockpit;
+#                        without it /cache/purge refuses to operate (503)
 #   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
 #                        default, so this must be set to something private
 #   MONGO_USER           MongoDB root user
@@ -296,7 +307,9 @@ services:
       - S3_PREFIX=${S3_PREFIX}
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
       - S3_ACL=${S3_ACL:-}
-      - S3_VERIFY=${S3_VERIFY:-true}
+      # No S3_VERIFY here on purpose: TLS verification toward the bucket is
+      # never disabled in production. The local dev compose carries it for the
+      # self-signed mkcert MinIO certificate.
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
       - APP_URL=http://app:8080
@@ -442,6 +455,15 @@ $config = [
     'session' => [
         'name' => '__PROJECT__',
     ],
+
+    // Forms addon: number of trusted reverse-proxy hops in front of the CMS.
+    // Every gosite site sits behind exactly one Traefik hop, so client
+    // identity for the rate limiter is taken one entry from the RIGHT of
+    // X-Forwarded-For (the entry this proxy observed), never the leftmost one,
+    // which clients can forge. Set 0 for direct, unproxied deployments.
+    'forms' => [
+        'trustedProxies' => 1,
+    ],
 ];
 
 // S3-compatible asset storage (MinIO in dev, AWS/Backblaze/R2 in prod).
@@ -503,8 +525,10 @@ STORAGE_ADAPTER=__STORAGE_ADAPTER__
 S3_URL=https://__MINIO_HOST__:9000
 S3_BUCKET=assets
 S3_REGION=us-east-1
-S3_KEY=minioadmin
-S3_SECRET=minioadmin
+# Credentials generated per installation by 'gosite infra up' (stored in
+# ~/.gosite/infra/minio.env); create and sync propagate them here.
+S3_KEY=__S3_KEY__
+S3_SECRET=__S3_SECRET__
 S3_PREFIX=
 # S3_VERIFY=false is required for the local MinIO (self-signed mkcert cert, not
 # in the CMS container's trust store). Set it to true (or unset) in production

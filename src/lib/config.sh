@@ -28,6 +28,13 @@
 : "${GOSITE_MONGO_PORT:=27017}"
 : "${GOSITE_MINIO_HOST:=gosite-minio}"
 
+# Host address the shared datastores (Mongo, Redis, MinIO) publish their ports
+# on. Loopback by default: they run without authentication and must not be
+# reachable from the LAN. Traefik keeps binding to every interface, since
+# serving the local domains is its purpose. Set GOSITE_BIND_ADDRESS=0.0.0.0
+# to deliberately expose the datastores to your network.
+: "${GOSITE_BIND_ADDRESS:=127.0.0.1}"
+
 # Local domains. Projects are served at <name>.<TLD> and cms.<name>.<TLD>
 # through the shared Traefik proxy, over HTTPS with mkcert certificates.
 : "${GOSITE_TLD:=test}"
@@ -55,7 +62,7 @@
 export GOSITE_NETWORK GOSITE_WORKSPACE GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
        GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
        GOSITE_MONGO_HOST GOSITE_MONGO_PORT GOSITE_MONGO_VERSION \
-       GOSITE_MINIO_HOST \
+       GOSITE_MINIO_HOST GOSITE_BIND_ADDRESS \
        GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY GOSITE_PORTS_FILE \
        GOSITE_TLD GOSITE_PROXY_HOST GOSITE_PROXY_HTTP_PORT GOSITE_PROXY_HTTPS_PORT \
        GOSITE_CERTS_DIR GOSITE_DYNAMIC_DIR \

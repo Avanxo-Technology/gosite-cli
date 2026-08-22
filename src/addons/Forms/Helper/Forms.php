@@ -18,6 +18,10 @@ class Forms extends \Lime\Helper {
     const DEFAULT_DAILY_LIMIT      = 50;
     const HONEYPOT_FIELD           = '_hp';
 
+    // Seconds advertised in Retry-After when the rate limit cannot be evaluated
+    // because the memory backend is down.
+    const RATE_LIMIT_RETRY_AFTER = 30;
+
     protected bool $modelsChecked = false;
 
     // ------------------------------------------------------------- install
@@ -37,8 +41,14 @@ class Forms extends \Lime\Helper {
 
         $this->modelsChecked = true;
 
-        if (!$force && $this->memoryGet('forms.models.ready')) {
-            return;
+        // The ready-flag is a cache, not a requirement: when the memory backend
+        // is down we simply do the (idempotent) model checks.
+        try {
+            if (!$force && $this->memoryGet('forms.models.ready')) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            $this->log('models.ready check skipped: '.$e->getMessage());
         }
 
         $content = $this->app->module('content');
@@ -83,7 +93,11 @@ class Forms extends \Lime\Helper {
             ]);
         }
 
-        $this->memorySet('forms.models.ready', 1);
+        try {
+            $this->memorySet('forms.models.ready', 1);
+        } catch (\Throwable $e) {
+            $this->log('models.ready flag not stored: '.$e->getMessage());
+        }
     }
 
     /**
@@ -231,10 +245,31 @@ class Forms extends \Lime\Helper {
         $settings = $this->settings($form);
         $ip       = $this->clientIp();
 
-        $check = $this->checkRateLimit($ip, $form, (int)$settings['throttle'], (int)$settings['dailyLimit']);
+        $throttle   = (int)$settings['throttle'];
+        $dailyLimit = (int)$settings['dailyLimit'];
 
-        if (!$check['ok']) {
-            return ['status' => 429, 'success' => false, 'error' => $check['error']];
+        // Both limits disabled is an explicit operator decision: the memory
+        // backend is not consulted at all, so availability beats abuse control.
+        if ($throttle > 0 || $dailyLimit > 0) {
+
+            $check = $this->checkRateLimit($ip, $form, $throttle, $dailyLimit);
+
+            if (!$check['ok']) {
+
+                // The backend could not be reached: this is "cannot decide",
+                // not "too many requests". Fail closed with 503 + Retry-After
+                // so clients retry honestly instead of learning the limit was off.
+                if (!empty($check['unavailable'])) {
+                    return [
+                        'status'     => 503,
+                        'success'    => false,
+                        'error'      => $check['error'],
+                        'retryAfter' => self::RATE_LIMIT_RETRY_AFTER,
+                    ];
+                }
+
+                return ['status' => 429, 'success' => false, 'error' => $check['error']];
+            }
         }
 
         $entry = [
@@ -331,58 +366,88 @@ class Forms extends \Lime\Helper {
      *
      * Expiry is encoded in the stored value instead of relying on TTL support,
      * so behaviour is identical on every memory backend.
+     *
+     * Returns ['ok' => true], ['ok' => false, 'error' => ...] when a limit was
+     * hit, or ['ok' => false, 'unavailable' => true] when the backend itself
+     * failed - callers treat that as "cannot decide", not as "limit reached".
      */
     protected function checkRateLimit(string $ip, string $form, int $throttle, int $dailyLimit): array {
 
-        $now    = time();
-        $bucket = md5($ip.'|'.$form);
-
-        if ($throttle > 0) {
-
-            $last = (int)$this->memoryGet("forms.last.{$bucket}", 0);
-
-            if ($last && ($now - $last) < $throttle) {
-                return ['ok' => false, 'error' => 'Too many requests. Please wait a few seconds and try again.'];
-            }
-
-            $this->memorySet("forms.last.{$bucket}", $now);
+        if ($throttle <= 0 && $dailyLimit <= 0) {
+            return ['ok' => true];
         }
 
-        if ($dailyLimit > 0) {
+        try {
 
-            $dayKey = 'forms.day.'.$bucket.'.'.date('Ymd', $now);
-            $count  = (int)$this->memoryGet($dayKey, 0);
+            $now    = time();
+            $bucket = md5($ip.'|'.$form);
 
-            if ($count >= $dailyLimit) {
-                return ['ok' => false, 'error' => 'Daily submission limit reached for this address.'];
+            if ($throttle > 0) {
+
+                $last = (int)$this->memoryGet("forms.last.{$bucket}", 0);
+
+                if ($last && ($now - $last) < $throttle) {
+                    return ['ok' => false, 'error' => 'Too many requests. Please wait a few seconds and try again.'];
+                }
+
+                $this->memorySet("forms.last.{$bucket}", $now);
             }
 
-            $this->memorySet($dayKey, $count + 1);
-        }
+            if ($dailyLimit > 0) {
 
-        return ['ok' => true];
+                $dayKey = 'forms.day.'.$bucket.'.'.date('Ymd', $now);
+                $count  = (int)$this->memoryGet($dayKey, 0);
+
+                if ($count >= $dailyLimit) {
+                    return ['ok' => false, 'error' => 'Daily submission limit reached for this address.'];
+                }
+
+                $this->memorySet($dayKey, $count + 1);
+            }
+
+            return ['ok' => true];
+
+        } catch (\Throwable $e) {
+
+            // Fail closed: without the counters an outage would mean unlimited
+            // submissions exactly while the system is degraded.
+            $this->log('rate limit unavailable: '.$e->getMessage());
+
+            return [
+                'ok'          => false,
+                'unavailable' => true,
+                'error'       => 'The form service is temporarily unavailable. Please try again shortly.',
+            ];
+        }
     }
 
     /**
-     * Memory access that never takes the request down with it: a Redis outage
-     * must not block a real lead.
+     * Memory access that propagates backend failures instead of swallowing
+     * them: the rate limiter must be able to tell "limit reached" apart from
+     * "backend down". Callers that only need best-effort caching wrap this in
+     * their own try/catch.
+     *
+     * @throws \Throwable
      */
     protected function memoryGet(string $key, mixed $default = null): mixed {
 
-        try {
-            return $this->app->memory ? $this->app->memory->get($key, $default) : $default;
-        } catch (\Throwable $e) {
-            return $default;
+        if (!$this->app->memory) {
+            throw new \RuntimeException('No memory backend configured.');
         }
+
+        return $this->app->memory->get($key, $default);
     }
 
+    /**
+     * @throws \Throwable
+     */
     protected function memorySet(string $key, mixed $value): void {
 
-        try {
-            if ($this->app->memory) $this->app->memory->set($key, $value);
-        } catch (\Throwable $e) {
-            // ignored on purpose
+        if (!$this->app->memory) {
+            throw new \RuntimeException('No memory backend configured.');
         }
+
+        $this->app->memory->set($key, $value);
     }
 
     // -------------------------------------------------------- notification
@@ -621,14 +686,63 @@ class Forms extends \Lime\Helper {
     }
 
     /**
-     * Best-effort client IP, honouring a proxy header only when one is trusted.
+     * Client IP for the rate limiter, correct behind a reverse proxy and not
+     * spoofable by the client.
+     *
+     * config/forms/trustedProxies (integer, default 0) is the number of
+     * reverse-proxy hops in front of the CMS. With N trusted hops the client
+     * address is the entry N positions from the RIGHT of X-Forwarded-For:
+     * everything further left was appended by the proxies themselves, but the
+     * rightmost entries are what those trusted proxies observed. The leftmost
+     * entry - which a client fully controls by sending its own header - is
+     * never trusted.
+     *
+     * Fewer X-Forwarded-For entries than configured hops means the topology
+     * does not match the configuration; fall back to REMOTE_ADDR.
      */
     public function clientIp(): string {
 
-        if ($this->app->retrieve('config/forms/trustProxy', false) && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            return trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0]);
+        $hops = $this->trustedProxies();
+
+        if ($hops > 0 && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+
+            $entries = array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
+
+            if (count($entries) >= $hops) {
+                $candidate = $entries[count($entries) - $hops];
+                if ($candidate !== '') {
+                    return $candidate;
+                }
+            }
         }
 
         return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    }
+
+    /**
+     * Resolves the number of trusted proxy hops from the configuration.
+     *
+     * The old boolean `trustProxy` is still honoured as an alias for
+     * `trustedProxies: 1` - it took the LEFTMOST X-Forwarded-For entry, which
+     * clients could forge, so it logs a deprecation notice.
+     */
+    protected function trustedProxies(): int {
+
+        $configured = $this->app->retrieve('config/forms/trustedProxies', null);
+
+        if ($configured !== null) {
+            return max(0, (int)$configured);
+        }
+
+        if ($this->app->retrieve('config/forms/trustProxy', false)) {
+            static $deprecated = false;
+            if (!$deprecated) {
+                $deprecated = true;
+                $this->log("config/forms/trustProxy is deprecated and will be removed; replace it with 'trustedProxies' => 1.");
+            }
+            return 1;
+        }
+
+        return 0;
     }
 }

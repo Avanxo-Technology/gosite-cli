@@ -186,6 +186,28 @@ _sync_env() {
   fi
 }
 
+# Projects scaffolded before gosite generated per-installation MinIO
+# credentials carry the fixed minioadmin literals. When the shared infra now
+# runs under real credentials, replace those two literals in place so uploads
+# keep working. Deliberate non-minioadmin values are left alone.
+_sync_env_minio_credentials() {
+  local envfile="$1"
+  [[ -f "${envfile}" ]] || return 0
+  resolve_minio_credentials
+  [[ "${GOSITE_MINIO_LEGACY:-0}" -eq 1 ]] && return 0   # infra still on minioadmin: nothing to migrate
+
+  grep -q '^S3_KEY=minioadmin$\|^S3_SECRET=minioadmin$' "${envfile}" || return 0
+
+  local tmp="${envfile}.gosite-sync.$$"
+  awk -v key="${MINIO_ROOT_USER}" -v sec="${MINIO_ROOT_PASSWORD}" '
+    /^S3_KEY=/     { print "S3_KEY=" key; next }
+    /^S3_SECRET=/  { print "S3_SECRET=" sec; next }
+    { print }
+  ' "${envfile}" > "${tmp}" && mv "${tmp}" "${envfile}"
+
+  ok "Migrated MinIO credentials in .env from minioadmin to this installation's generated pair"
+}
+
 _sync_list_addons() {
   info "Addons in gosite's library:"
   for d in "${GOSITE_ROOT}/addons"/*/; do

@@ -106,7 +106,9 @@ validated against the `app.csrf` key — the same check core controllers perform
 A flat body (`{"form":"cotizar","nombre":"Ana",...}`) and a classic
 `application/x-www-form-urlencoded` POST are both accepted too.
 
-Responses: `200 {"success":true}`, `400`/`429 {"success":false,"error":"…"}`.
+Responses: `200 {"success":true}`, `400`/`429 {"success":false,"error":"…"}`,
+or `503` with a `Retry-After` header when the rate limiter's memory backend
+(Redis) is unreachable.
 
 ## Anti-spam
 
@@ -116,9 +118,35 @@ Responses: `200 {"success":true}`, `400`/`429 {"success":false,"error":"…"}`.
 - **Throttle** — minimum seconds between submissions from the same IP+form
   (default `3`), in `$app->memory` (Redis).
 - **Daily cap** — max submissions per IP+form per day (default `50`).
+- **Client identity** — see *Behind a reverse proxy* below: the rate-limit
+  bucket key is derived with proxy awareness, so two different visitors never
+  share one bucket.
 
-Memory failures are swallowed: a Redis outage accepts leads rather than losing
-them.
+### Fail-closed rate limiting
+
+If the memory backend (Redis) is unreachable, submissions are rejected with
+**HTTP 503** and a `Retry-After` header rather than accepted without a limit.
+A Redis outage must not open an unlimited submission path exactly while the
+system is degraded. To prefer availability deliberately, set both `throttle`
+and `dailyLimit` to `0` for the form — the memory backend is then not consulted
+at all.
+
+### Behind a reverse proxy
+
+The client IP used by the rate limiter comes from
+`config/forms/trustedProxies`, an **integer** counting how many reverse-proxy
+hops sit in front of the CMS (default `0`). With `N` trusted hops, the identity
+is taken N entries from the **right** of `X-Forwarded-For`; anything further
+left could have been invented by the client itself and is discarded. If the
+header carries fewer entries than configured hops, it falls back to
+`REMOTE_ADDR`.
+
+Every gosite scaffold ships `'trustedProxies' => 1` in its generated
+`cockpit/config.php`, because every gosite site sits behind exactly one Traefik
+hop. Direct connections keep `trustedProxies` at `0`.
+
+The legacy boolean `'trustProxy' => true` still works and behaves as
+`trustedProxies => 1`, but logs a deprecation notice — migrate to the integer.
 
 ### Landing page snippet
 
@@ -193,8 +221,13 @@ most that much.
 
 ```php
 'forms' => [
-    'allowed_origins' => ['https://www.example.com'],  // omit for '*'
-    'trustProxy' => true,   // honour X-Forwarded-For (only behind a real proxy)
+    // Origins allowed to post from another origin (CORS). When unset, NO
+    // Access-Control-Allow-Origin header is emitted: browsers block
+    // cross-origin posts, and same-origin forms keep working. Explicitly opt
+    // into openness with ['*'] if you really mean it.
+    'allowed_origins' => ['https://www.example.com'],
+    // Number of trusted reverse-proxy hops in front of the CMS (see above).
+    'trustedProxies' => 1,
 ],
 ```
 

@@ -34,7 +34,14 @@ class Api extends \App\Controller\Base {
         $result = $this->helper('forms')->handleSubmission();
 
         $this->app->response->status = $result['status'];
-        unset($result['status']);
+
+        // A 503 means the anti-spam layer could not evaluate the rate limit;
+        // tell honest clients when to come back.
+        if (!empty($result['retryAfter'])) {
+            header('Retry-After: '.(int)$result['retryAfter']);
+        }
+
+        unset($result['status'], $result['retryAfter']);
 
         return $this->json($result);
     }
@@ -179,17 +186,25 @@ class Api extends \App\Controller\Base {
     }
 
     /**
-     * The landing page normally lives on another origin. Restrict it with
-     * config/forms/allowed_origins in config.php once you know the domains.
+     * Cross-origin policy of the public receiver. Fail-closed: when
+     * config/forms/allowed_origins is not configured, no
+     * Access-Control-Allow-Origin header is emitted at all - browsers then
+     * block cross-origin reads, and a same-origin form post is unaffected.
+     * Configure your site's origin(s), or explicitly opt into `['*']` if you
+     * really want the receiver open to every origin.
      */
     protected function cors(): void {
 
-        $allowed = (array)$this->app->retrieve('config/forms/allowed_origins', ['*']);
-        $origin  = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $configured = $this->app->retrieve('config/forms/allowed_origins', null);
+        $allowed    = is_array($configured) ? $configured : [];
+        $origin     = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-        if (in_array('*', $allowed)) {
+        // Same-origin posts (and server-to-server calls) carry no Origin
+        // header; CORS is enforced by browsers via the response headers below,
+        // so the submission itself always proceeds normally.
+        if (in_array('*', $allowed, true)) {
             header('Access-Control-Allow-Origin: *');
-        } elseif ($origin && in_array($origin, $allowed)) {
+        } elseif ($origin && in_array($origin, $allowed, true)) {
             header('Access-Control-Allow-Origin: '.$origin);
             header('Vary: Origin');
         }

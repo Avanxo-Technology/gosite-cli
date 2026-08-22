@@ -382,6 +382,15 @@ type App struct {
 // NewApp wires everything and verifies Redis up front, so a misconfigured
 // environment fails at boot instead of on the first request.
 func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
+
+	// A deployment error, not a caller error: without a shared token the purge
+	// endpoint refuses to operate in non-development environments (503), so
+	// name the fix at startup rather than letting editors discover it later.
+	if !cfg.IsDev() && cfg.CockpitToken == "" {
+		log.Warn("COCKPIT_API_TOKEN is empty in a non-development environment; " +
+			"POST /cache/purge will respond 503 until a token is configured")
+	}
+
 	opts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		return nil, err
@@ -752,6 +761,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -760,13 +770,30 @@ import (
 // PurgeCache drops the cached page. It is both the target of the htmx button
 // on the page and a webhook Cockpit can call when an editor publishes, so the
 // site updates without waiting out the TTL.
+//
+// Authentication fails closed: a missing token is treated as "purging must not
+// happen", never as "no authentication required". In any non-development
+// environment the endpoint therefore requires a configured COCKPIT_API_TOKEN -
+// with no token configured it responds 503 rather than serving unauthenticated
+// purges, and a supplied-but-wrong token is 401. Token comparison is
+// constant-time so timing cannot leak the secret. Development keeps its
+// convenience: the on-page button posts without a header and still works.
 func (h *Handlers) PurgeCache(c *echo.Context) error {
-	// In development the on-page button posts without a token, so the check is
-	// skipped there; everywhere else the token is enforced whenever one is
-	// configured, which is what protects a deployed site.
-	if !h.Config.IsDev() && h.Config.CockpitToken != "" && c.Request().Header.Get("X-Api-Key") != h.Config.CockpitToken {
-		return h.reply(c).Fail(http.StatusUnauthorized, "invalid token", nil)
+
+	if !h.Config.IsDev() {
+
+		if h.Config.CockpitToken == "" {
+			return h.reply(c).Fail(http.StatusServiceUnavailable,
+				"cache purge is unavailable: COCKPIT_API_TOKEN is not configured", nil)
+		}
+
+		supplied := c.Request().Header.Get("X-Api-Key")
+
+		if subtle.ConstantTimeCompare([]byte(supplied), []byte(h.Config.CockpitToken)) != 1 {
+			return h.reply(c).Fail(http.StatusUnauthorized, "invalid token", nil)
+		}
 	}
+
 	if err := h.Cache.Purge(c.Request().Context(), homeCacheKey); err != nil {
 		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
@@ -1712,9 +1739,11 @@ A Redis failure is never fatal: the page still renders, just slower.
 curl -X POST -H "X-Api-Key: $COCKPIT_API_TOKEN" https://__DOMAIN__/cache/purge
 ```
 
-The button on the page does the same thing over htmx. The token is only
-enforced when `COCKPIT_API_TOKEN` is set. Point a Cockpit publish webhook at
-this URL so editors do not wait out the TTL.
+The button on the page does the same thing over htmx. Outside development the
+endpoint fails closed: without `COCKPIT_API_TOKEN` configured it answers **503**
+(a warning is logged at startup naming the variable), with a wrong token it
+answers 401 - so set the token in production or purging stays off. Point a
+Cockpit publish webhook at this URL so editors do not wait out the TTL.
 
 ## Cockpit CMS
 
@@ -1903,7 +1932,7 @@ Read once in `internal/config/config.go`; never call `os.Getenv` in a handler.
 | `PORT` | 8080 | set by Coolify |
 | `REDIS_URL` | `redis://__REDIS_HOST__:__REDIS_PORT__/0` | a Coolify Redis service |
 | `COCKPIT_URL` | `http://__PROJECT__-cms:80` | the deployed Cockpit |
-| `COCKPIT_API_TOKEN` | in `.env` | set in the Coolify UI |
+| `COCKPIT_API_TOKEN` | in `.env` | **mandatory** - the cache-purge endpoint refuses (503) without it |
 
 `.env` is local only and gitignored. Production values come from the Coolify
 UI.
@@ -1921,6 +1950,8 @@ Coolify only supplies domains and secrets.
 Push to Git, point a Coolify Docker Compose resource at
 `docker-compose.prod.yml`, and set `SERVICE_FQDN_APP`, `SERVICE_FQDN_CMS`,
 `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and `MONGO_PASSWORD`.
+`COCKPIT_API_TOKEN` is mandatory in production: the cache-purge endpoint fails
+closed (503) in any non-development environment without it.
 
 ## Conventions
 
@@ -2176,6 +2207,8 @@ the environment. In Coolify: create a Docker Compose resource from this repo,
 select `docker-compose.prod.yml`, then set `SERVICE_FQDN_APP`,
 `SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and
 `MONGO_PASSWORD`. The stack brings its own MongoDB and Redis.
+`COCKPIT_API_TOKEN` is mandatory in production - without it `/cache/purge`
+responds 503.
 
 The `app` and `cms` services build from `deploy/Dockerfile` and
 `deploy/Dockerfile.cms`; nothing is bind-mounted, so Coolify needs no path to
