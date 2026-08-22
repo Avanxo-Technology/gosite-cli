@@ -1,0 +1,7 @@
+
+## Styling
+
+CSS reset via CDN (`@aprinciple/modern-reset`) in `internal/views/layout.html`.
+Tailwind CSS loaded from CDN for utility-first styling. Components carry utility
+classes. There is no Tailwind build or config file; before production, vendor
+the CDN scripts into `/static`.

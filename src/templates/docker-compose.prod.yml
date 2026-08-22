@@ -1,0 +1,148 @@
+# Production stack for __PROJECT__, in Coolify's native compose format.
+#
+# No host ports are published: Coolify's Traefik proxy routes to the container
+# port declared in the labels below. The stack is self-contained - it brings its
+# own MongoDB and Redis - so the only thing Coolify has to supply is the domain
+# names and the secrets.
+#
+# Required variables in Coolify:
+#   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
+#   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
+#   COCKPIT_API_TOKEN    MANDATORY: shared token between the app and Cockpit;
+#                        without it /cache/purge refuses to operate (503)
+#   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
+#                        default, so this must be set to something private
+#   MONGO_USER           MongoDB root user
+#   MONGO_PASSWORD       MongoDB root password
+#
+# Optional: MONGO_DB (defaults to the project name).
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      - APP_ENV=production
+      - PORT=8080
+      - SERVICE_FQDN_APP
+      - REDIS_URL=redis://redis:6379/0
+      - COCKPIT_URL=http://cms:80
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+      # Mongo parts so the app can build a credential-aware URI (see
+      # buildMongoURI in internal/config) exactly like the CMS does.
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_DB=${MONGO_DB:-__PROJECT__}
+    labels:
+      # Tells Coolify this service is built from the repository Dockerfile.
+      - coolify.managed=true
+      - coolify.image=true
+      - traefik.enable=true
+      - traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP}`)
+      - traefik.http.routers.__PROJECT__-app.entrypoints=https
+      - traefik.http.routers.__PROJECT__-app.tls=true
+      - traefik.http.routers.__PROJECT__-app.tls.certresolver=letsencrypt
+      - traefik.http.services.__PROJECT__-app.loadbalancer.server.port=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+      cms:
+        condition: service_started
+
+  cms:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.cms
+    restart: unless-stopped
+    environment:
+      # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
+      - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
+      - COCKPIT_MEMORY_SERVER=redis://redis:6379
+      - COCKPIT_DATABASE=${COCKPIT_DATABASE:-mongodb}
+      - MONGO_HOST=mongo
+      - MONGO_PORT=27017
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_DB=${MONGO_DB:-__PROJECT__}
+      # S3 storage (optional — only used when STORAGE_ADAPTER=s3)
+      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
+      - S3_URL=${S3_URL}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - S3_KEY=${S3_KEY}
+      - S3_SECRET=${S3_SECRET}
+      - S3_PREFIX=${S3_PREFIX}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+      - S3_ACL=${S3_ACL:-}
+      # No S3_VERIFY here on purpose: TLS verification toward the bucket is
+      # never disabled in production. The local dev compose carries it for the
+      # self-signed mkcert MinIO certificate.
+      # CachePurge addon: the Go app's internal address and shared token so
+      # Cockpit can POST to /cache/purge when content changes or Replica syncs.
+      - APP_URL=http://app:8080
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+    volumes:
+      # Uploads and cache still live on disk even when the data is in MongoDB.
+      # Config and addons are NOT mounted here: Dockerfile.cms bakes the
+      # committed cockpit/config.php and addons/ into the image. Relative bind
+      # mounts (./cockpit/config.php, ./addons) resolve against the directory
+      # where Coolify stores the pasted compose file, not the repo checkout, so
+      # they silently mount empty directories. After a deploy that changes an
+      # addon, clear storage/cache/modules.cache.php once so the CMS re-registers
+      # it on the next boot.
+      - cockpit-storage:/var/www/html/storage
+    labels:
+      - coolify.managed=true
+      - traefik.enable=true
+      - traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS}`)
+      - traefik.http.routers.__PROJECT__-cms.entrypoints=https
+      - traefik.http.routers.__PROJECT__-cms.tls=true
+      - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
+      - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Gate the CMS on a real ping, not just the container being up: Cockpit
+      # fails at boot if it cannot reach the database.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Page cache only: evict rather than refuse writes when memory runs out.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  cockpit-storage:
+  mongo-data:
+  redis-data:

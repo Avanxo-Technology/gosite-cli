@@ -21,6 +21,11 @@ class Admin extends \App\Controller\App {
         // the first time somebody opens the screen.
         $forms->ensureModels();
 
+        // Retention policy enforces itself here: personal data older than the
+        // configured window is cleared (rate-limited to once a day, so this
+        // stays off the hot path).
+        $forms->maintenance();
+
         return $this->render('forms:views/index.php', [
             'forms' => $forms->forms(),
         ]);

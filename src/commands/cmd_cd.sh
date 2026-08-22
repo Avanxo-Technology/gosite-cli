@@ -34,6 +34,8 @@ cmd_cd() {
 }
 
 _shell_profile() {
+  # Display strings for the user: the literal tilde is intentional (SC2088).
+  # shellcheck disable=SC2088
   case "${SHELL##*/}" in
     zsh)  echo "~/.zshrc" ;;
     bash) echo "~/.bashrc" ;;

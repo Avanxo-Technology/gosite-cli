@@ -322,8 +322,11 @@ allocate_ports() {
 _allocate_ports_locked() {
   local project="$1" start="$2" port app_port="" cms_port=""
 
-  # One docker ps for the whole scan; published-port checks below use it.
+  # One snapshot of everything that can occupy a port, taken once per scan:
+  # forking lsof per candidate port made the critical section O(ports) slow
+  # and starved concurrent allocations past the lock timeout.
   GOSITE_DOCKER_PUBLISHED="$(docker ps --format '{{.Ports}}' 2>/dev/null || true)"
+  GOSITE_LISTENING_PORTS="$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}' | grep -oE '[0-9]+$' | sort -u || true)"
 
   for (( port = start; port <= GOSITE_PORT_MAX; port++ )); do
     _port_in_use "${port}" && continue
@@ -392,17 +395,29 @@ _port_is_reserved() {
   awk '{ for (i = 2; i <= NF; i++) print $i }' "${GOSITE_PORTS_FILE}" | grep -qwF "$1"
 }
 
-_port_is_docker_mapped() {
-  printf '%s\n' "${GOSITE_DOCKER_PUBLISHED:-}" | grep -qE '0\.0\.0\.0:'"$1"'(->|/|$)'
+_port_is_listening() {
+  # Exact line match against the lsof snapshot; the newline framing keeps
+  # 800 from matching 8000.
+  case "
+${GOSITE_LISTENING_PORTS:-}
+" in *"
+$1
+"*) return 0 ;; esac
+  return 1
 }
 
-# A port is unusable when something is listening on it, Docker has a container
-# publishing it (Docker Desktop hides mappings from lsof), or gosite itself has
-# reserved it.
+# A port is unusable when gosite has reserved it, something is listening on
+# it, or Docker has a container publishing it (Docker Desktop hides mappings
+# from lsof). The reserved check runs first: it is the cheapest and, under
+# concurrent creations, the most common hit.
 _port_in_use() {
-  lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && return 0
-  _port_is_docker_mapped "$1" && return 0
-  _port_is_reserved "$1"
+  _port_is_reserved "$1" && return 0
+  _port_is_listening "$1" && return 0
+  _port_is_docker_mapped "$1"
+}
+
+_port_is_docker_mapped() {
+  printf '%s\n' "${GOSITE_DOCKER_PUBLISHED:-}" | grep -qE '0\.0\.0\.0:'"$1"'(->|/|$)'
 }
 
 # --- dependency checks -------------------------------------------------------

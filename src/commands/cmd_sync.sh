@@ -270,7 +270,7 @@ _sync_addons() {
 
 # Adds any key present in the .env template that is missing from the project
 # .env. Existing values - including secrets - are never touched. The template
-# is generated into a temp dir so the project's .gosite.env marker is not
+# is rendered into a temp dir so the project's .gosite.env marker is not
 # rewritten.
 _sync_env() {
   local dir="$1" envfile="${1}/.env" tmp
@@ -280,7 +280,7 @@ _sync_env() {
   trap 'rm -rf "${GOSITE_SYNC_TMP}"' RETURN
   tmp="${GOSITE_SYNC_TMP}"
   load_project_render_vars "${dir}"
-  _write_env_files "${tmp}"
+  _copy_template_file "${GOSITE_ROOT}/templates" "${tmp}" ".env"
   render_placeholders "${tmp}/.env"
 
   if [[ ! -f "${envfile}" ]]; then
@@ -353,27 +353,19 @@ _sync_list_addons() {
 # is created, modified or deleted: this is a pure read.
 
 # Renders the expected state of every managed file into ${1} (a scratch dir),
-# mirroring what _sync_compose/_sync_addons/_sync_env would write.
+# from the SAME template tree create uses (src/templates/, design D8) so both
+# commands produce byte-identical output for the same inputs.
 _render_expected_tree() {
   local exp="$1" dir="$2"
   load_project_render_vars "${dir}"
+
+  render_template_tree "${GOSITE_ROOT}/templates" "${exp}" sync
+  local f
+  while IFS= read -r f; do render_placeholders "${f}"; done < <(
+    find "${exp}" -type f
+  )
+
   mkdir -p "${exp}/cockpit/addons"
-
-  _write_compose_dev "${exp}"
-  render_placeholders "${exp}/docker-compose.yml"
-
-  # _write_compose_prod also emits cockpit/config.php.
-  _write_compose_prod "${exp}"
-  render_placeholders "${exp}/docker-compose.prod.yml"
-  render_placeholders "${exp}/cockpit/config.php"
-
-  _write_env_files "${exp}"
-  render_placeholders "${exp}/.env"
-  render_placeholders "${exp}/.env.example"
-
-  _write_air_config "${exp}"
-  _write_dockerfiles "${exp}"
-
   _write_builtin_addons "${exp}"
   # Optional addons: expected content exists only for those the project has.
   local name

@@ -197,14 +197,20 @@ $model = Forms\Helper\Forms::MODEL_SUBMISSIONS;
 
             showTable();
 
-            $('forms-count').textContent = result.total + ' ' + (result.total === 1 ? 'Item' : 'Items');
+            $('forms-count').textContent = result.total + ' ' + (result.total === 1 ? 'Item' : 'Items')
+                + (sampleSize && result.total > sampleSize
+                    ? ' · columns from newest ' + sampleSize
+                    : '');
             $('forms-page').textContent  = result.page + ' — ' + state.pages;
             $('forms-prev').style.visibility = result.page > 1 ? '' : 'hidden';
             $('forms-next').style.visibility = result.page < state.pages ? '' : 'hidden';
 
             // One column per data field seen in this form, so each form reads
-            // like its own table instead of a JSON blob.
+            // like its own table instead of a JSON blob. The set is derived
+            // from a bounded sample of the newest submissions; the interface
+            // states the bound instead of implying completeness.
             var columns = result.columns || [];
+            var sampleSize = result.columnSampleSize || null;
 
             $('forms-head').innerHTML = '<tr>'
                 + '<th fixed="left" width="70">ID</th>'

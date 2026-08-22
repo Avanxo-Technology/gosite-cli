@@ -88,13 +88,13 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 ## Usage
 
 ```bash
-gosite doctor                 # verify go, air, docker, docker compose
+gosite doctor                 # toolchain check + security audit of projects & infra (--strict fails on findings)
 gosite infra up               # gosite-network + Traefik and Redis
 gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
-gosite list                   # projects, ports, container status, paths
+gosite list                   # projects, ports, container status, paths (--prune cleans the registry)
 gosite open my-site           # open in Finder (macOS)
 gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
@@ -290,22 +290,42 @@ gosite remove my-site --keep-source  # tear down the stack, keep the directory
 
 ### Syncing templates into an existing project
 
-The templates that `create` writes are single-sourced: the compose files, the
-Cockpit config and the build files (`deploy/Dockerfile*`, `.air.toml`,
-`.dockerignore`) live in `src/lib/templates.sh`, and every addon ships in
-`src/addons/`. `gosite sync` re-applies those same sources to a project that
-already exists, without touching your work — it reads the project's
-`.gosite.env` marker, so it always renders the exact values the project was
-created with. This is how an existing site picks up gosite updates.
+The templates that `create` writes are single-sourced: every generated file
+(compose files, Cockpit config, build files, the Go application, docs) is a
+real file under `src/templates/`, and every addon ships in `src/addons/`.
+`gosite sync` re-renders those same sources into a project that already
+exists, without touching your work — it reads the project's `.gosite.env`
+marker, so it always renders the exact values the project was created with.
+This is how an existing site picks up gosite updates.
 
 ```bash
 gosite sync my-site              # compose + config.php + build files + addons + .env keys
-gosite sync my-site --compose    # re-render docker-compose(.prod).yml, config.php, deploy/ build files
+gosite sync my-site --compose    # re-render docker-compose.yml, config.php, deploy/ build files
 gosite sync my-site --addons     # refresh addons present, or --addons "Forms Replica"
 gosite sync my-site --env        # add keys missing from .env (never overwrites)
+gosite sync my-site --report     # drift report: nothing is written
+gosite sync my-site --report --strict   # ...exit non-zero when there is drift (CI gate)
+gosite sync my-site --compose-prod --force  # the ONLY way docker-compose.prod.yml is rewritten
 gosite sync my-site --build      # ...then rebuild the local images
 gosite sync --list-addons        # show the addon library
 ```
+
+Two guarantees make sync safe to run blindly:
+
+- **`docker-compose.prod.yml` is yours.** No sync mode ever writes it — that
+  file carries your production overrides (extra services, replicas,
+  healthchecks), so sync only reports its drift, structurally, with `yq`
+  (normalized textual diff without it). The single exception is the explicit
+  `--compose-prod --force` above, which first copies the current file to a
+  timestamped `.bak` beside it and prints the backup path.
+- **Hand-edited files are preserved.** Every file gosite writes is recorded
+  in the project's `.gosite/manifest.tsv` with its hash at write time. On
+  sync, a file that still matches its recorded hash is refreshed from the
+  current template; one that differs was edited by hand, so it is kept and
+  reported (re-apply with `--force`). Files that vanished are restored.
+  Projects created before the manifest existed adopt one from their current
+  contents on the first sync — that first pass writes nothing but the
+  manifest itself and shows the drift report instead.
 
 `.env` merging only appends keys that the template has and the project lacks;
 existing values — including `COCKPIT_SEC_KEY` — are never overwritten. After an
@@ -316,10 +336,12 @@ on the next boot.
 
 Projects are indexed in `~/.gosite/projects.tsv` (`<name>\t<path>`) when they
 are created or started, which is how `cd`, `logs`, `start`, `stop` and `remove`
-resolve a project by name from any directory. The index is self-healing:
-entries whose directory no longer exists are dropped on read, and `gosite list`
-picks up any unindexed project below the current directory (a fresh clone, for
-example).
+resolve a project by name from any directory. Reading the index never
+rewrites it: entries whose directory no longer exists are reported as
+`unavailable` (by `gosite list` and `gosite doctor`) and stay in the file
+until you prune them explicitly with `gosite list --prune`. `gosite list`
+also picks up any unindexed project below the current directory (a fresh
+clone, for example).
 
 ## Repository layout
 
@@ -332,12 +354,17 @@ gosite-cli/
     ├── dispatcher.sh             # command router (case statement), usage text
     ├── lib/
     │   ├── config.sh             # workspace, network, ports, domains (env-overridable)
-    │   ├── helpers.sh            # logging, validation, registry, docker helpers, dep checks
-    │   ├── templates.sh          # shared template writers (compose, env, addons) for create + sync
+    │   ├── helpers.sh            # logging, validation, registry, locking, ports, dep checks
+    │   ├── templates.sh          # placeholder substitution + template-tree renderer (create + sync)
+    │   ├── manifest.sh           # per-project manifest of gosite-managed files (drift detection)
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
+    ├── templates/                # the project sources as REAL files (design D8):
+    │   ├── cmd/server/main.go    #   rendered by copy + literal __PLACEHOLDER__ substitution
+    │   ├── internal/...          #   (Go app, views, compose, Dockerfiles, docs, .env)
+    │   └── flavors/{tailwind,plain}/  # styling variants, overlaid per project
     └── commands/
-        ├── cmd_create.sh         # project scaffolding (Go, templates, Docker, compose)
-        ├── cmd_sync.sh           # re-apply gosite's templates to an existing project
+        ├── cmd_create.sh         # project scaffolding from the template tree
+        ├── cmd_sync.sh           # re-apply templates safely (manifest guard, drift report)
         ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload
@@ -346,7 +373,8 @@ gosite-cli/
         ├── cmd_logs.sh           # tail project logs (app/cms, follow, tail size)
         ├── cmd_cd.sh             # cd/path/shell-init - jump into a project
         ├── cmd_remove.sh         # full teardown incl. the source (--keep-source opts out)
-        └── cmd_list.sh           # project inventory and status
+        ├── cmd_list.sh           # project inventory and status (--prune cleans the registry)
+        └── cmd_doctor.sh         # toolchain check + read-only security audit (--strict)
 ```
 
 ## What `gosite create <name>` generates
@@ -438,3 +466,25 @@ The `X-Cache` header reports `HIT`/`MISS`. `POST /cache/purge` (guarded by
 `X-Api-Key: $COCKPIT_API_TOKEN`) lets Cockpit invalidate on publish.
 
 Measured on the generated project: **cache hit 111µs vs 5.2ms miss**.
+
+## Security posture
+
+`gosite doctor --strict` audits every project and the shared infrastructure
+against the secure defaults and exits non-zero on findings — run it in CI or
+before a deploy. The invariants it checks (and that gosite enforces by
+default): purge endpoint fail-closed without a token, Forms rate limiting
+with correct client identity behind the proxy, CORS fail-closed, shared
+datastores bound to loopback, personal-data retention bounded.
+
+### Accepted risks
+
+Two operator secrets are stored in plaintext inside the CMS database, and
+that is an accepted trade-off rather than an oversight:
+
+- **Replica** keeps peer API keys in its target configuration, and **Forms**
+  keeps each form's `webhookSecret` in the `formSettings` collection. Anyone
+  with database access already has the content these secrets protect, so
+  encrypting them would only add a key-management problem, not protection.
+  Both are masked in admin output. The compensating control is the loopback
+  binding of the datastores above: keep the database unreachable from the
+  network and the plaintext storage stays an internal detail.

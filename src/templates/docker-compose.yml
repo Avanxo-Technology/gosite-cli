@@ -1,0 +1,100 @@
+# Local development stack for __PROJECT__.
+# Redis and MongoDB are NOT defined here: they are the shared gosite
+# infrastructure, reachable by container name on the external network.
+# Start them with `gosite infra up`.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.dev
+    container_name: __PROJECT__-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8080"
+      APP_ENV: development
+      REDIS_URL: "redis://__REDIS_HOST__:__REDIS_PORT__/0"
+      COCKPIT_URL: "http://__PROJECT__-cms:80"
+      # The app carries the Mongo connection parts too, so direct database
+      # access (if added) uses the shared infra with the same credentials
+      # logic as cockpit/config.php.
+      MONGO_HOST: "__MONGO_HOST__"
+      MONGO_PORT: "__MONGO_PORT__"
+      MONGO_DB: "__PROJECT__"
+    # Host ports stay mapped as a fallback; the domain below is the main entry.
+    ports:
+      - "__APP_PORT__:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=__NETWORK__
+      - traefik.http.routers.__PROJECT__-app.rule=Host(`__DOMAIN__`)
+      - traefik.http.routers.__PROJECT__-app.entrypoints=websecure
+      - traefik.http.routers.__PROJECT__-app.tls=true
+      - traefik.http.services.__PROJECT__-app.loadbalancer.server.port=8080
+    volumes:
+      # Live source mount: air rebuilds on save.
+      - .:/app
+      # Named volumes keep the module cache and build artifacts off the host FS.
+      - __PROJECT__-gomod:/go/pkg/mod
+      - __PROJECT__-tmp:/app/tmp
+    depends_on:
+      - cms
+    networks:
+      - gosite
+
+  cms:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.cms
+    container_name: __PROJECT__-cms
+    restart: unless-stopped
+    environment:
+      # Cockpit reads these through config.php's ${VAR} resolution.
+      COCKPIT_SESSION_NAME: "__PROJECT__"
+      COCKPIT_SEC_KEY: "${COCKPIT_SEC_KEY}"
+      COCKPIT_MEMORY_SERVER: "redis://__REDIS_HOST__:6379"
+      COCKPIT_DATABASE: "__DATABASE__"
+      MONGO_HOST: "__MONGO_HOST__"
+      MONGO_PORT: "__MONGO_PORT__"
+      MONGO_DB: "__PROJECT__"
+      STORAGE_ADAPTER: "${STORAGE_ADAPTER}"
+      S3_URL: "${S3_URL}"
+      S3_BUCKET: "${S3_BUCKET}"
+      S3_REGION: "${S3_REGION}"
+      S3_KEY: "${S3_KEY}"
+      S3_SECRET: "${S3_SECRET}"
+      S3_PREFIX: "${S3_PREFIX}"
+      S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
+      S3_ACL: "${S3_ACL:-}"
+      S3_VERIFY: "${S3_VERIFY:-true}"
+      # CachePurge addon: the Go app's internal address and shared token so
+      # Cockpit can POST to /cache/purge when content changes or Replica syncs.
+      APP_URL: "http://app:8080"
+      COCKPIT_API_TOKEN: "${COCKPIT_API_TOKEN}"
+    ports:
+      - "__CMS_PORT__:80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=__NETWORK__
+      - traefik.http.routers.__PROJECT__-cms.rule=Host(`__CMS_DOMAIN__`)
+      - traefik.http.routers.__PROJECT__-cms.entrypoints=websecure
+      - traefik.http.routers.__PROJECT__-cms.tls=true
+      - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
+    volumes:
+      # Config and addons are baked into the image by Dockerfile.cms, not
+      # bind-mounted: relative mounts resolve against the directory where
+      # Coolify stores the pasted compose file, not the repo checkout, and
+      # silently mount empty directories. Storage stays on a volume.
+      - ./cockpit-storage:/var/www/html/storage
+    networks:
+      - gosite
+
+volumes:
+  __PROJECT__-gomod:
+  __PROJECT__-tmp:
+
+networks:
+  gosite:
+    external: true
+    name: __NETWORK__

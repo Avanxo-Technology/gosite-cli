@@ -1,0 +1,38 @@
+{{/* Purges the cached page and reloads. It carries its own <style> block so it
+   can be copied into any project without touching the shared stylesheet. */}}
+{{define "purge-button"}}
+<button
+  type="button"
+  class="dev-purge"
+  aria-label="Clear the page cache"
+  x-data="{ busy: false }"
+  :disabled="busy"
+  x-text="busy ? 'Purging…' : 'Purge cache'"
+  hx-post="/cache/purge"
+  hx-swap="none"
+  hx-on::before-request="busy = true"
+  hx-on::after-request="if (event.detail.successful) window.location.reload()"
+>Purge cache</button>
+<style>
+.dev-purge {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 200;
+  padding: 8px 14px;
+  border: 1px solid var(--dev-purge-border, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  background: var(--dev-purge-bg, rgba(15, 23, 42, 0.78));
+  color: var(--dev-purge-fg, #f8fafc);
+  font: 600 12px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.dev-purge:hover { background: var(--dev-purge-hover, rgba(37, 99, 235, 0.85)); }
+.dev-purge:disabled { opacity: 0.6; cursor: wait; }
+</style>
+{{end}}

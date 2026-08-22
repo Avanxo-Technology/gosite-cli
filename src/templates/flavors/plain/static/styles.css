@@ -1,0 +1,64 @@
+/* __PROJECT__ - plain CSS, no build step.
+   Custom properties first so a restyle is a few values, not a find-replace. */
+:root {
+	--bg: #f8fafc;
+	--surface: #ffffff;
+	--text: #0f172a;
+	--muted: #475569;
+	--border: #e2e8f0;
+	--accent: #2563eb;
+	--radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0f172a;
+		--surface: #1e293b;
+		--text: #e2e8f0;
+		--muted: #94a3b8;
+		--border: #334155;
+		--accent: #60a5fa;
+	}
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[x-cloak] { display: none !important; }
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.container { max-width: 48rem; margin: 0 auto; padding: 3rem 1.5rem; }
+
+.page-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 2rem;
+}
+.page-header h1 { margin: 0; font-size: 1.875rem; letter-spacing: -0.02em; }
+
+.button {
+	padding: 0.5rem 1rem;
+	border: 0;
+	border-radius: var(--radius);
+	background: var(--text);
+	color: var(--bg);
+	font: inherit;
+	font-size: 0.875rem;
+	cursor: pointer;
+}
+.button:hover { opacity: 0.85; }
+
+.panel {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 1.5rem;
+}
+.panel h2 { margin: 0; font-size: 1.25rem; }
+.panel p { margin: 0.5rem 0 0; color: var(--muted); }

@@ -1,0 +1,14 @@
+# gosite shellcheck configuration.
+#
+# Starting severity for the CI gate is "warning" (task 9.1 of
+# harden-gosite-phased): the codebase has zero errors and every warning is
+# either fixed or carries a justified inline disable.
+
+# helpers.sh / templates.sh / dispatcher.sh are sourced across files, and
+# many "globals" (colors, render vars) are written in one module and read in
+# another. Following sources makes shellcheck see those uses.
+external-sources=true
+
+# printf with a variable format string ("${C_DIM}...${C_NC}") is this
+# codebase's intentional coloring idiom, used in every command module.
+disable=SC2059

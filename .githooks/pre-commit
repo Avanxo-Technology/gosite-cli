@@ -3,6 +3,8 @@
 # Pre-commit hook for gosite-dev:
 #   1. Reject hardcoded asset URLs (all .go / .html files).
 #   2. Enforce VERSION bump when user-facing source files change.
+#   3. Fast lint subset of CI: shellcheck + bash -n + php -l on the staged
+#      files only. Budget: ~2s (measured; the full bats suite stays in CI).
 #
 set -euo pipefail
 
@@ -75,6 +77,28 @@ if [[ "${staged_version}" == "${head_version}" ]]; then
   echo "     Otherwise, bump the version in ${VERSION_FILE}."
   echo ""
   exit 1
+fi
+
+# ── Check 3: Fast lint subset (mirrors the CI lint job) ──────────────────────
+# Same severity gate as CI (task 9.1: clean at `warning`), but only on the
+# staged files so the hook stays inside its ~2s budget. Run from the repo root,
+# exactly like the CI job: .shellcheckrc lives there, and staged paths are
+# repo-relative — rewriting them for another working directory breaks every
+# shell source outside src/ (tests/, and anything added later).
+staged_sh=$(echo "${staged}" | grep -E '\.sh$' || true)
+if [[ -n "${staged_sh}" ]]; then
+  if command -v shellcheck >/dev/null 2>&1; then
+    echo "${staged_sh}" | grep -v '^$' \
+      | tr '\n' '\0' | xargs -0 shellcheck --severity=warning
+  else
+    echo "  ℹ️  shellcheck not found; skipping (CI will still enforce it)."
+  fi
+  echo "${staged_sh}" | tr '\n' '\0' | xargs -0 -n1 bash -n
+fi
+
+staged_php=$(echo "${staged}" | grep -E '\.php$' || true)
+if [[ -n "${staged_php}" ]] && command -v php >/dev/null 2>&1; then
+  echo "${staged_php}" | tr '\n' '\0' | xargs -0 -n1 php -l >/dev/null
 fi
 
 exit 0

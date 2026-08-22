@@ -22,6 +22,25 @@ class Forms extends \Lime\Helper {
     // because the memory backend is down.
     const RATE_LIMIT_RETRY_AFTER = 30;
 
+    // Personal data (ip/userAgent) retention defaults, overridable per project
+    // in cockpit/config.php under 'forms':
+    //   collect_personal_data   false = never store ip/userAgent (the rate
+    //                           limit keeps working: it reads the client
+    //                           address at request time, never the stored copy)
+    //   personal_data_retention seconds until the fields are cleared from
+    //                           stored submissions; 0 = keep indefinitely
+    const DEFAULT_COLLECT_PERSONAL_DATA = true;
+    const DEFAULT_RETENTION_SECONDS     = 7776000; // 90 days
+
+    // Column derivation inspects at most this many newest submissions. The
+    // payload is schemaless, so the column set is a heuristic over a bounded,
+    // documented sample - not a promise about the whole collection.
+    const COLUMN_SAMPLE_SIZE = 200;
+
+    // The personal-data maintenance (prunePersonalData) runs at most this
+    // often per installation when the admin screen is opened.
+    const MAINTENANCE_INTERVAL_SECONDS = 86400;
+
     protected bool $modelsChecked = false;
 
     // ------------------------------------------------------------- install
@@ -147,6 +166,11 @@ class Forms extends \Lime\Helper {
     /**
      * Every known form: those configured in formSettings plus any that has
      * received a submission, each with its submission count.
+     *
+     * The counts come from a single database-side $group (see
+     * submissionCounts): no document body ever crosses into PHP, and the
+     * count is exact regardless of collection size - the previous PHP loop
+     * was both O(collection) and silently capped at its page size.
      */
     public function forms(): array {
 
@@ -155,6 +179,8 @@ class Forms extends \Lime\Helper {
         $content = $this->app->module('content');
         $forms   = [];
 
+        // Forms with settings but no submissions must still appear, with
+        // count zero: an empty inbox is information, not an absence.
         foreach ($content->items(self::MODEL_SETTINGS, ['limit' => 500]) as $doc) {
 
             if (empty($doc['form'])) continue;
@@ -166,15 +192,11 @@ class Forms extends \Lime\Helper {
             ];
         }
 
-        foreach ($content->items(self::MODEL_SUBMISSIONS, ['fields' => ['form' => 1], 'limit' => 10000]) as $doc) {
-
-            if (empty($doc['form'])) continue;
-
-            if (!isset($forms[$doc['form']])) {
-                $forms[$doc['form']] = ['form' => $doc['form'], 'label' => $doc['form'], 'count' => 0];
+        foreach ($this->submissionCounts() as $name => $count) {
+            if (!isset($forms[$name])) {
+                $forms[$name] = ['form' => $name, 'label' => $name, 'count' => 0];
             }
-
-            $forms[$doc['form']]['count']++;
+            $forms[$name]['count'] = $count;
         }
 
         $forms = array_values($forms);
@@ -185,15 +207,47 @@ class Forms extends \Lime\Helper {
     }
 
     /**
-     * Column names for a form: the union of the data keys of its submissions.
-     * This is what lets the screen show one real column per field even though
-     * the payload itself is schemaless.
+     * Exact submission count per form name, from one database-side
+     * aggregation. Empty on backend failure: the list still renders, with
+     * zero counts and a log line.
+     *
+     * @return array<string, int>
+     */
+    protected function submissionCounts(): array {
+
+        $counts = [];
+
+        try {
+            $rows = $this->app->dataStorage->aggregate(
+                'content/collections/'.self::MODEL_SUBMISSIONS,
+                [['$group' => ['_id' => '$form', 'count' => ['$sum' => 1]]]]
+            );
+
+            foreach ($rows as $row) {
+                $name = (string)($row['_id'] ?? '');
+                if ($name !== '') {
+                    $counts[$name] = (int)($row['count'] ?? 0);
+                }
+            }
+
+        } catch (\Throwable $e) {
+            $this->log('submission counts unavailable: '.$e->getMessage());
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Column names for a form: the union of the data keys of a bounded sample
+     * of its newest submissions (COLUMN_SAMPLE_SIZE). The payload is
+     * schemaless, so columns are a heuristic; the sample size is exposed so
+     * the interface can state the bound instead of implying completeness.
      */
     public function columnsFor(?string $form = null): array {
 
         $this->ensureModels();
 
-        $options = ['fields' => ['data' => 1], 'limit' => 500, 'sort' => ['_created' => -1]];
+        $options = ['fields' => ['data' => 1], 'limit' => self::COLUMN_SAMPLE_SIZE, 'sort' => ['_created' => -1]];
 
         if ($form) $options['filter'] = ['form' => $form];
 
@@ -272,12 +326,17 @@ class Forms extends \Lime\Helper {
             }
         }
 
+        // Personal-data collection is configurable. The rate limiter above
+        // always uses the live client address, so turning collection off
+        // costs nothing there; the stored fields are simply empty.
+        $collect = $this->personalDataConfig()['collect'];
+
         $entry = [
             'form'      => $form,
             'data'      => $this->sanitize($data),
             'origin'    => $_SERVER['HTTP_ORIGIN'] ?? ($_SERVER['HTTP_REFERER'] ?? null),
-            'ip'        => $ip,
-            'userAgent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+            'ip'        => $collect ? $ip : '',
+            'userAgent' => $collect ? ($_SERVER['HTTP_USER_AGENT'] ?? null) : '',
             'read'      => false,
             // 1 = published. Without it saveItem defaults to 0, which the
             // Content UI paints red as "unpublished" - wrong for a received lead.
@@ -561,6 +620,88 @@ class Forms extends \Lime\Helper {
         error_log('[forms] '.$message);
     }
 
+    // -------------------------------------------------- personal data retention
+
+    /**
+     * Resolved personal-data policy for this installation.
+     *
+     *   collect    whether ip/userAgent are stored at all
+     *   retention  seconds until the stored fields are cleared;
+     *              0 = unlimited (kept indefinitely; doctor flags it)
+     */
+    public function personalDataConfig(): array {
+        return [
+            'collect'   => $this->app->retrieve('config/forms/collect_personal_data', self::DEFAULT_COLLECT_PERSONAL_DATA)
+                ? true : false,
+            'retention' => max(0, (int)$this->app->retrieve('config/forms/personal_data_retention', self::DEFAULT_RETENTION_SECONDS)),
+        ];
+    }
+
+    /**
+     * Clears the ip/userAgent fields of submissions older than the retention
+     * period. The submission itself - and every other field - is preserved:
+     * only the personal fields are blanked, in one database-side update. No
+     * document body is loaded into PHP.
+     *
+     * Returns the number of submissions whose fields were cleared.
+     */
+    public function prunePersonalData(): int {
+
+        $config = $this->personalDataConfig();
+
+        if (!$config['collect'] || $config['retention'] <= 0) {
+            return 0;   // nothing is stored, or retention is unlimited: policy says keep
+        }
+
+        $collection = 'content/collections/'.self::MODEL_SUBMISSIONS;
+        $filter     = [
+            '_created' => ['$lt' => time() - $config['retention']],
+            'ip'       => ['$ne' => ''],
+        ];
+
+        try {
+
+            $affected = (int)$this->app->dataStorage->count($collection, $filter);
+
+            if ($affected > 0) {
+                $this->app->dataStorage->update($collection, $filter, ['ip' => '', 'userAgent' => '']);
+            }
+
+            return $affected;
+
+        } catch (\Throwable $e) {
+            $this->log('personal-data prune failed: '.$e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Opportunistic maintenance: prunes expired personal data at most once
+     * per interval. Called when the admin screen opens, so the policy
+     * enforces itself without extra infrastructure; a memory-flag rate limit
+     * keeps it off the hot path, and a backend outage is skipped, not fatal.
+     */
+    public function maintenance(): void {
+
+        try {
+            $last = (int)$this->memoryGet('forms.maintenance.last', 0);
+
+            if ($last && (time() - $last) < self::MAINTENANCE_INTERVAL_SECONDS) {
+                return;
+            }
+
+            $this->memorySet('forms.maintenance.last', time());
+        } catch (\Throwable $e) {
+            $this->log('maintenance rate-limit check skipped: '.$e->getMessage());
+        }
+
+        $cleared = $this->prunePersonalData();
+
+        if ($cleared > 0) {
+            $this->log("maintenance cleared personal data from {$cleared} expired submission(s).");
+        }
+    }
+
     // ------------------------------------------------------------- listing
 
     /**
@@ -589,6 +730,10 @@ class Forms extends \Lime\Helper {
         return [
             'items'   => $items,
             'columns' => $this->columnsFor($form),
+            // Stated so the interface can be honest about the heuristic: the
+            // column set is derived from the newest N submissions, not the
+            // whole collection (see columnsFor).
+            'columnSampleSize' => self::COLUMN_SAMPLE_SIZE,
             'total'   => $total,
             'page'    => $page,
             'pages'   => (int)ceil($total / $limit),

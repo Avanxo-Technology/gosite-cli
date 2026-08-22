@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# Pre-commit: reject hardcoded asset URLs in Go and HTML template files.
+# These break when the app runs in a different environment (QA, prod)
+# because the domain or bucket differs.  Use the assetBase config variable
+# or the assetURL template func instead.
+#
+set -euo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[[ -z "${staged}" ]] && exit 0
+
+# Only check Go and HTML files.
+check=$(echo "${staged}" | grep -E '\.(go|html)$' || true)
+[[ -z "${check}" ]] && exit 0
+
+# Patterns that indicate hardcoded asset paths or environment-specific URLs.
+violations=$(echo "${check}" | xargs grep -n \
+  -e '/static/assets/' \
+  -e 'https\?://minio\.' \
+  -e 'https\?://.*\.s3\.' \
+  2>/dev/null || true)
+
+if [[ -n "${violations}" ]]; then
+  echo ""
+  echo "  🚫 Hardcoded asset URLs detected in staged files:"
+  echo ""
+  echo "${violations}" | head -20
+  echo ""
+  echo "  Use assetBase config or the assetURL template func instead."
+  echo "  Override with: git commit --no-verify"
+  echo ""
+  exit 1
+fi

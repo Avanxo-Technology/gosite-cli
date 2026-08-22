@@ -101,6 +101,17 @@ _audit_project() {
       "the public form receiver is open to every origin" \
       "list your site's origin(s) in cockpit/config.php, then: gosite restart ${name}"
   fi
+
+  # Unlimited personal-data retention: submissions keep ip/userAgent forever.
+  # Absent config = the 90-day default applies, which is fine; an explicit
+  # zero means the operator chose to keep personal data indefinitely.
+  # (The value regex requires 0 not followed by another digit, so 7776000
+  # does not match.)
+  if [[ -f "${config}" ]] && grep -qE "personal_data_retention.*=>[[:space:]]*0([^0-9]|$)" "${config}"; then
+    _audit_finding "${name}" "forms.personal_data_retention" "0 (unlimited)" \
+      "submissions retain ip/userAgent personal data indefinitely" \
+      "set a retention window in cockpit/config.php (seconds), then: gosite restart ${name}"
+  fi
 }
 
 # Shared infra: the datastores have no authentication; their only protection

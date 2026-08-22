@@ -415,15 +415,15 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>gosite start</td><td>Start the Go app under air hot reload plus its Cockpit container.</td></tr>
           <tr><td>gosite restart</td><td>Recreate the containers after an <code>.env</code>, compose or Dockerfile change. <span class="flag">--build</span> rebuilds the image.</td></tr>
           <tr><td>gosite logs</td><td>Follow both containers, or pass <code>app</code> / <code>cms</code>. <span class="flag">-n</span> and <span class="flag">--no-follow</span> supported.</td></tr>
-          <tr><td>gosite list</td><td>Every project with its URLs, ports, container status and path.</td></tr>
+          <tr><td>gosite list</td><td>Every project with its URLs, ports, container status and path. <span class="flag">--prune</span> removes registry entries whose directory is gone.</td></tr>
           <tr><td>gosite cd &lt;name&gt;</td><td>Jump into a project directory. <code>gosite path</code> prints it for scripts.</td></tr>
           <tr><td>gosite open &lt;name&gt;</td><td>Open a project directory in Finder (macOS).</td></tr>
           <tr><td>gosite remove &lt;name&gt;</td><td>Delete containers, volumes, images, certificate and directory. <span class="flag">--keep-source</span> keeps the code.</td></tr>
-          <tr><td>gosite sync</td><td>Re-apply gosite's templates to an existing project: re-render the compose files, <code>cockpit/config.php</code> and the <code>deploy/</code> build files, refresh the addons, and add keys missing from <code>.env</code> (never overwrites). <span class="flag">--compose</span>, <span class="flag">--addons</span>, <span class="flag">--env</span>, <span class="flag">--build</span>, <span class="flag">--list-addons</span>.</td></tr>
-          <tr><td>gosite infra up</td><td>Shared Traefik and Redis. Also <code>down</code>, <code>restart</code>, <code>status</code>, <code>logs</code>.</td></tr>
+          <tr><td>gosite sync</td><td>Re-apply gosite's templates to an existing project without overwriting your work: files untouched since gosite wrote them are refreshed (tracked by <code>.gosite/manifest.tsv</code>), hand-edited ones are preserved and reported, missing ones are restored. <code>docker-compose.prod.yml</code> is never written — only the explicit <span class="flag">--compose-prod</span> <span class="flag">--force</span> re-renders it, with a timestamped backup. <span class="flag">--report</span> shows the drift without writing (<span class="flag">--strict</span> exits non-zero on drift), plus <span class="flag">--compose</span>, <span class="flag">--addons</span>, <span class="flag">--env</span>, <span class="flag">--build</span>, <span class="flag">--list-addons</span>.</td></tr>
+          <tr><td>gosite infra up</td><td>Shared Traefik and Redis (datastores bound to loopback). Also <code>down</code>, <code>restart</code>, <code>status</code>, <code>logs</code>.</td></tr>
           <tr><td>gosite dns</td><td>Verify that <code>*.test</code> resolves to 127.0.0.1, and print the fix if not.</td></tr>
-          <tr><td>gosite doctor</td><td>Check the local toolchain: Docker, compose, Go, air.</td></tr>
-          <tr><td>gosite update</td><td>Update gosite to the latest version from GitHub. <span class="flag">--check</span> to only compare versions, <span class="flag">--ref</span> to pin a branch or tag.</td></tr>
+          <tr><td>gosite doctor</td><td>Check the local toolchain and audit every project plus the shared infrastructure against the secure defaults (read-only, with the exact fix per finding). <span class="flag">--strict</span> exits non-zero on findings.</td></tr>
+          <tr><td>gosite update</td><td>Update gosite to the latest tagged release from GitHub, verified against the published checksum; a failed swap rolls back to the previous installation. <span class="flag">--check</span> to only compare versions, <span class="flag">--ref</span> to pin a tag (or a branch with <span class="flag">--allow-unverified</span>), <span class="flag">--repo</span> to choose the source explicitly.</td></tr>
         </tbody>
       </table>
     </div>
@@ -471,7 +471,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg></div>
         <h3>Forms <span class="tag opt">optional</span></h3>
-        <p>An inbox-style manager for website submissions: a public <code>POST /forms/api/submit</code> receiver with honeypot and rate-limit anti-spam, an admin screen per form, CSV export and mail/webhook notifications.</p>
+        <p>An inbox-style manager for website submissions: a public <code>POST /forms/api/submit</code> receiver with honeypot and rate-limit anti-spam, an admin screen per form, CSV export and mail/webhook notifications. The receiver is closed by default — list your site's origins in <code>allowed_origins</code>, and keep <code>trustedProxies</code> at <code>1</code> so the rate limit counts each visitor separately rather than the proxy.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></div>
@@ -637,9 +637,18 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>Config</td><td><code>.env</code> file</td><td>Environment set in the Coolify UI</td></tr>
           <tr><td>TLS</td><td>mkcert, trusted locally</td><td>Let's Encrypt via certresolver</td></tr>
           <tr><td>Datastores</td><td>Shared Redis and MongoDB</td><td>Own MongoDB and Redis in the stack</td></tr>
+          <tr><td>Cache purge</td><td>Open — the on-page button posts without a token</td><td>Requires <code>COCKPIT_API_TOKEN</code>; answers <strong>503</strong> until one is set</td></tr>
         </tbody>
       </table>
     </div>
+    <p class="sub rv" style="margin-top:1.5rem">
+      <strong>Updating an existing deployment:</strong> <code>/cache/purge</code> used to treat a
+      missing <code>COCKPIT_API_TOKEN</code> as “no authentication required”, which left the endpoint
+      public on any site that forgot the variable. It now fails closed — set the token in the Coolify
+      UI before you redeploy, or purging stops working. Run <code>gosite doctor</code> first: it
+      reports every project missing the token, along with the rest of the secure defaults, without
+      changing anything.
+    </p>
   </div>
 </section>
 

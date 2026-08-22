@@ -71,8 +71,8 @@ _seed_home_model() {
   # before FrankenPHP finishes wiring the REST routes on first boot. Prefer the
   # Traefik HTTPS host (works whether or not the host port is published); fall
   # back to the mapped localhost port. 200/401/412 mean the API is up.
-  local i code=000
-  for i in $(seq 1 45); do
+  local _ code=000
+  for _ in $(seq 1 45); do
     code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null)"
     case "${code}" in
       200|401|412) break ;;

@@ -1,0 +1,6 @@
+FROM cockpithq/cockpit:core-2.14.0
+
+RUN install-php-extensions mongodb
+
+COPY cockpit/config.php /var/www/html/config/config.php
+COPY cockpit/addons/ /var/www/html/addons/

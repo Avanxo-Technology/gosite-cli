@@ -1,0 +1,7 @@
+
+## Styling
+
+CSS reset via CDN (`@aprinciple/modern-reset`) in `internal/views/layout.html`.
+Plain CSS in `static/styles.css`, built on custom properties with a dark-mode
+block. Components carry semantic class names (`panel`, `page-header`,
+`button`). No Tailwind, no build step - add rules to that stylesheet.

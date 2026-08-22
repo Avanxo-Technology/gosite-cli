@@ -1,0 +1,23 @@
+{{/*
+  The home page. .Content is whatever the Cockpit "home" singleton returns, so
+  a field an editor has not filled in yet falls back to the text here.
+*/}}
+{{define "content"}}
+<header class="mb-8 flex items-center justify-between">
+	<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
+	{{template "purge-button" .}}
+</header>
+
+<section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+	<h2 class="text-xl font-semibold">
+		{{with .Content.headline}}{{.}}{{else}}Your site is running{{end}}
+	</h2>
+	<p class="mt-2 text-slate-600">
+		{{with .Content.intro}}{{.}}{{else}}
+		Edit views/pages/home.html to change this page, or create a "home"
+		singleton in Cockpit with headline and intro fields to drive it from
+		the CMS.
+		{{end}}
+	</p>
+</section>
+{{end}}

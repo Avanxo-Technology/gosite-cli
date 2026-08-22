@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint (shellcheck + syntax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Severity gate decided in task 9.1 of harden-gosite-phased: the
+      # codebase is clean at `warning`; anything louder fails the build.
+      # .shellcheckrc pins external-sources and the SC2059 coloring idiom.
+      - name: shellcheck
+        run: |
+          # shellcheck follows sourced files (external-sources=true), so run
+          # from src/ where the relative paths resolve.
+          cd src
+          find . -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
+
+      - name: bash syntax
+        run: |
+          find src -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: PHP syntax (addons)
+        run: |
+          # Fail loudly if php is missing: the addons are part of the product.
+          sudo apt-get update -qq && sudo apt-get install -y -qq php-cli
+          find src/addons -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  test:
+    name: Unit tests (bats, no Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats-core
+        run: |
+          git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats
+          sudo /tmp/bats/install.sh /usr/local
+
+      - name: Run test suite
+        run: bats tests/
+
+  templates:
+    name: Template fixture (gofmt, vet, YAML, php -l)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (go, php, pyyaml)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq php-cli python3-yaml
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Verify rendered fixture
+        run: bash tests/template_fixture.sh
+
+  smoke:
+    name: Smoke (create -> build -> start -> healthz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gosite
+        run: |
+          sudo mkdir -p /usr/local/share/gosite /usr/local/bin
+          sudo cp -R src /usr/local/share/gosite/src
+          sudo chmod 0755 /usr/local/share/gosite/src/main.sh
+          sudo ln -sf /usr/local/share/gosite/src/main.sh /usr/local/bin/gosite
+
+      - name: Smoke test
+        env:
+          # Keep the daemon logs reachable if something fails.
+          DOCKER_CLI_HINTS: false
+        run: |
+          set -euo pipefail
+          project="smoke$(( RANDOM % 10000 ))"
+
+          cleanup() {
+            # Guaranteed teardown: the project, its containers, volumes,
+            # images and the shared infra. Never fails the job by itself.
+            gosite -y remove "${project}" || true
+            gosite infra down || true
+            docker volume prune -f >/dev/null 2>&1 || true
+            docker network rm gosite-net >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          gosite infra up
+          gosite create "${project}" -y
+          gosite start "${project}"
+
+          # The app publishes its container port on a host port recorded in
+          # the project marker (.gosite.env -> GOSITE_APP_PORT).
+          dir="$(gosite path "${project}")"
+          # shellcheck source=/dev/null
+          source "${dir}/.gosite.env"
+
+          # Wait for the app's healthz endpoint (liveness, checks Redis).
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:${GOSITE_APP_PORT}/healthz" >/dev/null 2>&1; then
+              echo "healthz OK after ${i} tries"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "healthz did not come up; dumping state"
+          docker ps -a || true
+          gosite logs "${project}" --no-follow -n 100 || true
+          exit 1
+
+      - name: Dump docker state on failure
+        if: failure()
+        run: |
+          docker ps -a || true
+          docker compose -p smoke ls || true
