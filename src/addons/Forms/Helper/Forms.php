@@ -620,6 +620,27 @@ class Forms extends \Lime\Helper {
         error_log('[forms] '.$message);
     }
 
+    // -------------------------------------------------------------- config
+
+    /**
+     * Reads a key from the `forms` block of cockpit/config.php.
+     *
+     * bootstrap.php builds the app with `new Lime\App($config)`, so the file's
+     * top-level keys land at the ROOT of the registry - `forms/...`, not
+     * `config/forms/...`. The nested path is kept as a fallback in case a
+     * Cockpit build does nest the config, so both layouts resolve.
+     */
+    public function config(string $key, $default = null) {
+
+        $value = $this->app->retrieve("forms/{$key}", null);
+
+        if ($value !== null) {
+            return $value;
+        }
+
+        return $this->app->retrieve("config/forms/{$key}", $default);
+    }
+
     // -------------------------------------------------- personal data retention
 
     /**
@@ -631,9 +652,9 @@ class Forms extends \Lime\Helper {
      */
     public function personalDataConfig(): array {
         return [
-            'collect'   => $this->app->retrieve('config/forms/collect_personal_data', self::DEFAULT_COLLECT_PERSONAL_DATA)
+            'collect'   => $this->config('collect_personal_data', self::DEFAULT_COLLECT_PERSONAL_DATA)
                 ? true : false,
-            'retention' => max(0, (int)$this->app->retrieve('config/forms/personal_data_retention', self::DEFAULT_RETENTION_SECONDS)),
+            'retention' => max(0, (int)$this->config('personal_data_retention', self::DEFAULT_RETENTION_SECONDS)),
         ];
     }
 
@@ -834,7 +855,7 @@ class Forms extends \Lime\Helper {
      * Client IP for the rate limiter, correct behind a reverse proxy and not
      * spoofable by the client.
      *
-     * config/forms/trustedProxies (integer, default 0) is the number of
+     * forms.trustedProxies (integer, default 0) is the number of
      * reverse-proxy hops in front of the CMS. With N trusted hops the client
      * address is the entry N positions from the RIGHT of X-Forwarded-For:
      * everything further left was appended by the proxies themselves, but the
@@ -873,17 +894,17 @@ class Forms extends \Lime\Helper {
      */
     protected function trustedProxies(): int {
 
-        $configured = $this->app->retrieve('config/forms/trustedProxies', null);
+        $configured = $this->config('trustedProxies', null);
 
         if ($configured !== null) {
             return max(0, (int)$configured);
         }
 
-        if ($this->app->retrieve('config/forms/trustProxy', false)) {
+        if ($this->config('trustProxy', false)) {
             static $deprecated = false;
             if (!$deprecated) {
                 $deprecated = true;
-                $this->log("config/forms/trustProxy is deprecated and will be removed; replace it with 'trustedProxies' => 1.");
+                $this->log("forms.trustProxy is deprecated and will be removed; replace it with 'trustedProxies' => 1.");
             }
             return 1;
         }

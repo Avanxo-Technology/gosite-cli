@@ -134,12 +134,12 @@ at all.
 ### Behind a reverse proxy
 
 The client IP used by the rate limiter comes from
-`config/forms/trustedProxies`, an **integer** counting how many reverse-proxy
-hops sit in front of the CMS (default `0`). With `N` trusted hops, the identity
-is taken N entries from the **right** of `X-Forwarded-For`; anything further
-left could have been invented by the client itself and is discarded. If the
-header carries fewer entries than configured hops, it falls back to
-`REMOTE_ADDR`.
+the `forms.trustedProxies` key of `cockpit/config.php`, an **integer**
+counting how many reverse-proxy hops sit in front of the CMS (default `0`).
+With `N` trusted hops, the identity is taken N entries from the **right** of
+`X-Forwarded-For`; anything further left could have been invented by the
+client itself and is discarded. If the header carries fewer entries than
+configured hops, it falls back to `REMOTE_ADDR`.
 
 Every gosite scaffold ships `'trustedProxies' => 1` in its generated
 `cockpit/config.php`, because every gosite site sits behind exactly one Traefik

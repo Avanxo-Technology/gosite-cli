@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.43.1 — the Forms config block actually applies
+
+### Fixed
+
+- **The entire `forms` block of `cockpit/config.php` was inert.** The addon
+  read its five settings through `config/forms/...`, but `bootstrap.php` builds
+  the app with `new Lime\App($config)`, so the config file's top-level keys sit
+  at the ROOT of the registry — `forms/...`. All five lookups returned `null`
+  and silently fell back to the built-in defaults: `trustedProxies` (every
+  submission stored the proxy's IP instead of the visitor's),
+  `personal_data_retention` (the 90-day ip/userAgent clearing never applied),
+  `collect_personal_data` (collection could not be turned off),
+  `allowed_origins` (the public receiver's CORS ignored the list) and the
+  deprecated `trustProxy` alias. Reads now go through a `config()` helper that
+  tries the root key first and keeps the nested path as a fallback.
+
+  Two notes for existing installations: the addon is baked into the CMS image
+  (`Dockerfile.cms COPY`), so this needs a **CMS rebuild** — restarting is not
+  enough. And because the retention sweep never ran, existing projects may hold
+  IPs and user agents older than their configured window; the first time the
+  Forms screen is opened after the rebuild, the daily sweep runs and purges
+  them.
+
 ## 0.43.0 — templates as real files, submission storage, quality gates
 
 ### Note before upgrading (data-affecting)

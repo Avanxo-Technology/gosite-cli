@@ -187,7 +187,7 @@ class Api extends \App\Controller\Base {
 
     /**
      * Cross-origin policy of the public receiver. Fail-closed: when
-     * config/forms/allowed_origins is not configured, no
+     * the forms.allowed_origins config is not configured, no
      * Access-Control-Allow-Origin header is emitted at all - browsers then
      * block cross-origin reads, and a same-origin form post is unaffected.
      * Configure your site's origin(s), or explicitly opt into `['*']` if you
@@ -195,7 +195,7 @@ class Api extends \App\Controller\Base {
      */
     protected function cors(): void {
 
-        $configured = $this->app->retrieve('config/forms/allowed_origins', null);
+        $configured = $this->helper('forms')->config('allowed_origins', null);
         $allowed    = is_array($configured) ? $configured : [];
         $origin     = $_SERVER['HTTP_ORIGIN'] ?? '';
 
