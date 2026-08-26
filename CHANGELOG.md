@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.44.0 — replicated models become visible on the destination
+
+### Fixed
+
+- **Replica wrote models that nobody could see.** `applyModels()` stored
+  incoming model definitions correctly in the destination database, but
+  `Content\Helper\Model` caches every definition under the `content.models`
+  memory key and only bypasses that cache when debug is on. On any non-debug
+  destination the registry kept describing the world as it was: the REST API
+  answered `Model <name> not found` and a consuming app read the singleton as
+  empty, while the definition sat correct in the database the whole time.
+
+  `applyModels()` now rebuilds the registry after a successful write. The
+  rebuild is best-effort — the data is already stored and the next request
+  rebuilds it anyway — so a failure is reported in the run's messages instead
+  of failing the replication.
+
+  This affected every gosite project replicating a new model to a non-debug
+  target, and stayed hidden for so long precisely because development runs with
+  debug on, which rebuilds the registry on every request and masks it
+  completely.
+
+  The behaviour is documented in `src/knowledge/cockpit-model-registry-cache.md`
+  for every code path that writes model definitions outside the admin UI.
+
+  Replica is baked into the CMS image (`Dockerfile.cms COPY`), so projects need
+  a **CMS rebuild**, not a restart.
+
 ## 0.43.1 — the Forms config block actually applies
 
 ### Fixed

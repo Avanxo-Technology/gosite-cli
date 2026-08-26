@@ -983,8 +983,8 @@ class Replica extends \Lime\Helper {
     }
 
     /**
-     * Writes incoming model definitions locally, through the content module so
-     * its model cache stays coherent.
+     * Writes incoming model definitions locally through the content module,
+     * then rebuilds the model registry so the writes become visible.
      */
     public function applyModels(array $models, string $mode, bool $dryRun = false): array {
 
@@ -1037,6 +1037,30 @@ class Replica extends \Lime\Helper {
             } else {
                 $result['created']++;
                 $result['messages'][] = ($dryRun ? 'would create model ' : 'create model ').$name;
+            }
+        }
+
+        // Rebuild the model registry after writing.
+        //
+        // Content\Helper\Model caches every model definition under the
+        // 'content.models' memory key and only bypasses it when debug is on:
+        //
+        //     $this->models = $this->app['debug']
+        //         ? $this->cache(false)
+        //         : $this->app->memory->get('content.models', ...);
+        //
+        // So a replicated model is invisible on any non-debug destination
+        // until that key is rebuilt: the definition sits correctly in the
+        // database while the API answers "Model <name> not found", and a
+        // consuming app reads the singleton as empty. Development never shows
+        // it, because debug rebuilds the registry on every request.
+        if (!$dryRun && ($result['created'] || $result['updated'])) {
+            try {
+                $this->app->helper('content.model')->cache(true);
+            } catch (\Throwable $e) {
+                // Never fail a replication run over a cache rebuild: the data
+                // is already written, and the next request rebuilds it anyway.
+                $result['messages'][] = 'model cache rebuild failed: '.$e->getMessage();
             }
         }
 
