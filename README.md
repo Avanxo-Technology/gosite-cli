@@ -390,11 +390,14 @@ gosite-cli/
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     ├── templates/                # the project sources as REAL files (design D8):
     │   ├── cmd/server/main.go    #   rendered by copy + literal __PLACEHOLDER__ substitution
-    │   ├── internal/...          #   (Go app, views, compose, Dockerfiles, docs, .env)
+    │   ├── internal/...          #   (Go app, views, compose, Dockerfiles, docs)
+    │   ├── dotenv                #   becomes .env; named so no .gitignore can hide it
+    │   ├── addons/blog/          #   application half of an addon, overlaid on opt-in
     │   └── flavors/{tailwind,plain}/  # styling variants, overlaid per project
     └── commands/
         ├── cmd_create.sh         # project scaffolding from the template tree
         ├── cmd_sync.sh           # re-apply templates safely (manifest guard, drift report)
+        ├── cmd_addons.sh         # install/remove addons in an existing project
         ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload

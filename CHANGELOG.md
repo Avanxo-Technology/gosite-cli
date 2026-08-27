@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.45.4 — the website caught up
+
+### Changed
+
+- **`docs/index.html` and `README.md` now describe what gosite actually does.**
+  The site still said every project shipped *four* built-in addons (it is six),
+  had no card for `CachePurge` or `StarterContent`, and — the one that cost
+  real debugging time — claimed addons were "bind-mounted in dev, baked into
+  the production image". They are baked into the image in **both**, which is
+  why adding one needs a rebuild rather than a restart. That is now stated
+  where somebody looking for it would read it.
+
+  Also documented: `gosite addons`, `gosite sync --app`, the `router_blog.go` /
+  `internal/blog/` files an opt-in addon adds, and that `gosite start` registers
+  the API key but no longer creates content models.
+
 ## 0.45.3 — a new project brings its own home singleton
 
 ### Fixed
