@@ -227,7 +227,7 @@ _prompt_addons() {
 
   printf "\n"
   printf "${C_BOLD}Cockpit addons${C_NC}\n"
-  printf "  ${C_DIM}Optional: public forms, a blog, content replication.${C_NC}\n"
+  printf "  ${C_DIM}Optional: public forms, a blog, analytics, content replication.${C_NC}\n"
 
   local selected=""
 
@@ -239,6 +239,10 @@ _prompt_addons() {
   printf "${C_YELLOW}?${C_NC} Install Blog ${C_DIM}(articles at /{blog}/{slug}, with CMS models and pages)${C_NC} [y/N] "
   read -r reply
   [[ "${reply}" =~ ^[Yy]$ ]] && selected="${selected:+${selected} }Blog"
+
+  printf "${C_YELLOW}?${C_NC} Install Analytics ${C_DIM}(GTM, PostHog and other tracking keys, editable in the CMS)${C_NC} [y/N] "
+  read -r reply
+  [[ "${reply}" =~ ^[Yy]$ ]] && selected="${selected:+${selected} }Analytics"
 
   printf "${C_YELLOW}?${C_NC} Install Replica ${C_DIM}(content replication between Cockpit instances)${C_NC} [y/N] "
   read -r reply

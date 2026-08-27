@@ -299,7 +299,16 @@ func (b *Blog) purge(ctx context.Context, model, id string) error {
 		// body. Purging every blog page is the safe reading of "purge".
 		return b.Cache.PurgeGroup(ctx, keyPrefix())
 	default:
-		// Some other model changed. The blog does not read it.
+		// Some other model changed, and it is not one whose content reaches
+		// these pages.
+		//
+		// Content that IS on every page - analytics keys, anything the layout
+		// carries - never arrives here: the purge handler recognises those and
+		// drops the whole project before any hook runs. So this branch only
+		// ever sees models that genuinely change nothing here, and keeping the
+		// pages matters: a public form submission is a content save too, and
+		// dropping the blog's cache on every one of them would be expensive
+		// and pointless.
 		return nil
 	}
 

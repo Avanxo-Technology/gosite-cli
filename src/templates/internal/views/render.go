@@ -20,6 +20,17 @@ import (
 //go:embed layout.html pages/*.html components/*.html
 var files embed.FS
 
+// Integration is one third-party tracking tool the layout should load, as
+// configured in the CMS. Provider names what it is; Config is that provider's
+// own settings, whatever shape they take.
+//
+// It lives here rather than with the code that reads it so the templates and
+// the reader can share a type without either importing the other.
+type Integration struct {
+	Provider string
+	Config   map[string]any
+}
+
 // Renderer implements echo.Renderer. Each entry is a page: layout + page body
 // + every component, parsed once.
 type Renderer struct {
@@ -37,7 +48,31 @@ type Renderer struct {
 // assetBase is the base URL for CMS assets (config.AssetBaseURL): with S3
 // storage it is the public bucket/endpoint so images load CDN-style; otherwise
 // it is the local /storage/uploads mount.
-func NewRenderer(assetBase string) *Renderer {
+// Option configures a Renderer. Options rather than parameters so a capability
+// can be added without changing the signature - a project that has customised
+// its app.go would otherwise stop compiling the moment it syncs.
+type Option func(*options)
+
+type options struct {
+	integrations func() []Integration
+}
+
+// WithIntegrations supplies what the analytics component should load.
+//
+// A function rather than a value because the answer lives in the CMS and
+// changes while the process runs, while the renderer is built once at boot.
+// Left unset it means "none", which is what a project without the Analytics
+// addon gets.
+func WithIntegrations(fn func() []Integration) Option {
+	return func(o *options) { o.integrations = fn }
+}
+
+func NewRenderer(assetBase string, opts ...Option) *Renderer {
+	var o options
+	for _, apply := range opts {
+		apply(&o)
+	}
+	integrations := o.integrations
 
 	// assetURL turns a Cockpit asset object (a map with a "path") into a
 	// browser-reachable URL. It returns the empty string when the field is
@@ -52,8 +87,19 @@ func NewRenderer(assetBase string) *Renderer {
 		return ""
 	}
 
+	if integrations == nil {
+		integrations = func() []Integration { return nil }
+	}
+
 	funcs := template.FuncMap{
 		"assetURL": assetURL,
+		// analyticsIntegrations is what the analytics component reads.
+		//
+		// A function rather than data passed by each handler: this belongs on
+		// every page, and threading it through every data map would mean a page
+		// added later silently loses its tracking, with nobody noticing for
+		// weeks. Views call it as {{range analyticsIntegrations}}.
+		"analyticsIntegrations": integrations,
 		// safeHTML renders a value as markup instead of escaping it, for rich
 		// text an editor wrote in the CMS. This deliberately disables the XSS
 		// protection html/template otherwise gives you, so it is only ever

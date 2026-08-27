@@ -7,6 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"__MODULE__/internal/analytics"
 	"__MODULE__/internal/cache"
 	"__MODULE__/internal/cms"
 	"__MODULE__/internal/config"
@@ -49,7 +50,12 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 	}
 	log.Info("redis connected", "addr", opts.Addr, "db", opts.DB)
 
-	renderer := views.NewRenderer(cfg.AssetBaseURL())
+	// The renderer is built once, but the analytics integrations live in the
+	// CMS and change while the process runs, so it is handed a function rather
+	// than a list.
+	cmsClient := cms.New(cfg, log)
+	renderer := views.NewRenderer(cfg.AssetBaseURL(),
+		views.WithIntegrations(analytics.New(cmsClient, cfg, log).Integrations))
 
 	return &App{
 		Config:   cfg,
@@ -60,7 +66,7 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 			Config:   cfg,
 			Log:      log,
 			Cache:    cache.New(rdb, log, cfg.IsDev()),
-			CMS:      cms.New(cfg, log),
+			CMS:      cmsClient,
 			Renderer: renderer,
 			Redis:    rdb,
 		}),

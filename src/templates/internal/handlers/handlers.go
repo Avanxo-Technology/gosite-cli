@@ -15,6 +15,11 @@ import (
 	"__MODULE__/internal/views"
 )
 
+// cacheKeyPrefix namespaces every cache key this project owns. Several
+// projects share one Redis, so it is also what keeps a site-wide purge from
+// becoming a flush of everybody's cache.
+const cacheKeyPrefix = "__PROJECT__:"
+
 // Deps is what the handlers need. Passing a struct rather than six positional
 // arguments means adding a dependency does not touch every call site.
 type Deps struct {

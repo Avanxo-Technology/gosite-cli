@@ -126,6 +126,19 @@ func (c *Cache) Purge(ctx context.Context, keys ...string) error {
 // how long the server is busy in any single call.
 const purgeScanCount = 200
 
+// PurgeAll drops every page this project has cached.
+//
+// For a change to something the layout carries - analytics keys, a site-wide
+// setting - "purge what changed" is the whole site, because that content is on
+// every page. Anything narrower leaves pages serving values that no longer
+// exist.
+//
+// The prefix is what keeps this from being a cache flush: several projects
+// share one Redis, and one project's purge must never touch another's.
+func (c *Cache) PurgeAll(ctx context.Context, projectPrefix string) error {
+	return c.PurgeGroup(ctx, projectPrefix)
+}
+
 // PurgeGroup removes every key starting with prefix, fresh and stale alike.
 //
 // A page that exists once - the home page - is purged by name. A blog is many

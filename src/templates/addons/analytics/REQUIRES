@@ -1,0 +1,20 @@
+# What this addon needs from the project's own application code.
+#
+# The Analytics addon has no Go package of its own: its application half is
+# base scaffolding (the reader, the template function, the component and the
+# browser scripts), delivered by create and by `gosite sync --app`. This file
+# is what turns "installed the addon into a project too old to have that
+# scaffolding" from a silently dead integration into a refusal that names the
+# missing pieces.
+#
+# Format: <path><TAB><literal marker that must appear in the file>
+internal/analytics/analytics.go	func (r *Reader) Integrations()
+internal/views/render.go	analyticsIntegrations
+internal/app/app.go	views.WithIntegrations
+internal/handlers/purge.go	isSiteWide(
+internal/cache/cache.go	func (c *Cache) PurgeAll(
+internal/views/components/analytics.html	define "analytics-head"
+internal/views/layout.html	template "analytics-head"
+static/js/analytics/init.js	analyticsPlugins
+static/js/analytics/plugin-gtm.js	googletagmanager.com/gtm.js
+static/js/analytics/plugin-posthog.js	posthog.init

@@ -38,17 +38,29 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 
 	ctx := c.Request().Context()
 
+	model, id := purgeTarget(c)
+
+	// Some content is not part of any one page: analytics keys and anything
+	// else the layout carries are on all of them. Purging only the area an
+	// edit "belongs" to would leave every other page serving the old value for
+	// the rest of its cache window.
+	if isSiteWide(model) {
+		if err := h.Cache.PurgeAll(ctx, cacheKeyPrefix); err != nil {
+			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
+		}
+		go h.warmHome()
+		return h.reply(c).Text(http.StatusOK, "purged")
+	}
+
 	if err := h.Cache.Purge(ctx, homeCacheKey); err != nil {
 		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
 
-	// The CMS names what changed so features owning their own keys can be
-	// precise. The body is optional: the on-page button sends none, and so does
-	// a CMS older than this app. Anything unreadable is treated as "not named"
-	// rather than as an error - the home purge above already happened, and
-	// failing here would report a purge that in fact took place.
-	model, id := purgeTarget(c)
-
+	// Features owning their own keys invalidate them precisely. The body is
+	// optional: the on-page button sends none, and so does a CMS older than
+	// this app. Anything unreadable is treated as "not named" rather than as an
+	// error - the home purge above already happened, and failing here would
+	// report a purge that in fact took place.
 	for _, hook := range h.purgeHooks {
 		if err := hook(ctx, model, id); err != nil {
 			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
@@ -87,3 +99,11 @@ func purgeTarget(c *echo.Context) (model, id string) {
 	}
 	return payload.Model, payload.ID
 }
+
+// siteWideModels are the collections whose content appears in the layout, and
+// therefore on every page. A change to one of them invalidates everything.
+var siteWideModels = map[string]bool{
+	"analyticsIntegrations": true,
+}
+
+func isSiteWide(model string) bool { return siteWideModels[model] }

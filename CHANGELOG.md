@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.46.0 — analytics keys as content
+
+### Added
+
+- **New `Analytics` addon**, opt-in. Third-party tracking keys — Google Tag
+  Manager, PostHog — live in the CMS as content rather than in a layout five
+  projects edit separately.
+
+  One collection, one entry per integration: the provider, that provider's
+  configuration, whether it is on, and where it applies. **Adding a key is
+  data**, done by whoever owns the site, with no release. Adding a *kind* of
+  tool stays a visible change to the base, because something has to know how to
+  render it — which is why `provider` is a closed select and an entry the site
+  cannot render cannot be saved at all.
+
+  Each entry says whether it applies to `all`, `production` or `development`,
+  so local browsing never lands in a client's production account.
+
+  **Keys reach the browser as data, never as code.** They are emitted as a JSON
+  block a local script reads, so nothing an editor typed is ever interpolated
+  into JavaScript: a malformed value fails a `JSON.parse` instead of executing,
+  and no inline executable script is needed. Values are also validated on save
+  — the two defences are independent, so a mistake in one is not a
+  vulnerability.
+
+  The scripts are `analytics` plugins loaded from a **pinned** CDN version. No
+  official plugin publishes a browser bundle, so GTM and PostHog have small
+  plugins of our own under `static/js/analytics/`, which is roughly the work a
+  hand-written snippet would have been plus a uniform `track` / `page` /
+  `identify` API. `@analytics/posthog` does not exist and the third-party ones
+  were last published in 2024.
+
+  Integrations reach every page through a template function rather than each
+  handler's data, so a page added later cannot silently lose its tracking.
+
+  Consent management is deliberately **not** in this release. It is the next
+  task, and tags load unconditionally until it lands.
+
+### Changed
+
+- **A change to site-wide content now purges every cached page.** Invalidation
+  assumed an edit affects one area — the home page purges itself, a feature
+  purges its own. That does not hold for anything in the layout, which is on
+  every page: without this, the home page would update and every blog page
+  would serve the old keys for the rest of its cache window. The purge is
+  scoped by project prefix, so a shared Redis is never flushed across projects.
+- **`gosite sync --app` now covers `static/` as well as `internal/`.** The
+  browser assets gosite ships live there, and leaving them out meant an addon's
+  client scripts never arrived — found by running the upgrade path rather than
+  reading it.
+- `views.NewRenderer` takes options instead of a widening parameter list, so a
+  project that has customised its `app.go` keeps compiling when it syncs.
+
+### Fixed
+
+- **A stray `REQUIRES` file was copied into the root of every project created
+  with an addon that has an application half.** It describes an addon to
+  gosite and has no business in a project. Introduced in 0.45.0; the rendered
+  fixture now fails if it reappears.
+
+### Upgrading
+
+```bash
+gosite sync <project> --app       # internal/ and static/
+gosite addons add Analytics <project>
+gosite restart <project> --build  # both halves are compiled or baked in
+```
+
+`addons add` refuses with a precise list if the application half is missing.
+
 ## 0.45.4 — the website caught up
 
 ### Changed

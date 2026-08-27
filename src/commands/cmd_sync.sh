@@ -180,8 +180,12 @@ USAGE
 _sync_app() {
   local dir="$1" exp="$2" force="$3"
 
-  info "Syncing application sources (internal/)"
-  _sync_apply_expected "${dir}" "${exp}" "${force}" "internal/"
+  # static/ counts as application source too: the browser assets gosite ships
+  # live there, and leaving it out meant an addon's client scripts never
+  # arrived. styles.css is in the same tree and is exactly the kind of file
+  # projects customise - the manifest guard is what keeps that safe.
+  info "Syncing application sources (internal/, static/)"
+  _sync_apply_expected "${dir}" "${exp}" "${force}" "internal/" "static/"
   warn "The application is compiled, so rebuild it: gosite restart $(basename "${dir}") --build"
 }
 

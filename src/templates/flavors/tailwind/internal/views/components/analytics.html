@@ -1,0 +1,43 @@
+{{/*
+  Third-party tracking, from the integrations configured in the CMS.
+
+  Two blocks because some providers need markup in two places: GTM wants a
+  script in the head and a <noscript> fallback in the body. Which one a
+  provider uses is decided here, not by whoever types the key.
+
+  Nothing from the CMS is ever interpolated into JavaScript. The configuration
+  is emitted as a JSON data block that /static/js/analytics/init.js reads, so a
+  malformed value fails a JSON.parse instead of executing, and no inline
+  executable script is needed - which keeps a future CSP simple.
+
+  NEVER reach for safeHTML in this file. That is the one way to lose the
+  protection html/template gives here.
+*/}}
+
+{{define "analytics-head"}}
+{{$integrations := analyticsIntegrations}}
+{{if $integrations}}
+<script type="application/json" id="analytics-config">{{toJSON $integrations}}</script>
+<script src="https://unpkg.com/analytics@0.8.19/dist/analytics.min.js"></script>
+{{range $integrations}}
+  {{/* html/template refuses a template name that comes from a variable, so
+       dispatch is an explicit chain. It is the visible form of a coupling
+       that exists either way: a provider with no plugin renders nothing. */}}
+  {{if eq .Provider "gtm"}}<script src="/static/js/analytics/plugin-gtm.js"></script>
+  {{else if eq .Provider "posthog"}}<script src="/static/js/analytics/plugin-posthog.js"></script>
+  {{end}}
+{{end}}
+<script src="/static/js/analytics/init.js"></script>
+{{end}}
+{{end}}
+
+{{define "analytics-body"}}
+{{range analyticsIntegrations}}
+  {{if eq .Provider "gtm"}}
+    {{with index .Config "id"}}
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{.}}"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    {{end}}
+  {{end}}
+{{end}}
+{{end}}

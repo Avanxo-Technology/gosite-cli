@@ -73,6 +73,7 @@ for flavor in tailwind plain; do
   # application code must render, format and compile like the base tree, or a
   # project installing it gets a scaffold that does not build.
   render_addon_overlay "${GOSITE_ROOT}/templates" "${out}" blog >/dev/null
+  render_addon_overlay "${GOSITE_ROOT}/templates" "${out}" analytics >/dev/null
 
   while IFS= read -r f; do render_placeholders "${f}"; done < <(find "${out}" -type f)
   assert_no_placeholders "${out}"
@@ -90,6 +91,17 @@ for flavor in tailwind plain; do
   [[ -f "${out}/internal/blog/blog.go" && -f "${out}/internal/app/router_blog.go" \
      && -f "${out}/internal/views/pages/blog-article.html" ]]
   check $? "blog overlay rendered (${flavor})"
+
+  # REQUIRES describes an addon to gosite and must never reach a project.
+  [[ ! -e "${out}/REQUIRES" ]]
+  check $? "no stray REQUIRES in the project root (${flavor})"
+
+  # The analytics client scripts are base templates, not an overlay: a project
+  # gets them whether or not the addon is installed, and the component renders
+  # nothing without integrations.
+  [[ -f "${out}/static/js/analytics/init.js" && -f "${out}/internal/analytics/analytics.go" \
+     && -f "${out}/internal/views/components/analytics.html" ]]
+  check $? "analytics application half rendered (${flavor})"
 
   # gofmt: the Go templates must be canonically formatted.
   if command -v gofmt >/dev/null 2>&1; then

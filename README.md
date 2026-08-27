@@ -302,8 +302,8 @@ This is how an existing site picks up gosite updates.
 ```bash
 gosite sync my-site              # compose + config.php + build files + addons + .env keys
 gosite sync my-site --compose    # re-render docker-compose.yml, config.php, deploy/ build files
-gosite sync my-site --addons     # refresh addons present, or --addons "Forms Blog Replica"
-gosite sync my-site --app        # bring internal/ up to the current templates
+gosite sync my-site --addons     # refresh addons present, or --addons "Forms Blog Analytics Replica"
+gosite sync my-site --app        # bring internal/ and static/ up to the current templates
 gosite sync my-site --env        # add keys missing from .env (never overwrites)
 gosite sync my-site --report     # drift report: nothing is written
 gosite sync my-site --report --strict   # ...exit non-zero when there is drift (CI gate)
@@ -311,7 +311,7 @@ gosite sync my-site --compose-prod --force  # the ONLY way docker-compose.prod.y
 gosite sync my-site --build      # ...then rebuild the local images
 ```
 
-`--app` is the one mode that touches your Go code, which is why it is opt-in.
+`--app` is the one mode that touches your application sources (`internal/`, `static/`), which is why it is opt-in.
 The manifest guard still decides file by file: scaffolding you never opened is
 refreshed, anything you edited is preserved and reported. A project scaffolded
 long ago needs it before it can take an addon that ships application pages.

@@ -242,12 +242,14 @@ render_addon_overlay() {
 
   [[ -d "${root}" ]] || return 0
 
+  # REQUIRES describes the addon to gosite; it is not part of a project. Left
+  # in, it was copied to every project's root as a stray file.
   local f rel
   while IFS= read -r -d '' f; do
     rel="${f#./}"
     _copy_template_file "${root}" "${dest}" "${rel}"
     printf '%s\n' "${rel}"
-  done < <(cd "${root}" && find . -type f ! -path './flavors/*' -print0)
+  done < <(cd "${root}" && find . -type f ! -path './flavors/*' ! -name 'REQUIRES' -print0)
 
   while IFS= read -r -d '' f; do
     rel="${f#./}"
