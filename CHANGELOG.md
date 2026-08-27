@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.46.13 — the core library publishes `_analytics`, not `Analytics`
+
+### Fixed
+
+- **Nothing was ever tracked: the loader could not find the library.** The core
+  bundle publishes `_analytics` — an object holding `{Analytics, CONSTANTS,
+  EVENTS, default, init}` — and the factory is `_analytics.init`. The loader
+  looked for a bare `window.Analytics`, did not find it, and reported that the
+  library had not loaded while it was sitting there fully loaded.
+
+  That is a bad failure to have: it reads as an ad blocker, which sends you
+  looking at the network tab rather than at the code.
+
+  Both shapes are accepted now, so a bundle that changes its mind does not
+  break this again.
+
+- **The test agreed with the bug rather than catching it.** It stubbed
+  `window.Analytics`, inventing the shape the code assumed. The stub now
+  mirrors the real bundle. This is the second time today a mock encoded the
+  same misunderstanding as the code it was meant to check; the rule that comes
+  out of it is that a stub of a third-party contract has to be built from that
+  contract, not from what the caller hopes it is.
+
 ## 0.46.12 — the loader also says when the library is blocked
 
 ### Changed

@@ -20,6 +20,16 @@ upstream release change five client sites with no deployment, prevents
 subresource integrity, and costs a redirect. Every other dependency in
 `layout.html` is pinned too.
 
+### The core publishes `_analytics`, not `Analytics`
+
+```js
+var _analytics = { Analytics, CONSTANTS, EVENTS, default, init }
+```
+
+The factory is `_analytics.init`. Assuming a bare `window.Analytics` reports
+the library as "did not load" while it is sitting there fully loaded — a
+failure that reads as an ad blocker and sends you looking in the wrong place.
+
 ### Official plugins DO ship browser bundles — at a non-obvious path
 
 This was got wrong once, so it is written down. The bundle is **not** at

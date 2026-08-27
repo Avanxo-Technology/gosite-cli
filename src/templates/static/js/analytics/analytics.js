@@ -156,10 +156,23 @@
     return;
   }
 
-  if (!window.Analytics) {
-    // The library itself did not load: offline, an ad blocker, a CDN outage.
-    // Worth saying, because from a browser console that is indistinguishable
-    // from analytics simply being misconfigured.
+  /*
+   * The core bundle publishes `_analytics`, an object holding the factory -
+   * not a bare `Analytics` function. Assuming the latter meant the library was
+   * reported as "did not load" while sitting right there, fully loaded.
+   *
+   * Both shapes are accepted so a future bundle changing its mind does not
+   * break this again.
+   */
+  var core = window._analytics || window.Analytics;
+  var createAnalytics = typeof core === 'function'
+    ? core
+    : (core && (core.init || core.Analytics || core.default));
+
+  if (typeof createAnalytics !== 'function') {
+    // Genuinely absent: offline, an ad blocker, a CDN outage. Worth saying,
+    // because from a browser console that is indistinguishable from analytics
+    // simply being misconfigured.
     console.warn('[analytics] the analytics library did not load; nothing will be tracked');
     return;
   }
@@ -218,7 +231,7 @@
       return;
     }
 
-    var instance = window.Analytics({ app: 'site', plugins: plugins });
+    var instance = createAnalytics({ app: 'site', plugins: plugins });
 
     // Replace the queue and replay whatever the page recorded meanwhile.
     window.analytics = instance;
