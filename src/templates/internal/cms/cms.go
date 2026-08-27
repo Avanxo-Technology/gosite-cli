@@ -5,6 +5,7 @@ package cms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -61,6 +62,28 @@ func (c *Client) Singleton(ctx context.Context, name string) Content {
 	return v.(Content)
 }
 
+// ErrNotFound means Cockpit answered cleanly and the thing simply is not there
+// - a model nobody has created yet, most often on a brand-new project.
+//
+// It is worth separating from every other failure: "no content yet" is a
+// normal state a template can render with its fallbacks, while "the CMS is
+// unreachable" is not. Treating them alike is how an empty project ends up
+// serving 502 instead of its own placeholder text.
+var ErrNotFound = errors.New("cockpit: not found")
+
+// SingletonErr is Singleton for callers that need to tell those cases apart.
+// Singleton itself keeps swallowing the error, so existing callers are
+// unaffected.
+func (c *Client) SingletonErr(ctx context.Context, name string) (Content, error) {
+	v, err, _ := c.sf.Do("singleton:"+name, func() (any, error) {
+		return c.fetch(ctx, "/api/content/item/"+name)
+	})
+	if err != nil {
+		return Content{}, err
+	}
+	return v.(Content), nil
+}
+
 func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -74,6 +97,10 @@ func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
 		return nil, err
 	}
 	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
+	}
 
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cockpit returned %s", res.Status)

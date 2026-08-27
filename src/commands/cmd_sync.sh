@@ -450,7 +450,7 @@ _sync_list_addons() {
     [[ -d "${d}" ]] || continue
     local name; name="$(basename "${d}")"
     case "${name}" in
-      AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
+      AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge|StarterContent) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
       *)
         if addon_has_overlay "${name}"; then
           printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons; also adds application pages)"

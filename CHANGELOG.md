@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.45.3 — a new project brings its own home singleton
+
+### Fixed
+
+- **A fresh project could answer 502 on its front page.** The application reads
+  a `home` singleton, and when the CMS has none it returned
+  `502 could not load the page` — even though the templates carry fallback text
+  written for exactly that case.
+
+  Two separate problems, both fixed:
+
+  **The singleton was created from the CLI, over HTTP, after boot.** `gosite
+  start` waited up to 90s for the REST API, registered an API key and POSTed to
+  `/api/models/save` with retries. That depends on the CMS being up, on a token
+  existing and on timing — and when any of those was untrue it failed silently.
+  Combined with 0.45.1's missing `.env` (no token), it failed silently a lot.
+
+  A new built-in `StarterContent` addon creates the model from inside Cockpit
+  instead: no network, no token, idempotent, and it cannot half-succeed. It is
+  the approach Forms and Blog already use for their own models, and it rebuilds
+  the model registry cache so the model is visible on non-debug environments. A
+  `home` model that already exists is never touched, fields included. `gosite
+  start` still registers the API key; it no longer creates models.
+
+  **A missing model was treated like a broken CMS.** The client now reports
+  `ErrNotFound` separately, so "nobody has created this yet" renders the
+  template's fallbacks with a 200, while an unreachable or failing CMS is still
+  a 502. The fallback page is deliberately not cached, so real content appears
+  the moment somebody writes it rather than a TTL later. An existing but empty
+  singleton is treated the same way.
+
+### Upgrading
+
+New projects need nothing. For an existing project:
+
+```bash
+gosite sync <project>          # installs the StarterContent addon
+gosite sync <project> --app    # the 502-instead-of-fallbacks fix
+gosite restart <project> --build
+```
+
 ## 0.45.2 — a newly installed addon now actually appears in Cockpit
 
 ### Fixed

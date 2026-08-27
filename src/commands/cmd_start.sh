@@ -40,7 +40,7 @@ cmd_start() {
   info "Starting '${GOSITE_PROJECT}' (air hot reload)"
   compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" up -d --build
 
-  _seed_home_model "${dir}"
+  _register_api_key "${dir}"
 
   if [[ -n "${GOSITE_APP_DOMAIN:-}" ]]; then
     ok "App -> https://${GOSITE_APP_DOMAIN}"
@@ -58,11 +58,16 @@ cmd_start() {
   fi
 }
 
-# Best-effort starter content: registers COCKPIT_API_TOKEN as an admin API key
-# (idempotent) and creates a "home" singleton via the ModelManager addon, so a
-# fresh project has a model to edit instead of a blank admin. Failures are
-# non-fatal - the site works without it, and the seed re-runs on the next start.
-_seed_home_model() {
+# Registers COCKPIT_API_TOKEN as an admin API key so the application can read
+# the CMS. Idempotent, and non-fatal: the next start retries.
+#
+# It no longer creates the "home" singleton. That used to happen here, over
+# HTTP, after boot - which meant it depended on the CMS being up, on a token
+# existing and on timing, and when any of those was untrue it failed silently
+# and the site answered 502. The StarterContent addon creates the model from
+# inside Cockpit instead: no network, no token, idempotent, and it cannot
+# half-succeed.
+_register_api_key() {
   local dir="$1"
   local tok cms_port db base
   tok="$(grep -E '^COCKPIT_API_TOKEN=' "${dir}/.env" 2>/dev/null | cut -d= -f2-)"
@@ -88,33 +93,11 @@ _seed_home_model() {
     esac
     sleep 2
   done
-  [[ "${code}" == "000" ]] && { warn "CMS API not reachable yet; starter content not seeded."; return 0; }
+  [[ "${code}" == "000" ]] && { warn "CMS API not reachable yet; the API key was not registered."; return 0; }
 
-  # Make sure the token is a registered admin API key (ModelManager ACLs on
-  # /api/models/save require it). Upsert never touches an existing key.
+  # Make sure the token is a registered admin API key. Upsert never touches an
+  # existing key.
   docker exec "${GOSITE_MONGO_HOST}" mongosh "mongodb://127.0.0.1:27017/${db}" \
     --quiet --eval "db.system_api_keys.updateOne({key:'${tok}'},{\$setOnInsert:{name:'gosite-seed',key:'${tok}',role:'admin',active:true}},{upsert:true})" \
-    >/dev/null 2>&1 || { warn "Could not register the API key; starter content not seeded."; return 0; }
-
-  if curl -sk --max-time 5 -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null \
-      | grep -q '"name":"home"'; then
-    return 0  # already seeded
-  fi
-
-  # The CMS can answer HTTP before it has fully wired its modules, so the
-  # first save can fail silently. Retry until the model shows up in the API.
-  local attempt=0
-  while [[ "${attempt}" -lt 5 ]]; do
-    attempt=$(( attempt + 1 ))
-    curl -sk --max-time 5 -X POST -H "api-key: ${tok}" -H 'Content-Type: application/json' \
-      -d '{"model":{"name":"home","type":"singleton","fields":[{"name":"headline","type":"text"},{"name":"intro","type":"textarea"}]}}' \
-      "${base}/api/models/save" >/dev/null 2>&1
-    if curl -sk --max-time 5 -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null \
-        | grep -q '"name":"home"'; then
-      ok "Created starter 'home' singleton (headline + intro). Edit it in the CMS."
-      return 0
-    fi
-    sleep 3
-  done
-  warn "Could not create the starter 'home' singleton; create it in the CMS admin."
+    >/dev/null 2>&1 || { warn "Could not register the API key; the app will not be able to read the CMS."; return 0; }
 }
