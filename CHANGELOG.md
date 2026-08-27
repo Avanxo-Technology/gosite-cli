@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.46.8 — the config box now shows what was filled in
+
+### Fixed
+
+- **The config template was written but never displayed.** The value was set
+  correctly — the console said so — yet the Configuration box stayed empty,
+  which from the outside is indistinguishable from nothing happening at all.
+
+  Cockpit's object field only repaints from an external change when
+  `this.code.editor` exists, and it looks that element up **once**, in
+  `mounted()`, while the code editor is an async component that has not
+  rendered yet. So `this.code` is `null` for the life of the field and the
+  watcher can never fire: the value changes, the box does not.
+
+  `field-code` publishes its editor on its own element
+  (`this.$el.editor = this.editor`), which is the handle now used to do what
+  that watcher would have done. Nothing is reached into that was not offered,
+  and an editor that has focus is left alone — whoever is typing wins.
+
+### Changed
+
+- **The script reports each step it takes** (`console.debug`, visible at
+  Chrome's *Verbose* level). This feature failed three times in ways that all
+  looked identical from the outside — not deployed, not hooked, hooked but
+  silent — and each time the silence cost more than the bug. Now every branch
+  says which one it took.
+
 ## 0.46.7 — the config template actually fires
 
 ### Fixed
