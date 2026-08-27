@@ -368,10 +368,13 @@ _sync_addons() {
     _sync_apply_expected "${dir}" "${exp}" "${force}" "cockpit/addons/"
   fi
 
-  # Cockpit caches registered addons; without clearing it, a refresh is
-  # invisible until the cache expires or is wiped by hand.
-  rm -f "${dir}/cockpit-storage/cache/modules.cache.php" \
-        "${dir}/cockpit-storage/cache/addons.cache.php"
+  # Cockpit caches which addons exist. Clearing it here is not enough on its
+  # own - addons are baked into the CMS image, so until the rebuild Cockpit is
+  # still running the old one and would just write the stale list back. The
+  # clear that counts happens as the container comes up (see
+  # clear_cockpit_module_cache); this one keeps a running CMS from serving a
+  # list we already know is wrong.
+  clear_cockpit_module_cache "${dir}"
 }
 
 # Adds any key present in the .env template that is missing from the project

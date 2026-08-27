@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.45.2 — a newly installed addon now actually appears in Cockpit
+
+### Fixed
+
+- **An addon installed into an existing project stayed invisible in the CMS
+  panel**, with its files sitting correctly inside the container the whole time.
+
+  Cockpit records which addons exist in `storage/cache/modules.cache.php` and
+  rebuilds that list only when its own version or env directory changes —
+  never when an addon appears. gosite knew this and cleared the cache on
+  install, but at the wrong moment, and the timing made things worse rather
+  than better:
+
+  1. `addons add` copies the addon to the host and clears the cache
+  2. the CMS is still running the **old image**, which has no such addon, and
+     regenerates the cache from it — a stale list, written right then
+  3. `--build` finally puts the addon in the image
+  4. the container comes up, finds a cache that is still "valid" by Cockpit's
+     rule, and reuses it — never seeing the addon
+
+  Clearing before the rebuild does not just fail to help; it guarantees a stale
+  list gets written and then survives. The clear now happens as the container
+  comes up (`gosite start` and `gosite restart`), which is the only point where
+  the image and the cache are guaranteed to agree. Cockpit rebuilds the list on
+  the first request.
+
+  This was not new with the blog — Forms and Replica had the same exposure
+  whenever they were added to a project after creation.
+
+### Upgrading
+
+For a project whose addon is not showing:
+
+```bash
+gosite restart <project>
+```
+
 ## 0.45.1 — the .env template was never shipped
 
 ### Fixed

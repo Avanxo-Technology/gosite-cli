@@ -27,6 +27,11 @@ cmd_restart() {
   ensure_network
   container_running "${GOSITE_PROXY_HOST}" || warn "Proxy is not running; local domains will not resolve. Run 'gosite infra up'."
 
+  # Addons are baked into the CMS image, and Cockpit caches which addons exist
+  # until its version changes. Clearing that cache as the container comes up is
+  # what makes a newly installed addon actually appear in the panel.
+  clear_cockpit_module_cache "${dir}"
+
   info "Restarting '${GOSITE_PROJECT}'"
   local args=(up -d --force-recreate)
   [[ "${build}" -eq 1 ]] && args+=(--build)

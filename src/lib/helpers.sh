@@ -239,6 +239,24 @@ resolve_project_dir() {
 # dies on a missing storage/cache directory. Idempotent, so it doubles as a
 # repair for projects created before this was handled and for fresh clones
 # (cockpit-storage/ is gitignored).
+# Drops Cockpit's module registry cache.
+#
+# Cockpit records which addons exist in storage/cache/modules.cache.php and only
+# rebuilds it when its own version or env dir changes - never when an addon
+# appears or disappears. Clearing it at install time is not enough and is in
+# fact worse: addons are baked into the CMS image, so between the install and
+# the rebuild Cockpit is still running the old image, regenerates the cache
+# without the new addon, and that stale file then survives the rebuild. The
+# addon is on disk inside the container and invisible in the panel.
+#
+# Clearing it here, on the way up, is the only point where the image and the
+# cache are guaranteed to agree. Cockpit rebuilds it on the first request.
+clear_cockpit_module_cache() {
+  local dir="$1"
+  rm -f "${dir}/cockpit-storage/cache/modules.cache.php" \
+        "${dir}/cockpit-storage/cache/addons.cache.php" 2>/dev/null || true
+}
+
 ensure_cockpit_storage() {
   local dir="$1" sub
   for sub in cache data logs tmp uploads; do
