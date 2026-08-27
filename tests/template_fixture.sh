@@ -78,6 +78,14 @@ for flavor in tailwind plain; do
   assert_no_placeholders "${out}"
   check $? "no unresolved placeholders (${flavor})"
 
+  # .env has to reach the project. It is a dotfile matching a pattern in the
+  # template .gitignore, which git applies to the template directory itself -
+  # so a version of this file named ".env" was ignored, never committed, and
+  # absent from every release, breaking create and sync everywhere. This check
+  # is what makes that a test failure instead of a support ticket.
+  [[ -f "${out}/.env" && -s "${out}/.env" ]]
+  check $? "rendered .env (${flavor})"
+
   # The overlay must have landed, in the right flavor.
   [[ -f "${out}/internal/blog/blog.go" && -f "${out}/internal/app/router_blog.go" \
      && -f "${out}/internal/views/pages/blog-article.html" ]]

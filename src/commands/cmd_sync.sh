@@ -386,7 +386,8 @@ _sync_env() {
   trap 'rm -rf "${GOSITE_SYNC_TMP}"' RETURN
   tmp="${GOSITE_SYNC_TMP}"
   load_project_render_vars "${dir}"
-  _copy_template_file "${GOSITE_ROOT}/templates" "${tmp}" ".env"
+  # The template is stored as "dotenv"; _copy_template_file writes it as .env.
+  _copy_template_file "${GOSITE_ROOT}/templates" "${tmp}" "dotenv"
   render_placeholders "${tmp}/.env"
 
   if [[ ! -f "${envfile}" ]]; then

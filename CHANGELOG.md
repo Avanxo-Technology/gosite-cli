@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.45.1 — the .env template was never shipped
+
+### Fixed
+
+- **`gosite create` did not write `.env`, and `gosite sync` failed outright**
+  with `cp: .../src/templates/.env: No such file or directory`.
+
+  `src/templates/.gitignore` is a template — it is copied into generated
+  projects so their `.env` stays out of git. But it sits inside the template
+  directory, so **git applied it to gosite's own repository too**, silently
+  ignoring `src/templates/.env`. The file existed on the machine it was written
+  on and nowhere else: never committed, absent from every release tarball,
+  missing from every installed copy.
+
+  Three symptoms, one cause. Without `.env` a new project also had no
+  `COCKPIT_API_TOKEN`, so `gosite start` skipped seeding the Cockpit API key
+  and the application authenticated with an empty key — which is why a key
+  created by hand in the CMS appeared not to work.
+
+  The template is now stored as `dotenv` and written as `.env` on copy, the
+  same mapping `gosite.env` → `.gosite.env` already used, so no gitignore
+  pattern can match it again. The rendered fixture now asserts that `.env`
+  reaches the project, which turns a recurrence into a failing test.
+
+- **The cache-purge button rendered in production.** `home.html` included it
+  unconditionally; `IsDev` was passed to the template and never read. The
+  button posts without a token, which the purge endpoint accepts only in
+  development, so in production it showed every visitor a control that answers
+  401. It is now behind `{{if .IsDev}}`, with a test asserting both directions.
+
+### Changed
+
+- **`.env.example` now defaults to `APP_ENV=development`.** It is a local
+  development starting point and nothing else: the production compose sets
+  `APP_ENV` itself and declares no `env_file`, and `.env` is gitignored, so
+  neither file ever reaches a server.
+
+### Upgrading
+
+This affects every project, not only ones using the blog: no `gosite sync`
+worked without it. Update gosite, then per project:
+
+```bash
+gosite sync <project> --env    # creates .env when missing, adds missing keys
+gosite start <project>         # seeds the Cockpit API key from it
+```
+
 ## 0.45.0 — a blog every site shares
 
 ### Added

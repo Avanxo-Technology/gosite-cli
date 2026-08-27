@@ -5,7 +5,10 @@
 {{define "content"}}
 <header class="page-header">
 	<h1>{{.Title}}</h1>
-	{{template "purge-button" .}}
+	{{/* Development only: the button posts without a token, which the purge
+	     endpoint accepts only in development. Rendering it in production would
+	     show every visitor a control that answers 401. */}}
+	{{if .IsDev}}{{template "purge-button" .}}{{end}}
 </header>
 
 <section class="panel">

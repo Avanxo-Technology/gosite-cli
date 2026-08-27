@@ -142,6 +142,9 @@ _template_is_noeol() {
 _template_in_scope() {
   local rel="$1" scope="$2"
   [[ "${scope}" == "full" ]] && return 0
+  # Scope is decided on the name the project will see, not the name in the
+  # repository.
+  rel="$(_template_target_name "${rel}")"
   case "${rel}" in
     docker-compose.yml|docker-compose.prod.yml|cockpit/config.php|.env|.env.example|.air.toml|.dockerignore) return 0 ;;
     deploy/*) return 0 ;;
@@ -152,10 +155,25 @@ _template_in_scope() {
 # Copies one template file to its destination with the byte semantics of the
 # generator it replaces: gosite.env becomes the runtime marker name, noeol
 # files lose their trailing newline.
+# Template files whose name in the repository is not the name they get in a
+# project. Both are dotfiles, and src/templates/.gitignore is itself a template
+# shipped to generated projects - so git applies it to THIS directory too and
+# silently ignores anything matching it. A template literally named ".env" was
+# therefore never committed and never reached a release, which broke both
+# create and sync. Storing it under a name git cannot ignore is what stops that
+# from happening again.
+_template_target_name() {
+  case "$1" in
+    gosite.env) printf '%s' "${GOSITE_MARKER}" ;;
+    dotenv)     printf '.env' ;;
+    *)          printf '%s' "$1" ;;
+  esac
+}
+
 _copy_template_file() {
   local src="$1" dest="$2" rel="$3"
-  local d="${rel}"
-  [[ "${rel}" == "gosite.env" ]] && d="${GOSITE_MARKER}"
+  local d
+  d="$(_template_target_name "${rel}")"
   mkdir -p "$(dirname "${dest}/${d}")"
   cp "${src}/${rel}" "${dest}/${d}"
   if _template_is_noeol "${d}"; then

@@ -1,0 +1,32 @@
+# Local development environment. Not committed.
+APP_ENV=development
+PORT=8080
+REDIS_URL=redis://__REDIS_HOST__:__REDIS_PORT__/0
+COCKPIT_URL=http://__PROJECT__-cms:80
+COCKPIT_API_TOKEN=__CMS_TOKEN__
+COCKPIT_SEC_KEY=__COCKPIT_SEC_KEY__
+
+# S3-compatible storage for assets (optional — set STORAGE_ADAPTER=s3 to enable).
+# MinIO runs in the shared gosite infra (native TLS with mkcert certs); these
+# defaults point at it. For production, set these from the Coolify dashboard
+# (AWS S3, Backblaze, etc.).
+# A custom S3_URL implies path-style addressing (MinIO, R2, Backblaze); leave
+# S3_URL unset for AWS S3 virtual-hosted addressing.
+STORAGE_ADAPTER=__STORAGE_ADAPTER__
+S3_URL=https://__MINIO_HOST__:9000
+S3_BUCKET=assets
+S3_REGION=us-east-1
+# Credentials generated per installation by 'gosite infra up' (stored in
+# ~/.gosite/infra/minio.env); create and sync propagate them here.
+S3_KEY=__S3_KEY__
+S3_SECRET=__S3_SECRET__
+S3_PREFIX=
+# S3_VERIFY=false is required for the local MinIO (self-signed mkcert cert, not
+# in the CMS container's trust store). Set it to true (or unset) in production
+# when the bucket endpoint has a valid TLS certificate.
+S3_VERIFY=false
+# Public base for CMS asset URLs (used when STORAGE_ADAPTER=s3). For local
+# MinIO this is the HTTPS Traefik route (minio.__TLD__), so the app and the
+# browser load assets CDN-style instead of through the /storage/uploads proxy.
+# In production point this at a CDN or bucket endpoint.
+S3_PUBLIC_URL=https://minio.__TLD__/assets
