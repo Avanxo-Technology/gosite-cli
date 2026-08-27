@@ -28,7 +28,7 @@ Facts established while exploring, by checking rather than assuming:
 | its plugin contract | a plain object; only `name` is required; no imports needed |
 | `@analytics/posthog` | does not exist |
 | third-party PostHog plugins | `analytics-plugin-posthog` v0.0.3 (2024-01-17), `@metro-fs/...` v1.14.0 (2024-04-23) — both stale |
-| official plugins' browser bundles | none — `google-tag-manager`, `google-analytics`, `simple-analytics` all 404 |
+| official plugins' browser bundles | **nine work**, at `dist/@analytics/<name>.min.js` — an earlier check guessed the wrong filename, got 404s, and concluded there were none. Four published plugins genuinely do not work standalone |
 | `html/template` in a `<script>` | escapes interpolated values as JS strings |
 | dynamic template names | not supported: `{{template .Provider .}}` fails to parse |
 
@@ -56,21 +56,23 @@ Facts established while exploring, by checking rather than assuming:
 ### Plugins over hand-written snippets
 
 The alternative was a template partial per provider, holding that provider's
-official snippet. It was seriously considered and nearly won: it has no
-dependencies, no JavaScript to test, and Go's contextual escaping covers the
-interpolation.
+official snippet.
 
-What settled it is that **the work is nearly identical**. No official plugin
-ships a browser bundle, so either way a small piece of per-provider code gets
-written — an HTML partial of about fifteen lines, or a plugin object of about
-forty. For that difference the library adds a uniform `track` / `page` /
-`identify` API across every provider, queues events raised before a provider
-finishes loading, and gives one place to switch everything off, which is where
-consent will hook when it arrives.
+The first version of this section argued the two were the same amount of work,
+because "no official plugin ships a browser bundle". **That was wrong** — the
+check looked for `dist/analytics-plugin-<name>.min.js` and took the 404 as
+proof of absence. The real path repeats the scope
+(`dist/@analytics/<name>.min.js`), and nine of the fourteen official plugins
+load standalone and expose a global.
 
-The honest framing is that this is not "more machinery for the same result" —
-it is the same amount of per-provider code, in JavaScript instead of HTML,
-carrying an event API on top.
+The correct comparison is much less close: with partials, every provider is
+per-provider code we write and maintain. With plugins, nine providers are a
+pinned URL and a global name — and only PostHog, which has no official plugin,
+is ours. Adding Mixpanel or Segment is a line in a registry.
+
+Four published plugins are unusable without a bundler and are deliberately
+excluded rather than silently broken; the reasons are recorded per provider so
+nobody adds them back on the assumption they were an oversight.
 
 ### Pinned CDN, not vendored
 
@@ -107,13 +109,31 @@ notices for weeks.
 A template function has precedent in `assetURL` and cannot be forgotten. The
 lookup happens inside the render, which is already cached with the page.
 
+### One loader file, no per-provider template code
+
+The component emits the configuration and two script tags; a single file,
+`static/js/analytics/analytics.js`, decides from that JSON which bundles to
+fetch. Adding a provider therefore touches the CMS select and that registry,
+and **never a template**.
+
+This replaced an earlier design where the component branched per provider
+through a chain of comparisons — `html/template` refuses a template name from a
+variable, so dispatch had to be explicit. Loading dynamically removes the
+dispatch entirely. The one exception is GTM's `<noscript>` fallback, which a
+script cannot supply, so it stays as the single piece of per-provider markup.
+
+The cost is a round trip: the bundles are fetched after the loader parses,
+rather than in parallel from the head. They are two to three kilobytes each,
+and the alternative was per-provider template code forever.
+
+Because page code can call `analytics.track()` before the bundles arrive, the
+loader installs a queue that records those calls and replays them on mount.
+Without it the first events — the ones that matter most — would throw or be
+swallowed.
+
 ### A collection, with the provider constrained
 
-Adding a key is adding an entry. Adding a *kind* of tool is a change to the
-base, because something must know how to render it — and `html/template`
-refuses dynamic template names, so the component dispatches through an explicit
-chain of comparisons. That chain is not elegant, and it is deliberately the
-visible form of a coupling that exists either way.
+Adding a key is adding an entry.
 
 Making `provider` a select over the providers that have a plugin keeps the two
 halves honest: an entry that the site cannot render cannot be saved, instead of

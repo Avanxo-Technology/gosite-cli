@@ -28,10 +28,10 @@ func TestNothingRenderedWhenNoIntegrations(t *testing.T) {
 }
 
 func TestGTMRendersHeadAndBody(t *testing.T) {
-	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{"id": "GTM-ABC1234"}}})
+	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{"containerId": "GTM-ABC1234"}}})
 
-	if !strings.Contains(out, `<script src="/static/js/analytics/plugin-gtm.js">`) {
-		t.Error("the GTM plugin was not loaded")
+	if !strings.Contains(out, `<script src="/static/js/analytics/analytics.js">`) {
+		t.Error("the loader was not included")
 	}
 	if !strings.Contains(out, "googletagmanager.com/ns.html?id=GTM-ABC1234") {
 		t.Error("the noscript fallback is missing from the body")
@@ -44,19 +44,21 @@ func TestGTMRendersHeadAndBody(t *testing.T) {
 func TestPostHogRendersNoBodyMarkup(t *testing.T) {
 	out := render(t, []Integration{{Provider: "posthog", Config: map[string]any{"key": "phc_x", "host": "https://us.i.posthog.com"}}})
 
-	if !strings.Contains(out, "plugin-posthog.js") {
-		t.Error("the PostHog plugin was not loaded")
+	if !strings.Contains(out, "/static/js/analytics/analytics.js") {
+		t.Error("the loader was not included")
 	}
 	if strings.Contains(out, "<noscript>") {
 		t.Error("emitted body markup for a provider that needs none")
 	}
 }
 
-// A provider with no plugin renders nothing rather than breaking the page.
-func TestUnknownProviderRendersNothing(t *testing.T) {
+// A provider the loader does not know still emits no per-provider markup. The
+// template no longer branches per provider at all, which is the point: adding
+// one touches the CMS and the loader, never this file.
+func TestUnknownProviderEmitsNoMarkup(t *testing.T) {
 	out := render(t, []Integration{{Provider: "hotjar", Config: map[string]any{"id": "1"}}})
-	if strings.Contains(out, "plugin-hotjar") {
-		t.Error("emitted a script for a provider with no plugin")
+	if strings.Contains(out, "<noscript>") {
+		t.Error("emitted body markup for a provider that needs none")
 	}
 }
 
@@ -64,7 +66,7 @@ func TestUnknownProviderRendersNothing(t *testing.T) {
 // be able to close the tag or execute.
 func TestConfigIsInertData(t *testing.T) {
 	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{
-		"id": `GTM-X</script><script>alert(1)</script>`,
+		"containerId": `GTM-X</script><script>alert(1)</script>`,
 	}}})
 
 	if strings.Contains(out, "<script>alert(1)</script>") {
@@ -76,7 +78,7 @@ func TestConfigIsInertData(t *testing.T) {
 }
 
 func TestConfigBlockIsValidJSON(t *testing.T) {
-	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{"id": "GTM-ABC1234"}}})
+	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{"containerId": "GTM-ABC1234"}}})
 
 	start := strings.Index(out, `id="analytics-config">`)
 	if start < 0 {

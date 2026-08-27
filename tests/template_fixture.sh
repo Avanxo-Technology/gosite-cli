@@ -99,7 +99,7 @@ for flavor in tailwind plain; do
   # The analytics client scripts are base templates, not an overlay: a project
   # gets them whether or not the addon is installed, and the component renders
   # nothing without integrations.
-  [[ -f "${out}/static/js/analytics/init.js" && -f "${out}/internal/analytics/analytics.go" \
+  [[ -f "${out}/static/js/analytics/analytics.js" && -f "${out}/internal/analytics/analytics.go" \
      && -f "${out}/internal/views/components/analytics.html" ]]
   check $? "analytics application half rendered (${flavor})"
 

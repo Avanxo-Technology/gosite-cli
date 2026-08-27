@@ -24,15 +24,30 @@ class Analytics extends \Lime\Helper {
     const MODEL = 'analyticsIntegrations';
 
     /**
-     * Providers the application has a plugin for.
+     * Providers the application can actually load.
      *
-     * Adding one here without adding its plugin produces an entry that saves
-     * and never renders, which is the failure this list exists to prevent.
-     * Keep it in step with static/js/analytics/.
+     * All but PostHog are official `analytics` plugins with a browser bundle,
+     * loaded from a pinned CDN URL by static/js/analytics/analytics.js. This
+     * list and that file's registry are the two halves of the same fact: a
+     * provider here with no entry there saves and never renders, which is the
+     * failure this list exists to prevent.
+     *
+     * Four published plugins are deliberately absent because their bundles do
+     * not work standalone - aws-pinpoint, intercom and snowplow reference
+     * things they do not ship, and simple-analytics publishes no browser build
+     * at all. See src/knowledge/analytics-providers.md.
      */
     const PROVIDERS = [
-        'gtm'     => 'Google Tag Manager',
-        'posthog' => 'PostHog',
+        'gtm'                 => 'Google Tag Manager',
+        'posthog'             => 'PostHog',
+        'google-analytics'    => 'Google Analytics 4',
+        'google-analytics-v3' => 'Google Analytics (Universal)',
+        'mixpanel'            => 'Mixpanel',
+        'segment'             => 'Segment',
+        'amplitude'           => 'Amplitude',
+        'hubspot'             => 'HubSpot',
+        'fullstory'           => 'FullStory',
+        'customerio'          => 'Customer.io',
     ];
 
     const ENVIRONMENTS = ['all', 'production', 'development'];
@@ -48,14 +63,29 @@ class Analytics extends \Lime\Helper {
      *            in sanitize().
      */
     const RULES = [
+        // Keys are the ones each plugin documents, stored verbatim and handed
+        // over untouched: no translation layer to drift out of step.
         'gtm' => [
-            'fields'  => ['id' => true],
-            'pattern' => ['id' => '/^GTM-[A-Z0-9]+$/'],
+            'fields'  => ['containerId' => true],
+            'pattern' => ['containerId' => '/^GTM-[A-Z0-9]+$/'],
         ],
         'posthog' => [
             'fields'  => ['key' => true, 'host' => true],
             'pattern' => ['key' => '/^[A-Za-z0-9_-]{16,200}$/'],
         ],
+        'google-analytics' => [
+            'fields'  => ['measurementIds' => true],
+        ],
+        'google-analytics-v3' => [
+            'fields'  => ['trackingId' => true],
+            'pattern' => ['trackingId' => '/^UA-[0-9]+-[0-9]+$/'],
+        ],
+        'mixpanel'   => ['fields' => ['token' => true]],
+        'segment'    => ['fields' => ['writeKey' => true]],
+        'amplitude'  => ['fields' => ['apiKey' => true]],
+        'hubspot'    => ['fields' => ['portalId' => true]],
+        'fullstory'  => ['fields' => ['org' => true]],
+        'customerio' => ['fields' => ['siteId' => true]],
     ];
 
     protected bool $modelsChecked = false;
@@ -98,7 +128,7 @@ class Analytics extends \Lime\Helper {
                     'info' => 'Only providers this site has a plugin for.',
                 ]),
                 $this->field('config', 'object', 'Configuration', true, [
-                    'info' => 'GTM: {"id":"GTM-XXXXXX"} · PostHog: {"key":"...","host":"https://us.i.posthog.com"}',
+                    'info' => 'The keys the provider documents. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."}',
                 ]),
                 $this->field('enabled', 'boolean', 'Enabled', false, [
                     'info' => 'Turn a provider off without losing its configuration.',
@@ -223,8 +253,11 @@ class Analytics extends \Lime\Helper {
     }
 
     protected function describe(string $provider, string $key): string {
-        if ($provider === 'gtm' && $key === 'id') {
+        if ($provider === 'gtm' && $key === 'containerId') {
             return 'a container id like GTM-ABC1234.';
+        }
+        if ($provider === 'google-analytics-v3' && $key === 'trackingId') {
+            return 'a tracking id like UA-123456-1.';
         }
         if ($provider === 'posthog' && $key === 'key') {
             return 'a project API key, usually starting with phc_.';

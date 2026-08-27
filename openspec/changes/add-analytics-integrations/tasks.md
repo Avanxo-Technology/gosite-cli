@@ -64,7 +64,7 @@
 ## 9. Verify end to end
 
 - [x] 9.1 Scaffold a throwaway project with the addon and confirm it works with no manual step
-- [x] 9.2 Walk every scenario in the three spec files against the running sandbox, not by reading code
+- [ ] 9.2 Walk every scenario in the three spec files against the running sandbox, not by reading code — done except the ones that need a browser (loading order, "no event lost to timing", "a provider that never loads", CSP), which are the same ground as 6.6
 - [x] 9.3 Confirm a development environment does not load a production-only integration
 - [ ] 9.4 On one real project, with one provider, confirm events arrive **in that provider's dashboard** — a script tag being present proves nothing
 

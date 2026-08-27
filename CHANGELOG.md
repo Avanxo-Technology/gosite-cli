@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.46.1 — nine providers, not two
+
+### Fixed
+
+- **The Analytics addon offered two providers when it could offer ten.** The
+  0.46.0 design rested on a check that concluded no official `analytics` plugin
+  publishes a browser bundle. That check looked for
+  `dist/analytics-plugin-<name>.min.js`, got 404s, and read absence into them.
+
+  The real path repeats the scope — `dist/@analytics/<name>.min.js` — and nine
+  of the fourteen official plugins load standalone and expose a global,
+  verified by evaluating each one and calling it. So the hand-written GTM
+  plugin was replacing a maintained official one for no reason.
+
+  The select now offers **Google Tag Manager, Google Analytics 4, Google
+  Analytics (Universal), Mixpanel, Segment, Amplitude, HubSpot, FullStory,
+  Customer.io and PostHog**. Only PostHog is ours, because it genuinely has no
+  official plugin.
+
+  Four published plugins are deliberately absent: `aws-pinpoint`, `intercom`
+  and `snowplow` ship bundles referencing code they do not include, and
+  `simple-analytics` publishes no browser build. Each reason is recorded in
+  `src/knowledge/analytics-providers.md` so nobody adds them back assuming an
+  oversight.
+
+### Changed
+
+- **One loader file instead of a script per plugin.** The component emits the
+  configuration and two script tags; `static/js/analytics/analytics.js` decides
+  which bundles to fetch from that JSON. Adding a provider is a line in its
+  registry plus an option in the CMS — **never a template change**. The chain
+  of per-provider comparisons in the component is gone, along with the reason
+  it existed.
+- **Events raised before the bundles arrive are no longer lost.** The loader
+  installs a queue standing in for `window.analytics` and replays it on mount.
+- **Configuration is stored under each provider's own key names** and handed to
+  the plugin untouched, so there is no translation layer to drift. GTM's field
+  is `containerId`, which is what its plugin calls it — **not** `id` as 0.46.0
+  stored it.
+
+### Upgrading
+
+Only affects projects that already added a GTM integration on 0.46.0: rename
+its `id` key to `containerId`. Nothing else changes.
+
+```bash
+gosite sync <project> --app
+gosite restart <project> --build
+```
+
 ## 0.46.0 — analytics keys as content
 
 ### Added

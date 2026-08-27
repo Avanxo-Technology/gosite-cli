@@ -20,9 +20,50 @@ upstream release change five client sites with no deployment, prevents
 subresource integrity, and costs a redirect. Every other dependency in
 `layout.html` is pinned too.
 
-**No official plugin publishes a browser bundle.** Checked: `google-tag-manager`,
-`google-analytics` and `simple-analytics` all 404 on their `dist/*.min.js`.
-They ship CJS and ESM only, for bundlers. That is why every plugin here is ours.
+### Official plugins DO ship browser bundles — at a non-obvious path
+
+This was got wrong once, so it is written down. The bundle is **not** at
+`dist/analytics-plugin-<name>.min.js`; guessing that path returns 404 and looks
+like proof the bundle does not exist. The real path repeats the scope:
+
+```
+https://unpkg.com/@analytics/<name>@<version>/dist/@analytics/<name>.min.js
+```
+
+Each is an IIFE assigning a global, so a plain `<script>` works. Verified by
+evaluating each one and calling it:
+
+| provider | pinned | global |
+| --- | --- | --- |
+| `gtm` | `google-tag-manager@0.6.0` | `analyticsGtagManager` |
+| `google-analytics` | `google-analytics@1.1.0` | `analyticsGa` |
+| `google-analytics-v3` | `google-analytics-v3@0.7.0` | `analyticsGa3` |
+| `mixpanel` | `mixpanel@0.4.0` | `analyticsMixpanel` |
+| `segment` | `segment@2.1.0` | `analyticsSegment` |
+| `amplitude` | `amplitude@0.1.3` | `analyticsAmplitude` |
+| `hubspot` | `hubspot@0.5.1` | `analyticsHubspot` |
+| `fullstory` | `fullstory@0.2.7` | `analyticsFullStory` |
+| `customerio` | `customerio@0.2.2` | `analyticsCustomerio` |
+
+### Four are published but unusable without a bundler
+
+Do not add these back without re-checking. Each fails while evaluating the
+bundle itself, before any DOM is involved:
+
+| provider | why |
+| --- | --- |
+| `aws-pinpoint` | `_objectSpread is not defined` — the bundle references a helper it does not ship |
+| `intercom` | `typeUtils is not defined` — same |
+| `snowplow` | `require$$0 is not defined` — CommonJS leaked into the browser build |
+| `simple-analytics` | no `dist/` at all; only `lib/` CJS and ESM |
+
+### Only PostHog is ours
+
+`@analytics/posthog` does not exist, and the third-party ones
+(`analytics-plugin-posthog` v0.0.3, `@metro-fs/...` v1.14.0) were both last
+published in 2024 while `posthog-js` still ships releases. So it is the one
+plugin written by hand, and it lives with the registry in
+`static/js/analytics/analytics.js`.
 
 ### The plugin contract
 
@@ -49,24 +90,20 @@ a plugin worth verifying in a browser rather than by reading.
 
 ## Google Tag Manager
 
-**Stores:** a container id.
+**Stores:** `containerId`.
 
 **Format:** `GTM-` followed by uppercase letters and digits, e.g. `GTM-ABC1234`.
 Google has lengthened these over time, so validate the shape, not a length.
 
-**Needs markup in two places** — this is a property of GTM, not something an
-editor should have to know:
+**Stored as `containerId`**, which is what the official plugin's config calls
+it — its full default config is `{debug, containerId, dataLayerName, dataLayer,
+preview, auth, execution}`. Configuration is stored under the provider's own
+key names and handed over untouched, so there is no translation layer to drift.
 
-| where | what |
-| --- | --- |
-| `<head>` | create `dataLayer`, push `gtm.start`, inject `googletagmanager.com/gtm.js?id=<id>` |
-| `<body>` | a `<noscript>` iframe to `googletagmanager.com/ns.html?id=<id>`, for visitors without JS |
-
-**Events** go to `window.dataLayer.push({...})`. GTM itself decides what to do
-with them, which is the whole point of it.
-
-**Ready when** `window.dataLayer` exists — the container queues internally, so
-pushes before the script arrives are not lost.
+**The `<body>` half is ours**: a `<noscript>` iframe to
+`googletagmanager.com/ns.html?id=<id>`, for visitors without JavaScript. A
+script cannot supply that, which is why it is the one piece of per-provider
+markup in the template.
 
 ## PostHog
 

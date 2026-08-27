@@ -15,6 +15,4 @@ internal/handlers/purge.go	isSiteWide(
 internal/cache/cache.go	func (c *Cache) PurgeAll(
 internal/views/components/analytics.html	define "analytics-head"
 internal/views/layout.html	template "analytics-head"
-static/js/analytics/init.js	analyticsPlugins
-static/js/analytics/plugin-gtm.js	googletagmanager.com/gtm.js
-static/js/analytics/plugin-posthog.js	posthog.init
+static/js/analytics/analytics.js	posthog.init
