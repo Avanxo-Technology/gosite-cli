@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.46.2 — a new provider now reaches projects that already exist
+
+### Fixed
+
+- **Adding a provider never reached a project that already had the model.**
+  `ensureModels()` leaves an existing model completely alone, which is right for
+  anything an editor owns — but the provider list is not that. It is derived
+  from code, so a project created on 0.46.0 stayed frozen at two providers no
+  matter how many later releases added, and a CMS rebuild changed nothing.
+
+  The addon now brings that one field's options up to date on admin load, and
+  nothing else: labels, other fields and anything an editor changed are
+  untouched, and no write happens when the list already matches. Verified
+  against a real Cockpit, including that a renamed field label and an edited
+  model description both survive.
+
+### Upgrading
+
+For a project that already has the Analytics model, the list appears after a
+CMS rebuild — a restart is not enough, because the addon is baked into the
+image:
+
+```bash
+gosite addons add Analytics <project>   # refresh the addon files
+gosite restart <project> --build
+```
+
+Then open the CMS admin once: the update happens on admin load.
+
 ## 0.46.1 — nine providers, not two
 
 ### Fixed

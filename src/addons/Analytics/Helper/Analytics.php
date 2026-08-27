@@ -106,14 +106,20 @@ class Analytics extends \Lime\Helper {
 
         $content = $this->app->module('content');
 
-        if (!$content || $content->exists(self::MODEL)) {
+        if (!$content) {
             return;
         }
 
-        $options = [];
+        $options = $this->providerOptions();
 
-        foreach (self::PROVIDERS as $value => $label) {
-            $options[] = ['value' => $value, 'label' => $label];
+        if ($content->exists(self::MODEL)) {
+            // The model is left alone - with one deliberate exception. The
+            // provider list is derived from code, not from anything an editor
+            // owns, so a release that adds a provider has to reach projects
+            // that already have the model. Without this, the select would be
+            // frozen at whatever shipped the day the project was created.
+            $this->syncProviderOptions($options);
+            return;
         }
 
         $content->createModel(self::MODEL, [
@@ -151,6 +157,66 @@ class Analytics extends \Lime\Helper {
             $this->app->helper('content.model')->cache(true);
         } catch (\Throwable $e) {
             $this->log('model cache rebuild failed: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * The select's options, from the providers the application can load.
+     */
+    protected function providerOptions(): array {
+        $options = [];
+
+        foreach (self::PROVIDERS as $value => $label) {
+            $options[] = ['value' => $value, 'label' => $label];
+        }
+
+        return $options;
+    }
+
+    /**
+     * Brings an existing model's provider list up to date, and nothing else.
+     *
+     * Narrow on purpose: only the options of the `provider` field are
+     * rewritten. Labels, other fields, anything an editor changed - untouched.
+     * Nothing is written when the list already matches, so this costs one
+     * comparison per admin load rather than a write.
+     */
+    protected function syncProviderOptions(array $options): void {
+
+        $content = $this->app->module('content');
+        $model   = $content->model(self::MODEL);
+
+        if (!$model || !isset($model['fields'])) {
+            return;
+        }
+
+        $changed = false;
+
+        foreach ($model['fields'] as $i => $field) {
+
+            if (($field['name'] ?? '') !== 'provider') {
+                continue;
+            }
+
+            if (($field['opts']['options'] ?? null) == $options) {
+                return;
+            }
+
+            $model['fields'][$i]['opts']['options'] = $options;
+            $changed = true;
+            break;
+        }
+
+        if (!$changed) {
+            return;
+        }
+
+        try {
+            $content->updateModel(self::MODEL, $model);
+            $this->app->helper('content.model')->cache(true);
+            $this->log('provider list updated to: '.implode(', ', array_keys(self::PROVIDERS)));
+        } catch (\Throwable $e) {
+            $this->log('could not update the provider list: '.$e->getMessage());
         }
     }
 
