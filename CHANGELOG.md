@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.46.12 — the loader also says when the library is blocked
+
+### Changed
+
+- Completes 0.46.11: a blocked or missing `analytics` library now says so
+  rather than sharing the silent "nothing configured" path. An ad blocker is
+  the most likely reason a page has integrations and sends nothing, and it
+  should not look like a configuration mistake.
+
 ## 0.46.11 — the site loader says whether it is tracking
 
 ### Changed

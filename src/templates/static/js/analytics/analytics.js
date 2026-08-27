@@ -151,9 +151,16 @@
 
   var integrations = readConfig();
 
-  if (!integrations.length || !window.Analytics) {
-    // Nothing configured, or the library itself did not load (offline, an ad
-    // blocker, a CDN outage). Either way there is nothing to do.
+  if (!integrations.length) {
+    // Nothing configured for this environment. Nothing to say either.
+    return;
+  }
+
+  if (!window.Analytics) {
+    // The library itself did not load: offline, an ad blocker, a CDN outage.
+    // Worth saying, because from a browser console that is indistinguishable
+    // from analytics simply being misconfigured.
+    console.warn('[analytics] the analytics library did not load; nothing will be tracked');
     return;
   }
 
