@@ -378,6 +378,37 @@ class Analytics extends \Lime\Helper {
     }
 
     /**
+     * The empty configuration each provider expects, for the editor to
+     * pre-fill when a provider is chosen.
+     *
+     * Derived from the same RULES the screen validates against, so the shape
+     * offered and the shape checked cannot drift apart.
+     */
+    public function configTemplates(): array {
+
+        $templates = [];
+
+        foreach (array_keys(self::PROVIDERS) as $provider) {
+
+            $skeleton = [];
+
+            foreach (array_keys(self::RULES[$provider]['fields'] ?? []) as $key) {
+                $skeleton[$key] = '';
+            }
+
+            $templates[$provider] = $skeleton;
+        }
+
+        // A hint of what a valid value looks like, where the shape is
+        // distinctive enough to be worth showing.
+        $templates['gtm']['containerId']                  = 'GTM-';
+        $templates['google-analytics-v3']['trackingId']   = 'UA-';
+        $templates['posthog']['host']                     = 'https://us.i.posthog.com';
+
+        return $templates;
+    }
+
+    /**
      * The scalar behind a select field.
      *
      * Cockpit's select always emits an array, even for a single choice, so

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.46.6 — the editor fills in the right keys for you
+
+### Added
+
+- **Choosing a provider pre-fills `config` with the keys it expects.** Pick
+  Google Analytics and the field becomes `{"measurementIds": ""}`; pick GTM and
+  it becomes `{"containerId": "GTM-"}`. The system already knew every provider's
+  shape — the screen validated against it and the README listed it — so making
+  an editor retype key names from memory was the actual cause of a GTM container
+  id ending up under Google Analytics.
+
+  The templates come from the same rules the screen validates against, so what
+  the editor is offered and what is checked cannot drift apart.
+
+  It hooks `fields-renderer-init`, the event Cockpit's field renderer fires with
+  itself, rather than poking at the DOM. And it is deliberately conservative:
+  it writes into `config` only when that cannot destroy anything typed. A field
+  filled in by hand survives a change of provider untouched — better a stale key
+  the screen complains about than lost work.
+
 ## 0.46.5 — a wrong key is a message, not a 500
 
 ### Fixed
