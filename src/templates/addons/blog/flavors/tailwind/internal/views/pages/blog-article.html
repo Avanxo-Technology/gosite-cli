@@ -1,0 +1,43 @@
+{{/*
+  A single article.
+
+  .Post.body is rich text from the CMS, so it is deliberately rendered as HTML.
+  That is safe only because it comes from an authenticated editor in Cockpit -
+  never widen this to anything a visitor can submit.
+*/}}
+{{define "head"}}{{template "seo" .Meta}}{{end}}
+
+{{define "content"}}
+<nav class="mb-8 text-sm text-slate-500">
+	<a class="hover:underline" href="/{{.Blog.slug}}">{{.Blog.title}}</a>
+</nav>
+
+<article>
+	<header class="mb-8">
+		<h1 class="text-3xl font-bold tracking-tight">{{.Post.title}}</h1>
+		<div class="mt-2 flex gap-3 text-sm text-slate-500">
+			{{with .Post.publishedAt}}<time>{{.}}</time>{{end}}
+			{{with .Author}}{{with .name}}<span>{{.}}</span>{{end}}{{end}}
+			{{with .Post.category}}{{with .title}}<span class="rounded bg-slate-100 px-2">{{.}}</span>{{end}}{{end}}
+		</div>
+	</header>
+
+	{{with assetURL .Post.cover}}
+	<img src="{{.}}" alt="" class="mb-8 aspect-[2/1] w-full rounded-lg object-cover">
+	{{end}}
+
+	<div class="prose max-w-none text-slate-800">
+		{{with .Post.body}}{{. | safeHTML}}{{end}}
+	</div>
+
+	{{with .Author}}
+	<footer class="mt-12 flex items-center gap-4 border-t border-slate-200 pt-6">
+		{{with assetURL .photo}}<img src="{{.}}" alt="" class="size-12 rounded-full object-cover">{{end}}
+		<div>
+			<div class="font-medium">{{.name}}</div>
+			{{with .bio}}<div class="text-sm text-slate-600">{{.}}</div>{{end}}
+		</div>
+	</footer>
+	{{end}}
+</article>
+{{end}}

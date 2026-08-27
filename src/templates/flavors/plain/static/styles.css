@@ -62,3 +62,17 @@ body {
 }
 .panel h2 { margin: 0; font-size: 1.25rem; }
 .panel p { margin: 0.5rem 0 0; color: var(--muted); }
+
+/* --- blog ---------------------------------------------------------------- */
+.blog-lede { color: var(--muted); margin: 0 0 2rem; }
+.blog-list { display: grid; gap: 1.5rem; }
+.blog-list h2 { margin: 0; font-size: 1.25rem; }
+.blog-list h2 a { color: inherit; text-decoration: none; }
+.blog-list h2 a:hover { text-decoration: underline; }
+.blog-meta { color: var(--muted); font-size: 0.875rem; display: flex; gap: 0.75rem; }
+.blog-cover { width: 100%; aspect-ratio: 2 / 1; object-fit: cover; border-radius: 0.5rem; margin-bottom: 1rem; }
+.blog-pager { display: flex; justify-content: space-between; align-items: center; margin-top: 2.5rem; font-size: 0.875rem; }
+.blog-body { margin-top: 2rem; line-height: 1.7; }
+.blog-body img { max-width: 100%; height: auto; }
+.blog-byline { display: flex; gap: 1rem; align-items: center; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border, #e2e8f0); }
+.blog-avatar { width: 3rem; height: 3rem; border-radius: 9999px; object-fit: cover; }

@@ -4,6 +4,7 @@
 package handlers
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/redis/go-redis/v9"
@@ -29,6 +30,22 @@ type Deps struct {
 // without any of them reaching for a global.
 type Handlers struct {
 	Deps
+
+	purgeHooks []PurgeHook
 }
 
 func New(d Deps) *Handlers { return &Handlers{Deps: d} }
+
+// PurgeHook is given what the CMS said changed, so a feature that owns cache
+// keys of its own can invalidate exactly those. Both arguments are empty when
+// the purge did not name anything - an older CMS, or the on-page button.
+type PurgeHook func(ctx context.Context, model, id string) error
+
+// OnPurge registers a hook run by POST /cache/purge.
+//
+// This is how a package that mounts its own pages - the blog, say - keeps its
+// cache keys correct without this package having to know they exist. Register
+// during mount, before the server starts serving.
+func (h *Handlers) OnPurge(hook PurgeHook) {
+	h.purgeHooks = append(h.purgeHooks, hook)
+}

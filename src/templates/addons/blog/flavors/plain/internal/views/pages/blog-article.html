@@ -1,0 +1,39 @@
+{{/*
+  A single article.
+
+  .Post.body is rich text from the CMS, so it is deliberately rendered as HTML.
+  That is safe only because it comes from an authenticated editor in Cockpit -
+  never widen this to anything a visitor can submit.
+*/}}
+{{define "head"}}{{template "seo" .Meta}}{{end}}
+
+{{define "content"}}
+<nav class="blog-meta"><a href="/{{.Blog.slug}}">{{.Blog.title}}</a></nav>
+
+<article>
+	<header class="page-header">
+		<h1>{{.Post.title}}</h1>
+	</header>
+	<div class="blog-meta">
+		{{with .Post.publishedAt}}<time>{{.}}</time>{{end}}
+		{{with .Author}}{{with .name}}<span>{{.}}</span>{{end}}{{end}}
+		{{with .Post.category}}{{with .title}}<span>{{.}}</span>{{end}}{{end}}
+	</div>
+
+	{{with assetURL .Post.cover}}<img class="blog-cover" src="{{.}}" alt="">{{end}}
+
+	<div class="blog-body">
+		{{with .Post.body}}{{. | safeHTML}}{{end}}
+	</div>
+
+	{{with .Author}}
+	<footer class="blog-byline">
+		{{with assetURL .photo}}<img class="blog-avatar" src="{{.}}" alt="">{{end}}
+		<div>
+			<strong>{{.name}}</strong>
+			{{with .bio}}<div class="blog-meta">{{.}}</div>{{end}}
+		</div>
+	</footer>
+	{{end}}
+</article>
+{{end}}

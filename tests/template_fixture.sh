@@ -68,9 +68,20 @@ for flavor in tailwind plain; do
 
   set_fixture_vars "${tw}"
   render_template_tree "${GOSITE_ROOT}/templates" "${out}" full
+
+  # Addon overlays are part of the product: an addon that also ships
+  # application code must render, format and compile like the base tree, or a
+  # project installing it gets a scaffold that does not build.
+  render_addon_overlay "${GOSITE_ROOT}/templates" "${out}" blog >/dev/null
+
   while IFS= read -r f; do render_placeholders "${f}"; done < <(find "${out}" -type f)
   assert_no_placeholders "${out}"
   check $? "no unresolved placeholders (${flavor})"
+
+  # The overlay must have landed, in the right flavor.
+  [[ -f "${out}/internal/blog/blog.go" && -f "${out}/internal/app/router_blog.go" \
+     && -f "${out}/internal/views/pages/blog-article.html" ]]
+  check $? "blog overlay rendered (${flavor})"
 
   # gofmt: the Go templates must be canonically formatted.
   if command -v gofmt >/dev/null 2>&1; then

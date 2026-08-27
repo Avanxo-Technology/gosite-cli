@@ -111,9 +111,73 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 // Purge removes fresh and stale keys so an editor never has to wait out the
 // TTL and stale content is cleared alongside fresh content.
 func (c *Cache) Purge(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
 	all := make([]string, 0, len(keys)*2)
 	for _, k := range keys {
 		all = append(all, k, staleKey(k))
 	}
 	return c.rdb.Del(ctx, all...).Err()
+}
+
+// purgeScanCount is how many keys each SCAN round asks for. Redis treats it as
+// a hint about how much work one round may do, so it trades round-trips against
+// how long the server is busy in any single call.
+const purgeScanCount = 200
+
+// PurgeGroup removes every key starting with prefix, fresh and stale alike.
+//
+// A page that exists once - the home page - is purged by name. A blog is many
+// keys instead: an article per slug and an index per page number, and
+// publishing one article changes what the index lists. Naming them all is not
+// possible from here, so the group is addressed by its prefix.
+//
+// SCAN is used rather than KEYS: KEYS walks the whole keyspace in one blocking
+// call, which on a shared Redis stalls every other user of it. SCAN is
+// incremental and cursor-based, so a large keyspace costs more round-trips
+// instead of one long stall.
+//
+// Deletion happens in batches as the scan proceeds, so memory stays bounded no
+// matter how many keys match.
+func (c *Cache) PurgeGroup(ctx context.Context, prefix string) error {
+	if prefix == "" {
+		// Refuse to interpret an empty prefix as "everything": that would let a
+		// caller with a missing value flush the whole cache by accident.
+		return nil
+	}
+
+	var (
+		cursor uint64
+		batch  []string
+	)
+
+	for {
+		keys, next, err := c.rdb.Scan(ctx, cursor, prefix+"*", purgeScanCount).Result()
+		if err != nil {
+			return err
+		}
+
+		batch = append(batch, keys...)
+
+		if len(batch) >= purgeScanCount {
+			if err := c.rdb.Del(ctx, batch...).Err(); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(batch) > 0 {
+		if err := c.rdb.Del(ctx, batch...).Err(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

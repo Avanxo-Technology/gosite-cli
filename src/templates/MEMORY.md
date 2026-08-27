@@ -22,7 +22,7 @@ There is no JavaScript build step and no SPA.
 | CMS database | MongoDB (shared `__MONGO_HOST__` container locally, own MongoDB in production) |
 | Cache key | `__PROJECT__:home_html`, TTL 10 minutes |
 | Cache behaviour | single-flight on misses; `/cache/purge` re-warms in the background |
-| CMS addons | four built-ins + optional Forms/Replica in `cockpit/addons/` (from gosite's addon library) |
+| CMS addons | five built-ins + optional Forms/Blog/Replica in `cockpit/addons/` (from gosite's addon library) |
 | Managed by | the `gosite` CLI - see ARCHITECTURE.md for the commands |
 
 ## Reading order
@@ -34,7 +34,10 @@ There is no JavaScript build step and no SPA.
 1. **Echo v5, not v4.** Handlers take `*echo.Context`, `c.Response()` returns
    `http.ResponseWriter`, `echo.NewHTTPError(code, string)` takes a string, and
    there is no `e.Shutdown`. Do not copy v4 snippets from the web.
-2. **Every route is registered in `internal/app/router.go`.** Nothing registers
+2. **Every route is registered in `internal/app/router.go`.** An optional
+   feature that ships its own routes appends to `mountFeatures` from its own
+   file (`router_blog.go`), so installing one never rewrites this file - but
+   the call is still visible here. Nothing else registers
    routes anywhere else.
 3. **Handlers reply through `h.reply(c)`** (`internal/handlers/response.go`),
    never by writing headers by hand.
@@ -64,7 +67,7 @@ There is no JavaScript build step and no SPA.
 | Task | Do this |
 | --- | --- |
 | Add a route | one file in `internal/handlers/`, one line in `internal/app/router.go` |
-| Add a page | template in `internal/views/pages/`, register it in `internal/views/render.go` |
+| Add a page | drop a template in `internal/views/pages/`; it registers itself by filename |
 | Add a component | file in `internal/views/components/`, call `{{template "name" .}}` |
 | Change content | edit it in Cockpit, then purge the cache |
 | Read the logs | `gosite logs __PROJECT__` |

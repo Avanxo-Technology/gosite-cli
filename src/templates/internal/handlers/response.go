@@ -28,6 +28,13 @@ func (h *Handlers) reply(c *echo.Context) Response {
 	return Response{h: h, c: c}
 }
 
+// Reply is reply() for packages that mount their own pages, so a feature like
+// the blog answers with the same cache header, the same error page and the same
+// logging as everything else instead of reinventing them.
+func (h *Handlers) Reply(c *echo.Context) Response {
+	return h.reply(c)
+}
+
 // Page sends a rendered HTML page and records whether it came from the cache.
 // The X-Cache header makes the cache observable in devtools without putting
 // anything in the markup.

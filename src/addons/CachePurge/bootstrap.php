@@ -21,8 +21,14 @@
  * its HTTP status or transport error so stale cache after an outage can be
  * diagnosed - but it never blocks the CMS save or replication run that
  * triggered it.
+ *
+ * $model and $item name what changed, straight from the content.item.save
+ * event. They travel as a JSON body so an app serving more than one cached
+ * page can invalidate precisely what the edit affected instead of dropping
+ * everything. Both are optional and the body is additive: an older Go app
+ * ignores it and purges its home page exactly as before.
  */
-$purge = function() {
+$purge = function($model = null, $item = null) {
 
     static $disabledLogged = false;
 
@@ -40,13 +46,30 @@ $purge = function() {
     $endpoint = rtrim($url, '/') . '/cache/purge';
     $token    = getenv('COCKPIT_API_TOKEN') ?: '';
 
+    // Replica calls this helper with no arguments, and the item is an array
+    // when it arrives from content.item.save. Accept a bare id too, so the
+    // admin screens can name a single entry.
+    $id = is_array($item) ? ($item['_id'] ?? null) : $item;
+
+    $body = json_encode(array_filter([
+        'model' => $model ? (string)$model : null,
+        'id'    => $id ? (string)$id : null,
+    ], fn($v) => $v !== null));
+
+    $headers = ['Content-Type: application/json'];
+
+    if ($token) {
+        $headers[] = 'X-Api-Key: ' . $token;
+    }
+
     $ch = curl_init($endpoint);
     curl_setopt_array($ch, [
         CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $body,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT        => 5,
         CURLOPT_CONNECTTIMEOUT => 3,
-        CURLOPT_HTTPHEADER     => $token ? ['X-Api-Key: ' . $token] : [],
+        CURLOPT_HTTPHEADER     => $headers,
     ]);
     curl_exec($ch);
 
@@ -62,8 +85,11 @@ $purge = function() {
     }
 };
 
-// Hook regular CMS saves (admin publish / save).
-$this->on('content.item.save', $purge);
+// Hook regular CMS saves (admin publish / save). The event hands over the
+// model name and the saved item, which travel to the app as the purge body.
+$this->on('content.item.save', function($model, $item) use ($purge) {
+    $purge($model, $item);
+});
 
 // Expose for Replica: $app->helper('cachepurge')() after replication.
 $this->helpers['cachepurge'] = $purge;

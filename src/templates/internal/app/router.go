@@ -5,7 +5,19 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+
+	"__MODULE__/internal/handlers"
 )
+
+// mountFeatures are optional features that bring their own routes. A feature
+// installed into this project registers itself here from its own file (the
+// blog does this in router_blog.go), so installing or removing one is adding
+// or deleting files - this file is never rewritten by a tool and stays yours
+// to edit.
+//
+// The call still happens below, in plain sight: the HTTP surface remains
+// readable from this file alone.
+var mountFeatures []func(*echo.Echo, *handlers.Handlers)
 
 // NewRouter wires middleware and routes. This is the single source of truth
 // for the app's HTTP surface - nothing registers routes anywhere else.
@@ -42,6 +54,14 @@ func NewRouter(a *App) *echo.Echo {
 	e.GET("/", h.Home)                   // the page, served from cache
 	e.POST("/cache/purge", h.PurgeCache) // htmx button + Cockpit webhook
 	e.GET("/healthz", h.Health)          // liveness, checks Redis
+
+	// Optional features, mounted after the routes above so those keep
+	// precedence. The blog serves /{blog} and /{blog}/{slug}; echo resolves a
+	// concrete path segment before a `:param` one regardless of registration
+	// order, so a page this file serves always wins over a blog slug.
+	for _, mount := range mountFeatures {
+		mount(e, h)
+	}
 
 	return e
 }

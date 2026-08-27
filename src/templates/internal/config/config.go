@@ -18,6 +18,12 @@ type Config struct {
 	Environment    string
 	StorageAdapter string
 	S3PublicURL    string
+
+	// SiteURL is the site's own public origin, e.g. https://example.com. Used
+	// to build absolute URLs a page cannot infer from the request alone -
+	// canonical links and Open Graph tags, which crawlers require absolute.
+	// Empty is allowed: those tags are then omitted rather than emitted wrong.
+	SiteURL string
 }
 
 func Load() Config {
@@ -31,6 +37,7 @@ func Load() Config {
 		Environment:    os.Getenv("APP_ENV"),
 		StorageAdapter: env("STORAGE_ADAPTER", "local"),
 		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),
+		SiteURL:        strings.TrimRight(os.Getenv("SITE_URL"), "/"),
 	}
 }
 

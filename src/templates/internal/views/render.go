@@ -54,6 +54,15 @@ func NewRenderer(assetBase string) *Renderer {
 
 	funcs := template.FuncMap{
 		"assetURL": assetURL,
+		// safeHTML renders a value as markup instead of escaping it, for rich
+		// text an editor wrote in the CMS. This deliberately disables the XSS
+		// protection html/template otherwise gives you, so it is only ever
+		// correct for content authored by an authenticated Cockpit editor.
+		// Never reach for it to render anything a visitor can submit.
+		"safeHTML": func(v any) template.HTML {
+			s, _ := v.(string)
+			return template.HTML(s)
+		},
 		// toJSON marshals a value for Alpine x-data. It returns a plain string
 		// so html/template escapes it in the attribute, keeping XSS out.
 		"toJSON": func(v any) (string, error) {
@@ -72,18 +81,45 @@ func NewRenderer(assetBase string) *Renderer {
 		))
 	}
 
-	pages := map[string]*template.Template{
-		"home": page("home"),
+	// Every file under pages/ becomes a page, named after the file. Adding a
+	// page is dropping a file in - nothing to register here, and a feature that
+	// brings its own pages (the blog) does not have to edit this file to
+	// install or to be removed again.
+	entries, err := files.ReadDir("pages")
+	if err != nil {
+		panic("views: cannot read embedded pages: " + err.Error())
+	}
+
+	pages := map[string]*template.Template{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".html")
+		pages[name] = page(name)
 	}
 
 	// Force the contextual-escaping pass now so a broken template panics
 	// at boot instead of silently failing every request. probeData must
 	// include every top-level key the handler passes to Page(); missing
 	// keys cause "index of untyped nil" — add them here.
+	// The union of what every page reads. Keys a page does not use cost
+	// nothing, so this stays a superset rather than something per page.
 	probeData := map[string]any{
 		"Title":   "",
 		"Content": map[string]any{},
 		"IsDev":   true,
+		// Blog pages, present whether or not the blog is installed.
+		"Blog":    map[string]any{},
+		"Post":    map[string]any{},
+		"Posts":   []map[string]any{},
+		"Author":  map[string]any{},
+		"Meta":    map[string]any{},
+		"Page":    1,
+		"HasMore": false,
+		"PrevURL": "",
+		"NextURL": "",
+		"Total":   0,
 	}
 	for name, t := range pages {
 		if err := t.ExecuteTemplate(io.Discard, "layout", probeData); err != nil {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -35,8 +36,23 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 		}
 	}
 
-	if err := h.Cache.Purge(c.Request().Context(), homeCacheKey); err != nil {
+	ctx := c.Request().Context()
+
+	if err := h.Cache.Purge(ctx, homeCacheKey); err != nil {
 		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
+	}
+
+	// The CMS names what changed so features owning their own keys can be
+	// precise. The body is optional: the on-page button sends none, and so does
+	// a CMS older than this app. Anything unreadable is treated as "not named"
+	// rather than as an error - the home purge above already happened, and
+	// failing here would report a purge that in fact took place.
+	model, id := purgeTarget(c)
+
+	for _, hook := range h.purgeHooks {
+		if err := hook(ctx, model, id); err != nil {
+			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
+		}
 	}
 
 	go h.warmHome()
@@ -52,4 +68,22 @@ func (h *Handlers) warmHome() {
 	if _, _, err := h.Cache.HTML(context.Background(), homeCacheKey, h.renderHome); err != nil {
 		h.Log.Warn("cache re-warm failed", "key", homeCacheKey, "err", err)
 	}
+}
+
+// purgeTarget reads the optional {"model": "...", "id": "..."} body naming what
+// the CMS changed. Missing, malformed or empty bodies yield two empty strings.
+func purgeTarget(c *echo.Context) (model, id string) {
+	body := c.Request().Body
+	if body == nil {
+		return "", ""
+	}
+
+	var payload struct {
+		Model string `json:"model"`
+		ID    string `json:"id"`
+	}
+	if err := json.NewDecoder(body).Decode(&payload); err != nil {
+		return "", ""
+	}
+	return payload.Model, payload.ID
 }

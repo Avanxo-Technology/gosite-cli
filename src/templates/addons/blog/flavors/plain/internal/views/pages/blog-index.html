@@ -1,0 +1,38 @@
+{{/*
+  Blog index: the articles of one blog, newest first.
+
+  .Posts are Cockpit documents, so every field is read defensively - an article
+  an editor has not finished filling in still has to render.
+*/}}
+{{define "head"}}{{template "seo" .Meta}}{{end}}
+
+{{define "content"}}
+<header class="page-header">
+	<h1>{{.Title}}</h1>
+</header>
+{{with .Blog.description}}<p class="blog-lede">{{.}}</p>{{end}}
+
+{{if .Posts}}
+<div class="blog-list">
+	{{range .Posts}}
+	<article class="panel">
+		{{with assetURL .cover}}<img class="blog-cover" src="{{.}}" alt="">{{end}}
+		<h2><a href="/{{$.Blog.slug}}/{{.slug}}">{{.title}}</a></h2>
+		<div class="blog-meta">
+			{{with .publishedAt}}<time>{{.}}</time>{{end}}
+			{{with .author}}{{with .name}}<span>{{.}}</span>{{end}}{{end}}
+		</div>
+		{{with .excerpt}}<p>{{.}}</p>{{end}}
+	</article>
+	{{end}}
+</div>
+
+<nav class="blog-pager">
+	<span>{{if gt .Page 1}}<a href="{{.PrevURL}}">&larr; Newer</a>{{end}}</span>
+	<span class="blog-meta">Page {{.Page}}</span>
+	<span>{{if .HasMore}}<a href="{{.NextURL}}">Older &rarr;</a>{{end}}</span>
+</nav>
+{{else}}
+<section class="panel"><p>No articles published yet.</p></section>
+{{end}}
+{{end}}

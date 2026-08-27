@@ -30,6 +30,8 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   path   <name>      Print a project's absolute path
   remove <name>      Delete a project entirely (--keep-source keeps the code)
   sync   [name]      Re-apply gosite's templates (compose, addons, .env); never writes docker-compose.prod.yml
+  addons <cmd>       Install addons into an existing project
+                     list | add <name>... | remove <name>...
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
@@ -78,6 +80,7 @@ dispatch() {
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     sync)            load_command sync;   cmd_sync   "$@" ;;
+    addons)          load_command addons; cmd_addons "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
     dns)             load_command dns; cmd_dns ;;

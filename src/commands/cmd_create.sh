@@ -111,6 +111,19 @@ cmd_create() {
 
   _write_builtin_addons "${PROJECT_DIR}"
 
+  # An addon that also has an application side (the blog serves its own pages)
+  # overlays its Go package, its router wiring and its templates now, so the
+  # placeholder pass below covers them like every other generated file.
+  if [[ "${INSTALL_ADDONS}" -eq 1 ]]; then
+    local addon
+    for addon in ${ADDONS}; do
+      addon_has_overlay "${addon}" || continue
+      render_addon_overlay "${GOSITE_ROOT}/templates" "${PROJECT_DIR}" \
+        "$(printf '%s' "${addon}" | tr '[:upper:]' '[:lower:]')" >/dev/null
+      info "Added the ${addon} application pages"
+    done
+  fi
+
   local f
   while IFS= read -r f; do render_placeholders "${f}"; done < <(
     find "${PROJECT_DIR}" -type f ! -name '*.png' ! -name '*.ico'
@@ -214,7 +227,7 @@ _prompt_addons() {
 
   printf "\n"
   printf "${C_BOLD}Cockpit addons${C_NC}\n"
-  printf "  ${C_DIM}Optional: public forms, content replication.${C_NC}\n"
+  printf "  ${C_DIM}Optional: public forms, a blog, content replication.${C_NC}\n"
 
   local selected=""
 
@@ -222,6 +235,10 @@ _prompt_addons() {
   local reply
   read -r reply
   [[ "${reply}" =~ ^[Yy]$ ]] && selected="Forms"
+
+  printf "${C_YELLOW}?${C_NC} Install Blog ${C_DIM}(articles at /{blog}/{slug}, with CMS models and pages)${C_NC} [y/N] "
+  read -r reply
+  [[ "${reply}" =~ ^[Yy]$ ]] && selected="${selected:+${selected} }Blog"
 
   printf "${C_YELLOW}?${C_NC} Install Replica ${C_DIM}(content replication between Cockpit instances)${C_NC} [y/N] "
   read -r reply

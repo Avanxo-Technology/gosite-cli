@@ -1,0 +1,19 @@
+# What this addon's application half needs from the project's own Go code.
+#
+# gosite never rewrites internal/*.go - that is the project's source, and sync
+# deliberately leaves it alone. So an addon that calls into it can only be
+# installed where those seams already exist. Without this check the install
+# would succeed and the project would simply stop compiling.
+#
+# Format: <path><TAB><literal marker that must appear in the file>
+# Lines starting with # are ignored.
+internal/cms/collection.go	func (c *Client) Items(
+internal/cache/cache.go	func (c *Cache) PurgeGroup(
+internal/config/config.go	SiteURL string
+internal/handlers/handlers.go	func (h *Handlers) OnPurge(
+internal/handlers/purge.go	purgeTarget(
+internal/handlers/response.go	func (h *Handlers) Reply(
+internal/app/router.go	var mountFeatures
+internal/views/render.go	files.ReadDir("pages")
+internal/views/components/seo.html	define "seo"
+internal/views/layout.html	block "head"

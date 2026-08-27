@@ -1,0 +1,19 @@
+{{/*
+  Document-head metadata for a page. Called as {{template "seo" .Meta}} from a
+  page's "head" block.
+
+  Every tag is omitted when its value is empty rather than emitted blank: a
+  crawler reading an empty og:image or a canonical pointing nowhere is worse
+  off than one reading no tag at all. Canonical and og:url are absolute, which
+  is why they need SITE_URL and disappear without it.
+*/}}
+{{define "seo"}}
+{{with .Description}}<meta name="description" content="{{.}}">{{end}}
+{{with .Canonical}}<link rel="canonical" href="{{.}}">{{end}}
+<meta property="og:type" content="article">
+<meta property="og:title" content="{{.Title}}">
+{{with .Description}}<meta property="og:description" content="{{.}}">{{end}}
+{{with .Canonical}}<meta property="og:url" content="{{.}}">{{end}}
+{{with .Image}}<meta property="og:image" content="{{.}}">{{end}}
+<meta name="twitter:card" content="{{if .Image}}summary_large_image{{else}}summary{{end}}">
+{{end}}

@@ -185,7 +185,7 @@ render_template_tree() {
     rel="${f#./}"
     _template_in_scope "${rel}" "${scope}" || continue
     _copy_template_file "${src}" "${dest}" "${rel}"
-  done < <(cd "${src}" && find . -type f ! -path './flavors/*' -print0)
+  done < <(cd "${src}" && find . -type f ! -path './flavors/*' ! -path './addons/*' -print0)
 
   if [[ "${scope}" == "full" ]]; then
     while IFS= read -r -d '' f; do
@@ -198,6 +198,79 @@ render_template_tree() {
       cat "${src}/flavors/${flavor}/MEMORY.md.part" >> "${dest}/MEMORY.md"
     fi
   fi
+}
+
+# render_addon_overlay <template-root> <dest> <addon>
+#
+# Applies the application-side half of an optional addon: the Go package it
+# brings, the file that wires it into the router, and its page templates for the
+# current styling flavor.
+#
+# Addons are overlays rather than base template files so a project that did not
+# ask for one never carries its code. The wiring is always a file of its own -
+# never an edit to router.go - because projects edit that file by hand and sync
+# preserves it; installing is therefore only ever adding files.
+#
+# Placeholder substitution is NOT done here; callers run render_placeholders on
+# what this wrote, exactly like the rest of the tree.
+#
+# Prints every path it wrote, relative to <dest>, so callers can record them in
+# the sync manifest.
+render_addon_overlay() {
+  local src="$1" dest="$2" addon="$3"
+  local root="${src}/addons/${addon}"
+  local flavor="plain"
+  [[ "${TAILWIND:-0}" -eq 1 ]] && flavor="tailwind"
+
+  [[ -d "${root}" ]] || return 0
+
+  local f rel
+  while IFS= read -r -d '' f; do
+    rel="${f#./}"
+    _copy_template_file "${root}" "${dest}" "${rel}"
+    printf '%s\n' "${rel}"
+  done < <(cd "${root}" && find . -type f ! -path './flavors/*' -print0)
+
+  while IFS= read -r -d '' f; do
+    rel="${f#./}"
+    _copy_template_file "${root}/flavors/${flavor}" "${dest}" "${rel}"
+    printf '%s\n' "${rel}"
+  done < <(cd "${root}/flavors/${flavor}" 2>/dev/null && find . -type f -print0)
+}
+
+# Reports what an addon's application half needs but the project does not have.
+#
+# gosite never rewrites internal/*.go: that is the project's own source, which
+# sync preserves on purpose. An addon whose pages call into it can therefore
+# only be installed where those seams already exist - otherwise the install
+# succeeds and the project stops compiling, which is a worse outcome than
+# refusing.
+#
+# Prints one "path<TAB>marker" line per unmet requirement; prints nothing and
+# returns 0 when the project is ready.
+addon_unmet_requirements() {
+  local dir="$1" addon="$2"
+  local lower req
+  lower="$(printf '%s' "${addon}" | tr '[:upper:]' '[:lower:]')"
+  req="${GOSITE_ROOT}/templates/addons/${lower}/REQUIRES"
+
+  [[ -f "${req}" ]] || return 0
+
+  local path marker
+  while IFS=$'\t' read -r path marker; do
+    [[ -n "${path}" ]] || continue
+    case "${path}" in \#*) continue ;; esac
+    [[ -n "${marker}" ]] || continue
+
+    if [[ ! -f "${dir}/${path}" ]] || ! grep -qF "${marker}" "${dir}/${path}"; then
+      printf '%s\t%s\n' "${path}" "${marker}"
+    fi
+  done < "${req}"
+}
+
+# Does gosite ship an application-side overlay for this Cockpit addon?
+addon_has_overlay() {
+  [[ -d "${GOSITE_ROOT}/templates/addons/$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" ]]
 }
 
 # A rendered file must never keep a __PLACEHOLDER__ token: a template and the

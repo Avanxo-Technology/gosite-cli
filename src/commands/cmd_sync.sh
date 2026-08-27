@@ -25,7 +25,7 @@
 #
 
 cmd_sync() {
-  local do_compose=0 do_compose_prod=0 do_force=0 do_addons=0 do_env=0 do_build=0 do_list=0 do_report=0 strict=0 name=""
+  local do_compose=0 do_compose_prod=0 do_force=0 do_addons=0 do_env=0 do_build=0 do_list=0 do_report=0 do_app=0 strict=0 name=""
   local ADDONS=""
 
   while [[ $# -gt 0 ]]; do
@@ -34,8 +34,10 @@ cmd_sync() {
       --compose-prod)  do_compose_prod=1; shift ;;
       --force)         do_force=1; shift ;;
       --addons)        do_addons=1; shift; [[ -n "${1:-}" && "${1}" != -* ]] && ADDONS="$1" && shift ;;
+      --app)           do_app=1; shift ;;
       --env)           do_env=1; shift ;;
       --build)         do_build=1; shift ;;
+      --list-addons)   do_list=1; shift ;;
       --report)        do_report=1; shift ;;
       --strict)        strict=1; shift ;;
       -h|--help)
@@ -55,6 +57,11 @@ Flags:
   --addons        Refresh every Cockpit addon present in the project from
                   gosite's addon library (built-ins + any optional ones),
                   or install the named addons: --addons "Forms Replica"
+  --app           Bring internal/ up to the current templates, behind the same
+                  manifest guard: plumbing gosite wrote is refreshed, anything
+                  you edited is preserved and reported. Opt-in, because every
+                  other mode leaves your Go code alone. Needed before adding an
+                  addon that ships application pages into an old project.
   --env           Add any keys missing from the .env template to the project
                   .env (never overwrites existing values or secrets)
   --report        Show how the project diverges from the current templates,
@@ -78,6 +85,7 @@ USAGE
   done
 
   if [[ "${do_list}" -eq 1 ]]; then
+    source "${GOSITE_ROOT}/lib/templates.sh"
     _sync_list_addons
     return 0
   fi
@@ -94,7 +102,7 @@ USAGE
   fi
 
   # No action flag -> sync everything that is safe to re-apply.
-  [[ "${do_compose}" -eq 1 || "${do_addons}" -eq 1 || "${do_env}" -eq 1 || "${do_compose_prod}" -eq 1 ]] || {
+  [[ "${do_compose}" -eq 1 || "${do_addons}" -eq 1 || "${do_env}" -eq 1 || "${do_compose_prod}" -eq 1 || "${do_app}" -eq 1 ]] || {
     do_compose=1; do_addons=1; do_env=1
   }
 
@@ -116,7 +124,13 @@ USAGE
   GOSITE_SYNC_TMP="$(mktemp -d)"
   trap 'rm -rf "${GOSITE_SYNC_TMP}"' RETURN
   local exp="${GOSITE_SYNC_TMP}/expected"
-  _render_expected_tree "${exp}" "${dir}"
+  # --app compares against the application sources too, which the default
+  # scope does not render.
+  _render_expected_tree "${exp}" "${dir}" "$([[ "${do_app}" -eq 1 ]] && printf full || printf sync)"
+
+  if [[ "${do_app}" -eq 1 ]]; then
+    _sync_app "${dir}" "${exp}" "${do_force}"
+  fi
 
   if [[ "${do_compose}" -eq 1 ]]; then
     _sync_apply_expected "${dir}" "${exp}" "${do_force}" \
@@ -145,6 +159,30 @@ USAGE
   fi
 
   ok "Sync complete. Start the project with 'gosite start $(basename "${dir}")'"
+}
+
+# Brings the application sources (internal/) up to the current templates.
+#
+# Deliberately opt-in. Every other sync mode promises never to touch your Go
+# code, and that promise is worth keeping by default: internal/ is where the
+# project's own work lives. But gosite's own scaffolding lives there too -
+# the cache, the CMS client, the renderer, the router seam - and a project
+# created a year ago cannot install an addon that calls into scaffolding it
+# does not have.
+#
+# The manifest guard is what makes this safe: a file byte-identical to what
+# gosite wrote is refreshed, a file you have edited is preserved and reported.
+# So handler code you wrote survives, and plumbing you never opened catches up.
+#
+# Files an addon installed (its pages, its package) are not rendered into the
+# expected tree and are therefore untouched here; refresh those with
+# 'gosite addons add <name>'.
+_sync_app() {
+  local dir="$1" exp="$2" force="$3"
+
+  info "Syncing application sources (internal/)"
+  _sync_apply_expected "${dir}" "${exp}" "${force}" "internal/"
+  warn "The application is compiled, so rebuild it: gosite restart $(basename "${dir}") --build"
 }
 
 # Applies the expected tree to the project, file by file, behind the manifest
@@ -242,6 +280,72 @@ _sync_compose_prod_force() {
   ok "Re-rendered docker-compose.prod.yml from the current template"
 }
 
+# Installs the application-side half of an addon that has one.
+#
+# Only ever adds files. The router is never rewritten: an addon wires itself
+# from a file of its own (internal/app/router_<addon>.go), which is why this can
+# run against a project whose router.go has been edited by hand - the case sync
+# exists to protect. Re-running overwrites the files gosite owns and leaves
+# everything else alone, so it is idempotent by construction: no duplicated
+# wiring, no duplicated routes.
+_sync_addon_overlays() {
+  local dir="$1" want="$2" force="${3:-0}" one lower wrote
+
+  # The overlay carries __PROJECT__/__MODULE__ like every template, so the
+  # substitution variables have to describe THIS project before anything is
+  # rendered - not whatever a previous call left behind.
+  load_project_render_vars "${dir}"
+
+  for one in ${want}; do
+    addon_has_overlay "${one}" || continue
+
+    lower="$(printf '%s' "${one}" | tr '[:upper:]' '[:lower:]')"
+
+    # Render into a staging tree first, so a file the project has customised is
+    # never clobbered before it can be compared. Same guard the rest of sync
+    # uses: matching the recorded hash means gosite still owns the file and may
+    # refresh it; differing means somebody edited it and it is theirs.
+    local stage
+    stage="$(mktemp -d)"
+    wrote="$(render_addon_overlay "${GOSITE_ROOT}/templates" "${stage}" "${lower}")"
+
+    if [[ -z "${wrote}" ]]; then
+      rm -rf "${stage}"
+      continue
+    fi
+
+    local rel recorded current kept=0 installed=0
+    while IFS= read -r rel; do
+      [[ -n "${rel}" ]] || continue
+
+      render_placeholders "${stage}/${rel}"
+
+      if [[ -f "${dir}/${rel}" && "${force}" -ne 1 ]]; then
+        recorded="$(manifest_get "${dir}" "${rel}")"
+        current="$(sha256_file "${dir}/${rel}")"
+
+        if [[ -n "${recorded}" && "${recorded}" != "${current}" ]]; then
+          warn "Preserved ${rel} (locally modified; re-apply with: gosite sync --addons ${one} --force)"
+          kept=$((kept + 1))
+          continue
+        fi
+      fi
+
+      mkdir -p "$(dirname "${dir}/${rel}")"
+      cp "${stage}/${rel}" "${dir}/${rel}"
+      printf '%s\n' "${rel}" | manifest_update "${dir}"
+      installed=$((installed + 1))
+    done <<< "${wrote}"
+
+    rm -rf "${stage}"
+
+    [[ "${kept}" -gt 0 ]] && info "${kept} ${one} file(s) left as you edited them; re-run with --force to take the template version."
+
+    ok "Installed the ${one} application pages (${installed} file(s))"
+    warn "${one} changes the application as well as the CMS: rebuild both the CMS image and the app - restarting is not enough."
+  done
+}
+
 # Refreshes every addon the project already has (built-ins are always copied,
 # plus any optional addon directory present), behind the same manifest guard
 # as the compose files. Then clears the CMS module cache so Cockpit
@@ -258,6 +362,8 @@ _sync_addons() {
       [[ -d "${target}/${one}" ]] || continue
       find "${target}/${one}" -type f | sed "s|^${dir}/||" | manifest_update "${dir}"
     done
+
+    _sync_addon_overlays "${dir}" "${want}" "${force}"
   else
     _sync_apply_expected "${dir}" "${exp}" "${force}" "cockpit/addons/"
   fi
@@ -341,10 +447,17 @@ _sync_list_addons() {
     local name; name="$(basename "${d}")"
     case "${name}" in
       AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
-      *) printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons)" ;;
+      *)
+        if addon_has_overlay "${name}"; then
+          printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons; also adds application pages)"
+        else
+          printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons)"
+        fi
+        ;;
     esac
   done
   printf '\nInstall an optional addon with: gosite sync --addons <name> (then start the project)\n'
+  printf 'Addons that add application pages need the app rebuilt too, not just the CMS.\n'
 }
 
 # --- drift report -------------------------------------------------------------
@@ -356,10 +469,10 @@ _sync_list_addons() {
 # from the SAME template tree create uses (src/templates/, design D8) so both
 # commands produce byte-identical output for the same inputs.
 _render_expected_tree() {
-  local exp="$1" dir="$2"
+  local exp="$1" dir="$2" scope="${3:-sync}"
   load_project_render_vars "${dir}"
 
-  render_template_tree "${GOSITE_ROOT}/templates" "${exp}" sync
+  render_template_tree "${GOSITE_ROOT}/templates" "${exp}" "${scope}"
   local f
   while IFS= read -r f; do render_placeholders "${f}"; done < <(
     find "${exp}" -type f
