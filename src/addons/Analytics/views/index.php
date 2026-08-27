@@ -11,7 +11,6 @@
  * a handful of rows and there is nothing to page through.
  */
 $model = Analytics\Helper\Analytics::MODEL;
-$env   = getenv('APP_ENV') ?: '(unset)';
 ?>
 
 <kiss-container class="kiss-margin-small">
@@ -65,11 +64,6 @@ $env   = getenv('APP_ENV') ?: '(unset)';
                         <?php
                             $enabled = !empty($item['enabled']);
                             $applies = $item['environments'] ?? 'all';
-                            // "Live here" means: switched on AND covering the
-                            // environment this CMS is running in. Both have to
-                            // be true, and one without the other is the usual
-                            // reason somebody reports missing data.
-                            $live = $enabled && ($applies === 'all' || $applies === $env);
                         ?>
                         <tr>
                             <td fixed="left">
@@ -84,8 +78,8 @@ $env   = getenv('APP_ENV') ?: '(unset)';
                             </td>
                             <td>
                                 <?= htmlspecialchars($this->helper('analytics')->providerLabel($item['provider'] ?? '')) ?>
-                                <?php if (!$live): ?>
-                                    <div class="kiss-size-xsmall kiss-color-muted">not live in <?= htmlspecialchars($env) ?></div>
+                                <?php if (!$enabled): ?>
+                                    <div class="kiss-size-xsmall kiss-color-muted">disabled everywhere</div>
                                 <?php endif; ?>
                             </td>
                             <td class="kiss-size-small kiss-text-monospace">
@@ -109,8 +103,85 @@ $env   = getenv('APP_ENV') ?: '(unset)';
 
     </kiss-card>
 
-    <div class="kiss-size-xsmall kiss-color-muted kiss-margin-small-top">
-        This CMS reports <code>APP_ENV=<?= htmlspecialchars($env) ?></code>. The website decides
-        the same way, from its own environment.
-    </div>
+    <?php
+        /*
+         * The CMS deliberately does not say whether an entry is live.
+         *
+         * "Applies to" is matched against the WEBSITE's APP_ENV, not this
+         * container's - they are separate services and the CMS is not given
+         * one. An earlier version of this screen read getenv('APP_ENV') here
+         * and reported "(unset)", which was both wrong and confidently stated.
+         */
+    ?>
+    <kiss-card class="kiss-padding-small kiss-margin-top" theme="contrast">
+        <div class="kiss-size-small kiss-color-muted">
+            <icon class="kiss-margin-xsmall-right">info</icon>
+            <b>Applies to</b> is matched against the <b>website's</b> <code>APP_ENV</code>, not this CMS's —
+            they run as separate services, and only the website reads it.
+            <code>development</code> matches <code>development</code>, <code>dev</code> or <code>local</code>;
+            <code>production</code> matches anything else, including unset;
+            <code>all</code> always matches. An integration loads only when it is enabled
+            <em>and</em> its environment matches.
+        </div>
+    </kiss-card>
+
+    <?php
+        /*
+         * What each provider expects in `config`, and where its full option
+         * list lives. Deliberately a link rather than a copy: the options
+         * belong to each plugin and would go stale here the first time
+         * upstream changed one.
+         */
+    ?>
+    <kiss-card theme="contrast shadowed" class="kiss-padding-small kiss-margin-top">
+        <div class="kiss-flex kiss-flex-middle kiss-margin-small-bottom" gap="xsmall">
+            <icon>help_outline</icon>
+            <b>What each provider needs</b>
+            <span class="kiss-flex-1"></span>
+            <a href="<?= htmlspecialchars(Analytics\Helper\Analytics::DOCS_INDEX) ?>"
+               target="_blank" rel="noopener" class="kiss-size-small">
+                All plugins <icon>open_in_new</icon>
+            </a>
+        </div>
+
+        <table class="kiss-table kiss-size-small">
+            <thead>
+                <tr>
+                    <th width="200">Provider</th>
+                    <th>Required in <code>config</code></th>
+                    <th width="130">Options</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($reference as $row): ?>
+                    <tr>
+                        <td>
+                            <?= htmlspecialchars($row['label']) ?>
+                            <?php if ($row['custom']): ?>
+                                <span class="kiss-badge kiss-badge-outline">our plugin</span>
+                            <?php endif; ?>
+                            <div class="kiss-size-xsmall kiss-color-muted kiss-text-monospace"><?= htmlspecialchars($row['provider']) ?></div>
+                        </td>
+                        <td class="kiss-text-monospace">
+                            <?php if (!count($row['keys'])): ?>
+                                <span class="kiss-color-muted">see the plugin's options</span>
+                            <?php else: ?>
+                                <?= htmlspecialchars(implode(', ', $row['keys'])) ?>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <a href="<?= htmlspecialchars($row['docs']) ?>" target="_blank" rel="noopener">
+                                docs <icon>open_in_new</icon>
+                            </a>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+
+        <div class="kiss-size-xsmall kiss-color-muted kiss-margin-small-top">
+            Keys are stored under the provider's own names and passed to its plugin untouched,
+            so whatever its documentation calls an option is what goes here.
+        </div>
+    </kiss-card>
 </kiss-container>

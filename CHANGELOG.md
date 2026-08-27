@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.46.3 — the Analytics screen says what each provider needs
+
+### Added
+
+- **A reference table on the Analytics screen**: every provider, the keys its
+  `config` requires, and a link to where that provider's full option list is
+  documented. Links rather than copies — those options belong to each plugin
+  and a copy here would go stale the first time upstream changed one. The
+  `config` field's help text points at the same index.
+
+### Fixed
+
+- **The screen claimed to know whether an integration was live, and did not.**
+  It compared each entry's environment against the **CMS container's**
+  `APP_ENV` — which is never set, because the website and the CMS are separate
+  services and only the website reads it. Every entry therefore read
+  "not live in (unset)", which was both wrong and confidently stated.
+
+  The screen no longer guesses. It shows whether an entry is enabled, and
+  explains that "applies to" is matched against the *website's* environment.
+
 ## 0.46.2 — a new provider now reaches projects that already exist
 
 ### Fixed

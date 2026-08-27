@@ -19,6 +19,7 @@ class Admin extends \App\Controller\App {
 
         return $this->render('analytics:views/index.php', [
             'integrations' => $analytics->all(),
+            'reference'    => $analytics->providerReference(),
         ]);
     }
 }

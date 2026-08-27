@@ -53,6 +53,31 @@ class Analytics extends \Lime\Helper {
     const ENVIRONMENTS = ['all', 'production', 'development'];
 
     /**
+     * Where the options for each provider are documented.
+     *
+     * Whoever fills in `config` needs to know what that provider's plugin
+     * accepts, and that is not knowledge worth copying into this file - it
+     * would go stale the first time upstream changed it. Link to the source
+     * instead.
+     *
+     * PostHog is ours, so it points at PostHog's own SDK documentation.
+     */
+    const DOCS_INDEX = 'https://getanalytics.io/plugins/';
+
+    const DOCS = [
+        'gtm'                 => 'https://getanalytics.io/plugins/google-tag-manager/',
+        'posthog'             => 'https://posthog.com/docs/libraries/js',
+        'google-analytics'    => 'https://getanalytics.io/plugins/google-analytics/',
+        'google-analytics-v3' => 'https://getanalytics.io/plugins/google-analytics-v3/',
+        'mixpanel'            => 'https://getanalytics.io/plugins/mixpanel/',
+        'segment'             => 'https://getanalytics.io/plugins/segment/',
+        'amplitude'           => 'https://getanalytics.io/plugins/amplitude/',
+        'hubspot'             => 'https://getanalytics.io/plugins/hubspot/',
+        'fullstory'           => 'https://getanalytics.io/plugins/fullstory/',
+        'customerio'          => 'https://getanalytics.io/plugins/customerio/',
+    ];
+
+    /**
      * Per-provider configuration rules.
      *
      *   fields   key => whether it is required
@@ -134,7 +159,7 @@ class Analytics extends \Lime\Helper {
                     'info' => 'Only providers this site has a plugin for.',
                 ]),
                 $this->field('config', 'object', 'Configuration', true, [
-                    'info' => 'The keys the provider documents. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."}',
+                    'info' => 'The keys the provider documents, stored verbatim. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."}. Full options per provider: '.self::DOCS_INDEX,
                 ]),
                 $this->field('enabled', 'boolean', 'Enabled', false, [
                     'info' => 'Turn a provider off without losing its configuration.',
@@ -344,6 +369,33 @@ class Analytics extends \Lime\Helper {
 
     public function providerLabel(string $provider): string {
         return self::PROVIDERS[$provider] ?? $provider;
+    }
+
+    public function providerDocs(string $provider): string {
+        return self::DOCS[$provider] ?? self::DOCS_INDEX;
+    }
+
+    /**
+     * Provider, the keys it needs, and where its options are documented - for
+     * the admin screen's reference table.
+     */
+    public function providerReference(): array {
+        $rows = [];
+
+        foreach (self::PROVIDERS as $value => $label) {
+
+            $fields = array_keys(self::RULES[$value]['fields'] ?? []);
+
+            $rows[] = [
+                'provider' => $value,
+                'label'    => $label,
+                'keys'     => $fields,
+                'docs'     => $this->providerDocs($value),
+                'custom'   => $value === 'posthog',
+            ];
+        }
+
+        return $rows;
     }
 
     protected function log(string $message): void {
