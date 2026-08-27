@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.46.14 — mounting waited for nothing, and threw
+
+### Fixed
+
+- **`Cannot read properties of null (reading 'appendChild')`, from inside the
+  Google Analytics plugin.** The loader sits in `<head>` so the bundles start
+  downloading as early as possible — but at that moment `document.body` is
+  still `null`, and that plugin appends its tag straight to `document.body`.
+
+  Mounting now waits for `DOMContentLoaded` when the body is not there yet.
+  Only the mount waits: the downloads still start immediately, and the queue
+  added in 0.46.6 holds any event the page raises meanwhile, so nothing is lost
+  to the delay.
+
+  The loader's test now runs the way a real page does — no `body` at script
+  time, `DOMContentLoaded` afterwards — which is what makes this the last
+  failure of its kind rather than the next one.
+
 ## 0.46.13 — the core library publishes `_analytics`, not `Analytics`
 
 ### Fixed

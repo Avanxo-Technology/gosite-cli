@@ -55,6 +55,17 @@ evaluating each one and calling it:
 | `fullstory` | `fullstory@0.2.7` | `analyticsFullStory` |
 | `customerio` | `customerio@0.2.2` | `analyticsCustomerio` |
 
+### Mounting must wait for `document.body`
+
+The loader sits in `<head>` so the bundles start downloading early — but at
+that point `document.body` is `null`, and the `google-analytics` plugin appends
+its tag straight to `document.body`. Mounting there throws
+`Cannot read properties of null (reading 'appendChild')` from inside the plugin
+and nothing is ever sent.
+
+Only the mount waits for `DOMContentLoaded`; the downloads still start
+immediately, and the loader's queue holds any event raised meanwhile.
+
 ### Two expose an ESM interop object, not the factory
 
 `google-analytics` and `google-analytics-v3` set their global to

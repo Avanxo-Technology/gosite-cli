@@ -121,6 +121,25 @@
     identify: enqueue('identify'),
   };
 
+  /*
+   * Run once the document has a body.
+   *
+   * This script sits in <head> so the bundles start downloading as early as
+   * possible - but at that moment `document.body` is still null, and at least
+   * one official plugin (google-analytics) appends its tag straight to
+   * document.body. Mounting there threw before anything was ever sent.
+   *
+   * Only the mount waits. The downloads still start immediately, and the queue
+   * above holds any event the page raises meanwhile.
+   */
+  function whenReady(fn) {
+    if (document.body) {
+      fn();
+      return;
+    }
+    document.addEventListener('DOMContentLoaded', fn, { once: true });
+  }
+
   function loadScript(src) {
     return new Promise(function (resolve) {
       var s = document.createElement('script');
@@ -192,6 +211,12 @@
       return loadScript(CDN + o.path);
     })
   ).then(function () {
+    whenReady(function () {
+      mount();
+    });
+  });
+
+  function mount() {
     var plugins = [];
 
     integrations.forEach(function (item) {
@@ -253,5 +278,5 @@
     console.debug('[analytics] tracking with: ' + plugins.map(function (p) {
       return p.name;
     }).join(', '));
-  });
+  }
 })();
