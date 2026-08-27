@@ -1,5 +1,120 @@
 # Changelog
 
+## 0.45.0 — a blog every site shares
+
+### Added
+
+- **New `Blog` addon**, opt-in like `Forms` and `Replica`, but the first one
+  that installs an application half as well as a CMS half.
+
+  **In the CMS.** Four models created on first admin load: `blogs`,
+  `blogPosts`, `blogCategories`, `blogAuthors`, grouped under *Blog*. Several
+  blogs per site are **data, not schema** — a blog is an entry in `blogs` and an
+  article references it, so every project runs the same models and a fix here
+  is a fix everywhere. Names are prefixed on purpose: `categories` is a name a
+  client will want for their own content, and because installation skips a
+  model that already exists the collision would have been silent.
+
+  Slugs are derived from the title, transliterated (`Diseño Gráfico` →
+  `diseno-grafico`) and unique **within their blog**, so `/noticias/novedades`
+  and `/casos/novedades` can both exist. Cockpit's own `meta.unique` cannot
+  express that — it runs an `$or` across the whole collection — so the scoped
+  check lives in the addon. A blog slug that collides with a path the scaffold
+  serves (`static`, `healthz`, `api`, …) is refused at save time.
+
+  The byline is the article's author reference, falling back to the
+  `blogAuthors` entry linked to the Cockpit account that created it. Writing
+  your own blog needs no author picked; publishing for a client still lets you
+  choose. Only display fields ever leave the addon — never an account's e-mail.
+
+  An admin screen at `/blog` shows what Cockpit's generic editor cannot: each
+  article's real address on the public site, plus a manual cache purge.
+
+  **In the application.** Pages at `/{blog}` and `/{blog}/{slug}`, paginated,
+  with canonical URLs and Open Graph tags, in both template flavors. Drafts are
+  unreachable by construction: Cockpit's read API overwrites `filter._state`
+  and never serves an unpublished entry, so nothing here has to filter them.
+
+- **New `gosite addons` command.** Installing an addon into a project that
+  already exists was possible before (`gosite sync --addons`), but only if you
+  knew `sync` had a flag for it. It is now a command of its own:
+
+  ```bash
+  gosite addons list [project]        # the library, and what the project has
+  gosite addons add Blog [project]    # install
+  gosite addons remove Blog [project] # uninstall
+  ```
+
+  Addon names are matched against gosite's library, so the project can be given
+  in any position. The implementation is the same one `sync --addons` uses -
+  the command is a front door, not a second code path. Removal deletes the
+  addon's files, including its application half, and deliberately leaves the
+  content it created in the database: dropping models and entries is a data
+  decision, not an install one.
+
+- **New `gosite sync --app`.** Every other sync mode promises never to touch
+  your Go code, and that promise is worth keeping by default. But gosite's own
+  scaffolding lives in `internal/` too — the cache, the CMS client, the
+  renderer, the router seam — so a project scaffolded a year ago could not
+  install an addon that calls into scaffolding it does not have.
+
+  `--app` brings `internal/` up to the current templates behind the same
+  manifest guard as everything else: a file byte-identical to what gosite wrote
+  is refreshed, a file you edited is preserved and reported. Handler code you
+  wrote survives; plumbing you never opened catches up. Files an addon
+  installed are not touched here — refresh those with `gosite addons add`.
+
+- **`gosite addons add` refuses an install that would break the build.** An
+  addon's pages call into the project's own Go code, which gosite never
+  rewrites. Installing into a project without those seams used to succeed and
+  leave a project that did not compile. It now checks first and names every
+  file and the exact thing missing from it, installing nothing. Requirements
+  are declared by the addon (`REQUIRES`), not hard-coded in the CLI.
+
+### Changed
+
+- **The CMS client can read collections.** `internal/cms` gained `Items` and
+  `First` with filter, sort, pagination, projection and populate. Both of
+  Cockpit's response shapes decode to one result type — it returns a bare array
+  normally but `{data, meta}` when `skip` and `limit` are both present, and
+  reading that wrapper as a list yields entries with no `_id`. Reads always
+  send both parameters, which makes the shape deterministic and is also the
+  only way to get `meta.total`.
+- **Cache invalidation can address a group of keys.** A blog is many keys where
+  the home page was one, and publishing an article changes its blog's index as
+  well as its own page. `CachePurge` now tells the app *what* changed, so the
+  app drops that blog and leaves other blogs and the home page cached. The body
+  is additive — an older app ignores it and behaves exactly as before — and the
+  endpoint's fail-closed authentication from 0.43.0 is unchanged.
+- **Page templates register themselves.** Every file under
+  `internal/views/pages/` becomes a page named after the file; adding a page no
+  longer means editing `render.go`.
+- **Optional features mount from their own file.** `router.go` declares a
+  `mountFeatures` seam and calls it in plain sight; an addon appends to it from
+  a file of its own. Installing a feature into an existing project therefore
+  adds files and never rewrites `router.go`, which projects edit by hand and
+  `sync` deliberately preserves.
+
+### Fixed
+
+- `gosite sync --list-addons` was documented in the command's help but never
+  wired into its argument parser, so it was treated as a project name and
+  failed with "Unknown project '--list-addons'".
+
+### Upgrading
+
+Existing projects need their application sources brought up to date first,
+because the blog's pages call into scaffolding older scaffolds do not have:
+
+```bash
+gosite sync <project> --app       # refreshes internal/, preserves what you edited
+gosite addons add Blog <project>  # refuses with a precise list if anything is still missing
+gosite restart <project> --build  # both halves are compiled/baked in
+``` It only adds files —
+a blog page you have edited is preserved and reported, `--force` takes the
+template version. Because the addon changes both halves, **rebuild the CMS
+image and the application**; restarting is not enough.
+
 ## 0.44.0 — replicated models become visible on the destination
 
 ### Fixed

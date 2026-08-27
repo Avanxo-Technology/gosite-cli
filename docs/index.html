@@ -419,7 +419,8 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>gosite cd &lt;name&gt;</td><td>Jump into a project directory. <code>gosite path</code> prints it for scripts.</td></tr>
           <tr><td>gosite open &lt;name&gt;</td><td>Open a project directory in Finder (macOS).</td></tr>
           <tr><td>gosite remove &lt;name&gt;</td><td>Delete containers, volumes, images, certificate and directory. <span class="flag">--keep-source</span> keeps the code.</td></tr>
-          <tr><td>gosite sync</td><td>Re-apply gosite's templates to an existing project without overwriting your work: files untouched since gosite wrote them are refreshed (tracked by <code>.gosite/manifest.tsv</code>), hand-edited ones are preserved and reported, missing ones are restored. <code>docker-compose.prod.yml</code> is never written — only the explicit <span class="flag">--compose-prod</span> <span class="flag">--force</span> re-renders it, with a timestamped backup. <span class="flag">--report</span> shows the drift without writing (<span class="flag">--strict</span> exits non-zero on drift), plus <span class="flag">--compose</span>, <span class="flag">--addons</span>, <span class="flag">--env</span>, <span class="flag">--build</span>, <span class="flag">--list-addons</span>.</td></tr>
+          <tr><td>gosite addons</td><td>Install addons into a project that already exists — the discoverable front door for what <code>sync --addons</code> does. <code>gosite addons list</code> shows the library and what this project has; <code>add &lt;name&gt;… [project]</code> installs; <code>remove &lt;name&gt;… [project]</code> uninstalls. Addon names are matched against the library, so the project can go in any position. Installing only ever adds files: an addon with application pages wires itself from its own file, so your <code>router.go</code> is never rewritten. Content the addon created is left in the database on removal.</td></tr>
+          <tr><td>gosite sync</td><td>Re-apply gosite's templates to an existing project without overwriting your work: files untouched since gosite wrote them are refreshed (tracked by <code>.gosite/manifest.tsv</code>), hand-edited ones are preserved and reported, missing ones are restored. <code>docker-compose.prod.yml</code> is never written — only the explicit <span class="flag">--compose-prod</span> <span class="flag">--force</span> re-renders it, with a timestamped backup. <span class="flag">--report</span> shows the drift without writing (<span class="flag">--strict</span> exits non-zero on drift), plus <span class="flag">--compose</span>, <span class="flag">--addons</span>, <span class="flag">--env</span>, <span class="flag">--build</span>, <span class="flag">--list-addons</span>. <span class="flag">--app</span> is the one mode that touches <code>internal/</code>, and is opt-in for that reason: the same manifest guard refreshes scaffolding you never opened and preserves anything you edited — an old project needs it before it can take an addon that ships application pages.</td></tr>
           <tr><td>gosite infra up</td><td>Shared Traefik and Redis (datastores bound to loopback). Also <code>down</code>, <code>restart</code>, <code>status</code>, <code>logs</code>.</td></tr>
           <tr><td>gosite dns</td><td>Verify that <code>*.test</code> resolves to 127.0.0.1, and print the fix if not.</td></tr>
           <tr><td>gosite doctor</td><td>Check the local toolchain and audit every project plus the shared infrastructure against the secure defaults (read-only, with the exact fix per finding). <span class="flag">--strict</span> exits non-zero on findings.</td></tr>
@@ -440,10 +441,10 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         Addons are plain folders at <code>/var/www/html/addons</code> — bind-mounted
         in dev, baked into the production image by <code>Dockerfile.cms</code> — so
         nothing loads unless it exists. Every project ships four built-ins;
-        <code>Forms</code> and <code>Replica</code> are opt-in at setup
-        (<span class="flag">--addons "Forms Replica"</span>, or
+        <code>Forms</code>, <code>Blog</code> and <code>Replica</code> are opt-in at setup
+        (<span class="flag">--addons "Forms Blog Replica"</span>, or
         <span class="flag">--no-addons</span> to skip). Refresh or add them later
-        with <code>gosite sync --addons</code>.
+        with <code>gosite addons add &lt;name&gt;</code>.
       </p>
     </div>
 
@@ -472,6 +473,11 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v12H4z"/><path d="M8 20h8M12 16v4"/></svg></div>
         <h3>Forms <span class="tag opt">optional</span></h3>
         <p>An inbox-style manager for website submissions: a public <code>POST /forms/api/submit</code> receiver with honeypot and rate-limit anti-spam, an admin screen per form, CSV export and mail/webhook notifications. The receiver is closed by default — list your site's origins in <code>allowed_origins</code>, and keep <code>trustedProxies</code> at <code>1</code> so the rate limit counts each visitor separately rather than the proxy.</p>
+      </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h9l5 5v11H5z"/><path d="M14 4v5h5"/><path d="M8 13h8M8 17h8"/></svg></div>
+        <h3>Blog <span class="tag opt">optional</span></h3>
+        <p>A blog every site shares: four content models installed on first load, articles served at <code>/{blog}/{slug}</code> with pagination, canonical URLs and Open Graph tags. Several blogs are data, not schema — a blog is an entry in <code>blogs</code> and an article points at it, so every project runs the same models. Slugs are derived from the title and unique within their blog; drafts are unreachable because Cockpit's read API never serves them. Unlike the other addons this one also installs application pages, so it needs the app rebuilt as well as the CMS.</p>
       </article>
       <article class="card rv">
         <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3L4 7l4 4"/><path d="M4 7h16"/><path d="M16 21l4-4-4-4"/><path d="M20 17H4"/></svg></div>

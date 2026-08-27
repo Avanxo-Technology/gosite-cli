@@ -100,6 +100,7 @@ gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
 gosite remove my-site          # deletes containers, cert and the directory
 gosite sync my-site            # re-apply gosite's templates to an existing project
+gosite addons add Blog my-site # install an addon into a project that already exists
 gosite infra down
 ```
 
@@ -301,13 +302,42 @@ This is how an existing site picks up gosite updates.
 ```bash
 gosite sync my-site              # compose + config.php + build files + addons + .env keys
 gosite sync my-site --compose    # re-render docker-compose.yml, config.php, deploy/ build files
-gosite sync my-site --addons     # refresh addons present, or --addons "Forms Replica"
+gosite sync my-site --addons     # refresh addons present, or --addons "Forms Blog Replica"
+gosite sync my-site --app        # bring internal/ up to the current templates
 gosite sync my-site --env        # add keys missing from .env (never overwrites)
 gosite sync my-site --report     # drift report: nothing is written
 gosite sync my-site --report --strict   # ...exit non-zero when there is drift (CI gate)
 gosite sync my-site --compose-prod --force  # the ONLY way docker-compose.prod.yml is rewritten
 gosite sync my-site --build      # ...then rebuild the local images
-gosite sync --list-addons        # show the addon library
+```
+
+`--app` is the one mode that touches your Go code, which is why it is opt-in.
+The manifest guard still decides file by file: scaffolding you never opened is
+refreshed, anything you edited is preserved and reported. A project scaffolded
+long ago needs it before it can take an addon that ships application pages.
+
+### Addons in an existing project
+
+Adding an addon to a project made months ago has its own command, so it does
+not mean remembering that `sync` has a flag for it:
+
+```bash
+gosite addons list my-site        # the library, and what this project has
+gosite addons add Blog my-site    # install: CMS half + application pages
+gosite addons remove Blog my-site # uninstall (content in the database is kept)
+```
+
+Installing only ever **adds** files. An addon that ships application pages
+wires itself from a file of its own, so your `router.go` is never rewritten,
+and a page template you have edited is preserved and reported rather than
+overwritten (`--force` takes the template version).
+
+Addons are baked into the CMS image, and an addon with application pages is
+compiled into the app binary, so both have to be rebuilt — restarting shows
+neither:
+
+```bash
+gosite restart my-site --build
 ```
 
 Two guarantees make sync safe to run blindly:
