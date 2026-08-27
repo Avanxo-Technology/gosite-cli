@@ -18,7 +18,7 @@
 {{define "analytics-head"}}
 {{$integrations := analyticsIntegrations}}
 {{if $integrations}}
-<script type="application/json" id="analytics-config">{{toJSON $integrations}}</script>
+<script type="application/json" id="analytics-config">{{jsonData $integrations}}</script>
 <script src="https://unpkg.com/analytics@0.8.19/dist/analytics.min.js"></script>
 <script src="/static/js/analytics/analytics.js"></script>
 {{end}}

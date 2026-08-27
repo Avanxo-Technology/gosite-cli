@@ -2,6 +2,7 @@ package views
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -88,5 +89,40 @@ func TestConfigBlockIsValidJSON(t *testing.T) {
 	end := strings.Index(out[start:], "</script>")
 	if !strings.Contains(out[start:start+end], "GTM-ABC1234") {
 		t.Errorf("the id is not in the data block: %q", out[start:start+end])
+	}
+}
+
+// The config block must contain JSON, not a JSON string. Inside a <script>
+// element html/template escapes an ordinary string as a JS string literal, so
+// the browser's JSON.parse would hand back text instead of the data - which is
+// indistinguishable from "analytics did nothing".
+func TestConfigBlockParsesAsAnArray(t *testing.T) {
+	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{"containerId": "GTM-ABC1234"}}})
+
+	const open = `id="analytics-config">`
+	start := strings.Index(out, open)
+	if start < 0 {
+		t.Fatal("no configuration block")
+	}
+	start += len(open)
+	body := out[start : start+strings.Index(out[start:], "</script>")]
+
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("the block is not a JSON array: %v\n  got: %s", err, body)
+	}
+	if len(parsed) != 1 || parsed[0]["Provider"] != "gtm" {
+		t.Fatalf("parsed = %v", parsed)
+	}
+}
+
+// A value carrying script syntax must not be able to close the element.
+func TestConfigBlockCannotCloseTheScript(t *testing.T) {
+	out := render(t, []Integration{{Provider: "gtm", Config: map[string]any{
+		"containerId": `GTM-X</script><img src=x onerror=alert(1)>`,
+	}}})
+
+	if strings.Contains(out, "<img src=x") {
+		t.Fatal("a CMS value escaped the data block and became markup")
 	}
 }

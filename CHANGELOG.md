@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.46.9 — the config block was JSON-encoded twice
+
+### Fixed
+
+- **The page carried the integrations and loaded none of them.** The
+  configuration block held a JSON *string* rather than JSON:
+
+  ```html
+  <script type="application/json" id="analytics-config">"[{\"Provider\":\"...\"}]"
+  ```
+
+  `toJSON` returns a plain string — deliberately, so that in an Alpine
+  attribute `html/template` escapes it — but inside a `<script>` element that
+  same escaping turns it into a JavaScript string literal. `JSON.parse` then
+  returned text instead of an array, the loader found nothing to mount, and the
+  page looked exactly as though analytics had never been configured.
+
+  A separate `jsonData` helper emits it verbatim for data blocks. That is safe
+  rather than a hole, and the reason is worth stating: `encoding/json` escapes
+  `<`, `>` and `&` to `\u003c`, `\u003e` and `\u0026` by default, so no value
+  can close the script element or open a tag. The escaping that matters still
+  happens, one layer down, where it belongs. `toJSON` is unchanged for
+  attributes.
+
+  Two tests now cover it: the block must parse as an array, and a value
+  carrying `</script><img onerror=...>` must not become markup.
+
 ## 0.46.8 — the config box now shows what was filled in
 
 ### Fixed

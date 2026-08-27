@@ -115,6 +115,23 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 			b, err := json.Marshal(v)
 			return string(b), err
 		},
+		// jsonData marshals a value into a <script type="application/json">
+		// block, where the browser must see JSON and not a JSON string.
+		//
+		// toJSON cannot be used there: inside a <script> element
+		// html/template escapes its result as a JavaScript string literal, so
+		// the page ends up with "[{\"a\":1}]" and JSON.parse returns a string
+		// rather than the data. Returning template.JS emits it verbatim.
+		//
+		// That is safe here rather than a hole, and the reason is worth
+		// keeping: encoding/json escapes <, > and & to \u003c, \u003e and
+		// \u0026 by default, so no value can close the script element or open
+		// a tag. The escaping that matters still happens - one layer down,
+		// where it belongs.
+		"jsonData": func(v any) (template.JS, error) {
+			b, err := json.Marshal(v)
+			return template.JS(b), err
+		},
 	}
 
 	// Every page is parsed as layout + that page + all components, so a page
