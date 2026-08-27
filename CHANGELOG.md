@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.46.11 — the site loader says whether it is tracking
+
+### Changed
+
+- **The browser loader reports success, not only failure.** It used to log
+  nothing on the happy path, so an empty console meant any of four very
+  different things: nothing configured, the library blocked, no plugin built,
+  or everything working. All four look identical while debugging, and that
+  ambiguity has now cost more time than any of the bugs behind it.
+
+  A page with analytics logs one line naming what it mounted
+  (`[analytics] tracking with: google-analytics`). A library that failed to
+  load, and a set of integrations that produced no usable plugin, each say so.
+
 ## 0.46.10 — Google Analytics never loaded
 
 ### Fixed

@@ -206,7 +206,10 @@
       }
     });
 
-    if (!plugins.length) return;
+    if (!plugins.length) {
+      console.warn('[analytics] no plugin could be built; nothing will be tracked');
+      return;
+    }
 
     var instance = window.Analytics({ app: 'site', plugins: plugins });
 
@@ -218,5 +221,17 @@
     queue.length = 0;
 
     instance.page();
+
+    /*
+     * Say so on the way out.
+     *
+     * Silence used to mean any of: not configured, script missing, plugin not
+     * built, or working perfectly - four very different situations that looked
+     * identical in a browser console. One line removes the ambiguity, and the
+     * cost is one console.debug on pages that actually have analytics.
+     */
+    console.debug('[analytics] tracking with: ' + plugins.map(function (p) {
+      return p.name;
+    }).join(', '));
   });
 })();
