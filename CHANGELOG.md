@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.46.7 — the config template actually fires
+
+### Fixed
+
+- **Selecting a provider did nothing.** The 0.46.6 script read the event payload
+  one level too high: Cockpit's `App.trigger(name, params)` hands handlers
+  `{name, params}`, so the form is at `event.params.form`, not `event.form`.
+  Undefined, an early return, and a feature that was deployed, served, and
+  inert.
+
+  The test did not catch it because the mock encoded the same misunderstanding
+  as the code — it fired `cb({form})`, matching the bug rather than Cockpit. It
+  now mirrors the real `trigger` implementation, which is the only version of
+  that mock worth having.
+
+  An unexpected payload now logs a warning instead of returning quietly. The
+  original failure looked exactly like a deployment problem for as long as it
+  stayed silent, and that cost more time than the bug did.
+
 ## 0.46.6 — the editor fills in the right keys for you
 
 ### Added

@@ -21,9 +21,22 @@
 
     App.on('fields-renderer-init', function (event) {
 
-        var form = event.form;
+        /*
+         * App.trigger(name, params) hands handlers {name, params} - the
+         * payload is one level down. Reading event.form instead of
+         * event.params.form was a silent no-op: undefined, an early return,
+         * and a feature that looked deployed and did nothing.
+         */
+        var form = event && event.params && event.params.form;
 
-        if (!form || !Array.isArray(form.fields)) return;
+        // Say so rather than returning quietly. The first version of this file
+        // read the payload one level too high and did nothing at all, which
+        // looked exactly like a deployment problem for as long as it stayed
+        // silent.
+        if (!form || !Array.isArray(form.fields)) {
+            console.warn('[analytics] unexpected fields-renderer-init payload; config templates disabled', event);
+            return;
+        }
 
         var names = form.fields.map(function (f) { return f.name; });
 
