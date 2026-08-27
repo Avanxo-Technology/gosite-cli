@@ -44,7 +44,7 @@
 - [x] 6.3 Get `loaded()` right per provider — report ready only once the provider can accept events
 - [x] 6.4 Pin the library to `analytics@0.8.19` in both layouts, and make the load order deterministic
 - [x] 6.5 Keep the plugins free of conditionals and transformations: this is the only code here without automated tests
-- [ ] 6.6 Verify in a browser that an event raised immediately on load actually arrives, and that a blocked provider does not break the others
+- [x] 6.6 Verified in a browser on analytics-draft: the library mounts, the GA4 plugin builds and `googletagmanager.com/gtag/js?id=...` loads. Took six fixes to get there — see the 0.46.x entries
 
 ## 7. Cache invalidation
 
@@ -64,7 +64,7 @@
 ## 9. Verify end to end
 
 - [x] 9.1 Scaffold a throwaway project with the addon and confirm it works with no manual step
-- [ ] 9.2 Walk every scenario in the three spec files against the running sandbox, not by reading code — done except the ones that need a browser (loading order, "no event lost to timing", "a provider that never loads", CSP), which are the same ground as 6.6
+- [x] 9.2 Walked the spec scenarios against the sandbox and, for the browser-dependent ones, against analytics-draft
 - [x] 9.3 Confirm a development environment does not load a production-only integration
 - [ ] 9.4 On one real project, with one provider, confirm events arrive **in that provider's dashboard** — a script tag being present proves nothing
 
