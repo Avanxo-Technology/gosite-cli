@@ -50,7 +50,18 @@ class Analytics extends \Lime\Helper {
         'customerio'          => 'Customer.io',
     ];
 
-    const ENVIRONMENTS = ['all', 'production', 'development'];
+    /**
+     * Where an integration applies.
+     *
+     * Matched against the WEBSITE's APP_ENV, folded to one of these: the
+     * application maps development/dev/local, and qa/staging/stage/acceptance/
+     * uat/test, onto the first two; anything else is production.
+     *
+     * `qa` exists because without it "not development" means production, and a
+     * staging site would load the client's production keys and fill their real
+     * analytics with test traffic - data that looks legitimate and is not.
+     */
+    const ENVIRONMENTS = ['all', 'production', 'qa', 'development'];
 
     /**
      * Where the options for each provider are documented.
@@ -166,7 +177,7 @@ class Analytics extends \Lime\Helper {
                 ]),
                 $this->field('environments', 'select', 'Applies to', true, [
                     'opts' => ['options' => self::ENVIRONMENTS],
-                    'info' => 'Keep development traffic out of a client\'s production account.',
+                    'info' => 'Matched against the website\'s APP_ENV. qa covers staging, acceptance and uat. Keeps development and staging traffic out of a client\'s production account.',
                 ]),
             ],
         ]);
@@ -272,7 +283,25 @@ class Analytics extends \Lime\Helper {
      */
     public function beforeSave(array &$item, bool $isUpdate): void {
 
-        $provider = (string)($item['provider'] ?? '');
+        // Cockpit's select field emits an ARRAY, always - its select() does
+        // `if (!Array.isArray(val)) val = []` then pushes. So `provider`
+        // arrives as ["posthog"], not "posthog". Folding it here also stores
+        // the scalar, so everything downstream (the site included) reads a
+        // plain string.
+        $provider    = $this->selectValue($item['provider'] ?? null);
+        $environment = $this->selectValue($item['environments'] ?? null) ?: 'all';
+        $config      = $item['config'] ?? [];
+
+        $item['provider']     = $provider;
+        $item['environments'] = $environment;
+
+        // A brand-new entry is saved before it is filled in. Refusing that
+        // turns "I clicked save too early" into an error page, so an empty
+        // draft is allowed through: it renders nothing, and the admin screen
+        // shows it as incomplete.
+        if ($provider === '' && !$this->hasValues($config)) {
+            return;
+        }
 
         if (!isset(self::PROVIDERS[$provider])) {
             throw new \App\Exception\AppNotification(
@@ -280,17 +309,11 @@ class Analytics extends \Lime\Helper {
             );
         }
 
-        $environment = (string)($item['environments'] ?? 'all');
-
         if (!in_array($environment, self::ENVIRONMENTS, true)) {
             throw new \App\Exception\AppNotification(
                 "\"{$environment}\" is not a known environment. Use: ".implode(', ', self::ENVIRONMENTS).'.'
             );
         }
-
-        $item['environments'] = $environment;
-
-        $config = $item['config'] ?? [];
 
         if (!is_array($config)) {
             throw new \App\Exception\AppNotification('Configuration must be an object.');
@@ -329,6 +352,42 @@ class Analytics extends \Lime\Helper {
         // the application will not read them, so keeping them only invites
         // someone to believe they do something.
         $item['config'] = array_intersect_key($config, $rules['fields']);
+    }
+
+    /**
+     * The scalar behind a select field.
+     *
+     * Cockpit's select always emits an array, even for a single choice, so
+     * this folds ["posthog"] and "posthog" to the same thing. Getting this
+     * wrong cast an array to the string "Array" and refused every save the
+     * editor made.
+     */
+    protected function selectValue($value): string {
+
+        if (is_array($value)) {
+            $value = $value[0] ?? '';
+        }
+
+        return is_string($value) ? trim($value) : '';
+    }
+
+    /**
+     * Does this configuration hold anything at all? Used to tell an untouched
+     * draft from a half-filled one.
+     */
+    protected function hasValues($config): bool {
+
+        if (!is_array($config)) {
+            return $config !== '' && $config !== null;
+        }
+
+        foreach ($config as $v) {
+            if ($v !== '' && $v !== null && $v !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

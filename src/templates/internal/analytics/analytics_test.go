@@ -116,3 +116,41 @@ func TestUnreachableCMSLoadsNothingAndDoesNotPanic(t *testing.T) {
 }
 
 var _ = views.Integration{}
+
+// APP_ENV is free text and deployments spell the same idea many ways. Folding
+// it wrong is how a staging site ends up loading a client's production keys.
+func TestEnvironmentFolding(t *testing.T) {
+	for _, tc := range []struct{ appEnv, want string }{
+		{"development", analytics.EnvDevelopment},
+		{"dev", analytics.EnvDevelopment},
+		{"local", analytics.EnvDevelopment},
+		{"DEV", analytics.EnvDevelopment},
+		{"qa", analytics.EnvQA},
+		{"staging", analytics.EnvQA},
+		{"stage", analytics.EnvQA},
+		{"acceptance", analytics.EnvQA},
+		{"uat", analytics.EnvQA},
+		{"  Staging ", analytics.EnvQA},
+		{"production", analytics.EnvProduction},
+		{"prod", analytics.EnvProduction},
+		{"", analytics.EnvProduction},
+		{"whatever", analytics.EnvProduction},
+	} {
+		if got := analytics.Environment(tc.appEnv); got != tc.want {
+			t.Errorf("Environment(%q) = %q, want %q", tc.appEnv, got, tc.want)
+		}
+	}
+}
+
+// The whole point: a staging deployment must not load production keys.
+func TestStagingDoesNotLoadProductionKeys(t *testing.T) {
+	if got := reader(t, "staging", items(gtm(true, "production"))).Integrations(); len(got) != 0 {
+		t.Fatalf("a staging site loaded the production integration: %+v", got)
+	}
+	if got := reader(t, "staging", items(gtm(true, "qa"))).Integrations(); len(got) != 1 {
+		t.Fatal("a staging site did not load its own qa integration")
+	}
+	if got := reader(t, "staging", items(gtm(true, "all"))).Integrations(); len(got) != 1 {
+		t.Fatal("a staging site did not load an all-environments integration")
+	}
+}

@@ -36,17 +36,53 @@ type Reader struct {
 	environment string
 }
 
+// Environment names an entry can be scoped to. APP_ENV is free text and
+// deployments spell the same idea half a dozen ways, so it is folded into one
+// of these three before anything is compared.
+const (
+	EnvDevelopment = "development"
+	EnvQA          = "qa"
+	EnvProduction  = "production"
+)
+
+// aliases fold the names deployments actually use.
+//
+// The one that matters is the QA row. Without it "anything that is not
+// development" means production, so a staging or acceptance site would load
+// the client's production keys and quietly fill their real analytics with
+// test traffic. That is worse than no tracking at all, because the data looks
+// legitimate.
+var aliases = map[string]string{
+	"development": EnvDevelopment,
+	"dev":         EnvDevelopment,
+	"local":       EnvDevelopment,
+
+	"qa":         EnvQA,
+	"staging":    EnvQA,
+	"stage":      EnvQA,
+	"acceptance": EnvQA,
+	"uat":        EnvQA,
+	"test":       EnvQA,
+	"testing":    EnvQA,
+}
+
+// Environment folds an APP_ENV value into the three this feature reasons about.
+// Anything unrecognised - including empty - is production, which is the
+// fail-safe reading: an unknown environment gets the production keys only if
+// nobody said otherwise, and never gets development's.
+func Environment(appEnv string) string {
+	if folded, ok := aliases[strings.ToLower(strings.TrimSpace(appEnv))]; ok {
+		return folded
+	}
+	return EnvProduction
+}
+
 func New(c *cms.Client, cfg config.Config, log *slog.Logger) *Reader {
-	env := strings.TrimSpace(cfg.Environment)
-	if env == "" {
-		// An unset APP_ENV means production everywhere else in this app
-		// (config.IsDev), and it must mean the same here.
-		env = "production"
-	}
-	if cfg.IsDev() {
-		env = "development"
-	}
-	return &Reader{cms: c, log: log, environment: env}
+	// Deliberately not config.IsDev(): that decides whether the cache-purge
+	// endpoint may skip its token, and folding staging into "dev" there would
+	// leave purging unauthenticated on a staging site. The two questions look
+	// alike and must not share an answer.
+	return &Reader{cms: c, log: log, environment: Environment(cfg.Environment)}
 }
 
 // Integrations returns what applies to this environment, in a shape the

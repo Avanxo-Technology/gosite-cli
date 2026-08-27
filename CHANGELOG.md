@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.46.4 — saving an integration no longer answers 500
+
+### Fixed
+
+- **Every save from the Analytics editor returned a 500.** Cockpit's `select`
+  field emits an **array**, always — its `select()` does
+  `if (!Array.isArray(val)) val = []` and then pushes — so `provider` arrived as
+  `["posthog"]`, not `"posthog"`. Casting that to a string produced `"Array"`,
+  which is not a known provider, so validation refused it. Nothing catches a
+  validation exception on the way out (core's own uniqueness check has the same
+  fate), so it surfaced as a 500.
+
+  Select values are now folded to the scalar behind them and stored that way,
+  so the site reads a plain string too. Verified against the payload the editor
+  actually sends, which is what the original tests never did: they passed
+  strings and so never met the bug.
+
+- **Saving a new entry before filling it in exploded.** An untouched draft — no
+  provider, no configuration — is now allowed through. It renders nothing and
+  the screen shows it as incomplete, which beats an error page for clicking
+  save too early. A provider that is set but wrong is still refused.
+
+### Added
+
+- **`qa` as an environment**, covering `qa`, `staging`, `stage`, `acceptance`,
+  `uat` and `test`.
+
+  Without it, "anything that is not development" meant production — so a
+  staging site loaded the client's **production** keys and filled their real
+  analytics with test traffic. That is worse than no tracking, because the data
+  looks legitimate.
+
+  `APP_ENV` is folded to one of `development`, `qa` or `production`; anything
+  unrecognised, empty included, is production. Deliberately separate from
+  `config.IsDev()`, which decides whether the cache-purge endpoint may skip its
+  token: folding staging in there would leave purging unauthenticated on a
+  staging site. The two questions look alike and must not share an answer.
+
 ## 0.46.3 — the Analytics screen says what each provider needs
 
 ### Added

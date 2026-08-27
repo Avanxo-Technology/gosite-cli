@@ -118,10 +118,15 @@ $model = Analytics\Helper\Analytics::MODEL;
             <icon class="kiss-margin-xsmall-right">info</icon>
             <b>Applies to</b> is matched against the <b>website's</b> <code>APP_ENV</code>, not this CMS's —
             they run as separate services, and only the website reads it.
-            <code>development</code> matches <code>development</code>, <code>dev</code> or <code>local</code>;
-            <code>production</code> matches anything else, including unset;
-            <code>all</code> always matches. An integration loads only when it is enabled
-            <em>and</em> its environment matches.
+            <br>
+            <code>development</code> covers <code>development</code>, <code>dev</code>, <code>local</code>.
+            <code>qa</code> covers <code>qa</code>, <code>staging</code>, <code>stage</code>,
+            <code>acceptance</code>, <code>uat</code>, <code>test</code>.
+            <code>production</code> covers anything else, including unset.
+            <code>all</code> always matches.
+            <br>
+            An integration loads only when it is enabled <em>and</em> its environment matches — so a
+            staging site never loads production keys, and never pollutes a client's real data.
         </div>
     </kiss-card>
 
