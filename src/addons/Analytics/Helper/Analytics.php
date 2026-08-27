@@ -111,6 +111,9 @@ class Analytics extends \Lime\Helper {
         ],
         'google-analytics' => [
             'fields'  => ['measurementIds' => true],
+            // Plural for a reason: the plugin iterates it. A lone string is
+            // the easy mistake and it fails in silence, so it is wrapped.
+            'list'    => ['measurementIds'],
         ],
         'google-analytics-v3' => [
             'fields'  => ['trackingId' => true],
@@ -306,15 +309,22 @@ class Analytics extends \Lime\Helper {
         $item['environments'] = in_array($environment, self::ENVIRONMENTS, true) ? $environment : 'all';
 
         $config = is_array($item['config'] ?? null) ? $item['config'] : [];
+        $lists  = self::RULES[$provider]['list'] ?? [];
 
         foreach ($config as $key => $value) {
 
-            if (!is_string($value)) {
-                continue;
+            if (is_string($value)) {
+                $value = trim($value);
+                $this->sanitize((string)$key, $value);
             }
 
-            $value = trim($value);
-            $this->sanitize((string)$key, $value);
+            // Options the plugin iterates must be lists. Typing one value into
+            // a plural field is the obvious thing to do and it fails silently,
+            // so a scalar is wrapped rather than left to break later.
+            if (in_array($key, $lists, true) && !is_array($value)) {
+                $value = ($value === '' || $value === null) ? [] : [$value];
+            }
+
             $config[$key] = $value;
         }
 
@@ -347,6 +357,14 @@ class Analytics extends \Lime\Helper {
         foreach ($rules['fields'] as $key => $required) {
 
             $value = $config[$key] ?? null;
+
+            if (is_array($value)) {
+                $value = array_filter($value, fn($v) => $v !== '' && $v !== null);
+                if (!count($value) && $required) {
+                    $problems[] = "Missing \"{$key}\".";
+                }
+                continue;
+            }
 
             if (($value === null || $value === '') && $required) {
                 $problems[] = "Missing \"{$key}\".";
@@ -392,8 +410,12 @@ class Analytics extends \Lime\Helper {
 
             $skeleton = [];
 
+            $lists = self::RULES[$provider]['list'] ?? [];
+
             foreach (array_keys(self::RULES[$provider]['fields'] ?? []) as $key) {
-                $skeleton[$key] = '';
+                // Offer a list where the plugin wants one, so the shape is
+                // obvious before anything is typed.
+                $skeleton[$key] = in_array($key, $lists, true) ? [''] : '';
             }
 
             $templates[$provider] = $skeleton;

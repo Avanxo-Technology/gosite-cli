@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.46.10 — Google Analytics never loaded
+
+### Fixed
+
+- **Two official plugins expose an ESM interop object, not the factory.**
+  `google-analytics` and `google-analytics-v3` set their global to
+  `{default: fn, ...}`; the other seven set the function directly. The loader
+  called the global, found it was not callable, and skipped the provider — the
+  bundle loaded, the global existed, and no request ever reached Google. The
+  loader now unwraps `.default`, which is cheaper than maintaining a list of
+  which bundles do that.
+
+- **`measurementIds` has to be a list.** It is plural because the GA4 plugin
+  iterates it, and a lone string there loads the plugin and sends nothing, with
+  no error anywhere. Keys declared as lists are wrapped on save, and the config
+  template now offers `[""]` so the shape is visible before anything is typed.
+
+Both were found by running the real bundles rather than reading them: the
+loader is now exercised against the published files, mounting GA, GTM, several
+providers at once, and one unknown provider that must not take the others down.
+
 ## 0.46.9 — the config block was JSON-encoded twice
 
 ### Fixed

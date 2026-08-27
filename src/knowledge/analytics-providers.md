@@ -45,6 +45,23 @@ evaluating each one and calling it:
 | `fullstory` | `fullstory@0.2.7` | `analyticsFullStory` |
 | `customerio` | `customerio@0.2.2` | `analyticsCustomerio` |
 
+### Two expose an ESM interop object, not the factory
+
+`google-analytics` and `google-analytics-v3` set their global to
+`{default: fn, ...}` rather than to the factory itself. The other seven set the
+function directly. The loader unwraps `.default` when the global is not
+callable, which is cheaper than keeping a list of which ones do it.
+
+Symptom if this is missed: the bundle loads, the global exists, and the plugin
+is never built — no request to the provider at all.
+
+### Options the plugin iterates must be lists
+
+`measurementIds` is plural because the GA4 plugin iterates it. Storing a lone
+string there loads the plugin and sends nothing, with no error anywhere. The
+addon wraps a scalar into a list on save for keys declared as lists, and the
+config template offers `[""]` so the shape is visible before anything is typed.
+
 ### Four are published but unusable without a bundler
 
 Do not add these back without re-checking. Each fails while evaluating the

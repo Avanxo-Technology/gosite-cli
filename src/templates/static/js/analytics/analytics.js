@@ -182,6 +182,16 @@
         factory = CUSTOM[item.Provider];
       } else if (OFFICIAL[item.Provider]) {
         factory = window[OFFICIAL[item.Provider].global];
+
+        /*
+         * Two of the official bundles - google-analytics and its v3 - expose
+         * an ESM interop object rather than the factory itself, so the global
+         * is {default: fn, ...} instead of fn. Unwrapping it here beats
+         * recording which ones do that, since the list would go stale.
+         */
+        if (typeof factory !== 'function' && factory && typeof factory.default === 'function') {
+          factory = factory.default;
+        }
       }
 
       if (typeof factory !== 'function') {
