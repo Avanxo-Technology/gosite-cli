@@ -129,7 +129,9 @@ func (r *Reader) Integrations() []views.Integration {
 		config, _ := item["config"].(map[string]any)
 		if len(config) == 0 {
 			// An entry with no configuration cannot load anything, and a
-			// half-configured provider is worse than an absent one.
+			// half-configured provider is worse than an absent one. The CMS
+			// stores it anyway and reports the problem on its own screen,
+			// because refusing the save there is refusing it silently.
 			r.log.Warn("analytics integration has no configuration; skipping", "provider", provider)
 			continue
 		}

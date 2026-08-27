@@ -283,40 +283,63 @@ class Analytics extends \Lime\Helper {
      */
     public function beforeSave(array &$item, bool $isUpdate): void {
 
-        // Cockpit's select field emits an ARRAY, always - its select() does
-        // `if (!Array.isArray(val)) val = []` then pushes. So `provider`
-        // arrives as ["posthog"], not "posthog". Folding it here also stores
-        // the scalar, so everything downstream (the site included) reads a
-        // plain string.
+        /*
+         * Normalise, do not reject.
+         *
+         * Cockpit turns ANY uncaught exception from a save hook into
+         * `{"error":"500","message":"system error"}` (index.php:156) - the
+         * message never reaches the editor, and core's own validation has the
+         * same fate. So refusing a save is refusing it silently, which reads as
+         * a broken CMS rather than as "you typed the wrong key".
+         *
+         * Ordinary mistakes are therefore stored and reported on the Analytics
+         * screen, where there is room to say what is wrong and link to the
+         * provider's documentation. The site skips anything it cannot use, so a
+         * wrong entry costs tracking, not correctness.
+         *
+         * Genuinely hostile input is still refused outright - see sanitize().
+         */
         $provider    = $this->selectValue($item['provider'] ?? null);
         $environment = $this->selectValue($item['environments'] ?? null) ?: 'all';
-        $config      = $item['config'] ?? [];
 
         $item['provider']     = $provider;
-        $item['environments'] = $environment;
+        $item['environments'] = in_array($environment, self::ENVIRONMENTS, true) ? $environment : 'all';
 
-        // A brand-new entry is saved before it is filled in. Refusing that
-        // turns "I clicked save too early" into an error page, so an empty
-        // draft is allowed through: it renders nothing, and the admin screen
-        // shows it as incomplete.
-        if ($provider === '' && !$this->hasValues($config)) {
-            return;
+        $config = is_array($item['config'] ?? null) ? $item['config'] : [];
+
+        foreach ($config as $key => $value) {
+
+            if (!is_string($value)) {
+                continue;
+            }
+
+            $value = trim($value);
+            $this->sanitize((string)$key, $value);
+            $config[$key] = $value;
+        }
+
+        $item['config'] = $config;
+    }
+
+    /**
+     * What is wrong with an entry, in words an editor can act on.
+     *
+     * Empty means it is usable. This is the same knowledge validation used to
+     * throw, moved to where it can actually be read.
+     */
+    public function problems(array $item): array {
+
+        $provider = $this->selectValue($item['provider'] ?? null);
+        $config   = is_array($item['config'] ?? null) ? $item['config'] : [];
+        $problems = [];
+
+        if ($provider === '') {
+            return $this->hasValues($config) ? ['No provider selected.'] : ['Not configured yet.'];
         }
 
         if (!isset(self::PROVIDERS[$provider])) {
-            throw new \App\Exception\AppNotification(
-                "\"{$provider}\" is not a provider this site can render. Known: ".implode(', ', array_keys(self::PROVIDERS)).'.'
-            );
-        }
-
-        if (!in_array($environment, self::ENVIRONMENTS, true)) {
-            throw new \App\Exception\AppNotification(
-                "\"{$environment}\" is not a known environment. Use: ".implode(', ', self::ENVIRONMENTS).'.'
-            );
-        }
-
-        if (!is_array($config)) {
-            throw new \App\Exception\AppNotification('Configuration must be an object.');
+            $problems[] = "\"{$provider}\" is not a provider this site can load.";
+            return $problems;
         }
 
         $rules = self::RULES[$provider] ?? ['fields' => [], 'pattern' => []];
@@ -325,33 +348,33 @@ class Analytics extends \Lime\Helper {
 
             $value = $config[$key] ?? null;
 
-            if ($value === null || $value === '') {
-                if ($required) {
-                    throw new \App\Exception\AppNotification("{$provider} needs a \"{$key}\" value.");
-                }
+            if (($value === null || $value === '') && $required) {
+                $problems[] = "Missing \"{$key}\".";
                 continue;
             }
 
-            if (!is_string($value)) {
-                throw new \App\Exception\AppNotification("\"{$key}\" must be text.");
+            if (is_string($value) && isset($rules['pattern'][$key]) && !preg_match($rules['pattern'][$key], $value)) {
+                $problems[] = "\"{$key}\" does not look right: ".$this->describe($provider, $key);
             }
-
-            $value = trim($value);
-            $this->sanitize($key, $value);
-
-            if (isset($rules['pattern'][$key]) && !preg_match($rules['pattern'][$key], $value)) {
-                throw new \App\Exception\AppNotification(
-                    "\"{$key}\" does not look like a valid {$provider} value: {$this->describe($provider, $key)}"
-                );
-            }
-
-            $config[$key] = $value;
         }
 
-        // Keys not declared for this provider are dropped rather than stored:
-        // the application will not read them, so keeping them only invites
-        // someone to believe they do something.
-        $item['config'] = array_intersect_key($config, $rules['fields']);
+        // Keys that belong to a different provider are the most common mistake
+        // and the least obvious, so name them rather than ignoring them.
+        $unknown = array_diff(array_keys($config), array_keys($rules['fields']));
+
+        if (count($unknown) && count($rules['fields'])) {
+            $problems[] = 'Unused here: '.implode(', ', $unknown).'. '
+                .self::PROVIDERS[$provider].' expects '.implode(', ', array_keys($rules['fields'])).'.';
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Is this entry complete enough for the site to load it?
+     */
+    public function isUsable(array $item): bool {
+        return count($this->problems($item)) === 0;
     }
 
     /**
@@ -395,6 +418,10 @@ class Analytics extends \Lime\Helper {
      * regardless of provider.
      */
     protected function sanitize(string $key, string $value): void {
+        // The one thing still refused outright. It costs an opaque 500, which
+        // is a bad experience - but this is not an ordinary typo, it is input
+        // that has no business in a page, and storing it to report politely
+        // later is the wrong trade.
         if (preg_match('/["\'<>\\\\`]/', $value)) {
             throw new \App\Exception\AppNotification(
                 "\"{$key}\" contains characters that are not allowed here: quotes, angle brackets or backslashes."
@@ -418,7 +445,8 @@ class Analytics extends \Lime\Helper {
     // ------------------------------------------------------------- reading
 
     /**
-     * Every integration, for the admin screen. Includes disabled ones.
+     * Every integration, for the admin screen. Includes disabled and broken
+     * ones - seeing a broken entry is the whole point of that screen.
      */
     public function all(): array {
         return $this->app->module('content')->items(self::MODEL, [

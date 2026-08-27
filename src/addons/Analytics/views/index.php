@@ -39,6 +39,10 @@ $model = Analytics\Helper\Analytics::MODEL;
             These values are <b>public</b> — they are served in the HTML of every page, where
             anyone can read them. That is what makes them safe to keep here. Never put a real
             credential in this collection.
+            <br>
+            An entry is saved as you type it and checked <b>here</b>, not on save: Cockpit turns a
+            rejected save into an unreadable error, so problems are reported below instead. An entry
+            marked with a warning is stored but <b>not loaded by the site</b>.
         </div>
     </kiss-card>
 
@@ -54,6 +58,7 @@ $model = Analytics\Helper\Analytics::MODEL;
                     <tr>
                         <th fixed="left" width="70">ID</th>
                         <th class="kiss-align-center" width="20">On</th>
+                        <th class="kiss-align-center" width="20">OK</th>
                         <th width="180">Provider</th>
                         <th>Configuration</th>
                         <th width="130">Applies to</th>
@@ -62,8 +67,10 @@ $model = Analytics\Helper\Analytics::MODEL;
                 <tbody>
                     <?php foreach ($integrations as $item): ?>
                         <?php
-                            $enabled = !empty($item['enabled']);
-                            $applies = $item['environments'] ?? 'all';
+                            $enabled  = !empty($item['enabled']);
+                            $applies  = $item['environments'] ?? 'all';
+                            $problems = $this->helper('analytics')->problems($item);
+                            $provider = $item['provider'] ?? '';
                         ?>
                         <tr>
                             <td fixed="left">
@@ -76,20 +83,42 @@ $model = Analytics\Helper\Analytics::MODEL;
                             <td class="kiss-align-center">
                                 <icon class="<?= $enabled ? 'kiss-color-success' : 'kiss-color-muted' ?>">trip_origin</icon>
                             </td>
+                            <td class="kiss-align-center">
+                                <?php if (count($problems)): ?>
+                                    <icon class="kiss-color-danger" title="This entry cannot be loaded">error_outline</icon>
+                                <?php else: ?>
+                                    <icon class="kiss-color-success">check_circle_outline</icon>
+                                <?php endif; ?>
+                            </td>
                             <td>
-                                <?= htmlspecialchars($this->helper('analytics')->providerLabel($item['provider'] ?? '')) ?>
+                                <?= htmlspecialchars($this->helper('analytics')->providerLabel($provider)) ?>
                                 <?php if (!$enabled): ?>
                                     <div class="kiss-size-xsmall kiss-color-muted">disabled everywhere</div>
                                 <?php endif; ?>
+                                <?php if ($provider): ?>
+                                    <div class="kiss-size-xsmall">
+                                        <a href="<?= htmlspecialchars($this->helper('analytics')->providerDocs($provider)) ?>"
+                                           target="_blank" rel="noopener">options <icon>open_in_new</icon></a>
+                                    </div>
+                                <?php endif; ?>
                             </td>
-                            <td class="kiss-size-small kiss-text-monospace">
+                            <td class="kiss-size-small">
                                 <?php $config = is_array($item['config'] ?? null) ? $item['config'] : []; ?>
-                                <?php if (!count($config)): ?>
-                                    <span class="kiss-badge kiss-badge-outline kiss-color-danger">empty</span>
-                                <?php else: ?>
-                                    <?php foreach ($config as $key => $value): ?>
-                                        <div><?= htmlspecialchars($key) ?>: <?= htmlspecialchars((string)$value) ?></div>
-                                    <?php endforeach; ?>
+                                <div class="kiss-text-monospace">
+                                    <?php if (!count($config)): ?>
+                                        <span class="kiss-badge kiss-badge-outline kiss-color-muted">empty</span>
+                                    <?php else: ?>
+                                        <?php foreach ($config as $key => $value): ?>
+                                            <div><?= htmlspecialchars($key) ?>: <?= htmlspecialchars((string)$value) ?></div>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if (count($problems)): ?>
+                                    <div class="kiss-color-danger kiss-margin-xsmall-top">
+                                        <?php foreach ($problems as $problem): ?>
+                                            <div><icon class="kiss-margin-xsmall-right">warning</icon><?= htmlspecialchars($problem) ?></div>
+                                        <?php endforeach; ?>
+                                    </div>
                                 <?php endif; ?>
                             </td>
                             <td class="kiss-size-small">

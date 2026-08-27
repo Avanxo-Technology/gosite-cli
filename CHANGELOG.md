@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.46.5 — a wrong key is a message, not a 500
+
+### Fixed
+
+- **A configuration mistake in the Analytics editor answered `500 system
+  error`.** Putting a GTM container id under Google Analytics, or leaving a
+  required key out, refused the save — and the reason never reached the editor.
+
+  The cause is structural, not a slip: Cockpit turns **any** uncaught exception
+  from a save hook into `{"error":"500","message":"system error"}`
+  (`index.php:156`). Core's own validation has the same fate. So refusing a save
+  is refusing it *silently*, which reads as a broken CMS rather than as "you
+  typed the wrong key".
+
+  Validation therefore moved from the save to the screen. An entry is stored as
+  typed, and the Analytics screen shows exactly what is wrong next to it —
+  `Missing "measurementIds"` · `Unused here: id. Google Analytics 4 expects
+  measurementIds` — with a link to that provider's documentation. A column says
+  at a glance whether each entry is usable, and the site loads only the ones
+  that are.
+
+  Genuinely hostile input — quotes, angle brackets, backslashes — is still
+  refused outright. That costs an opaque 500, which is the right trade for
+  input that has no business in a page.
+
+  Saving an untouched draft, an unknown provider and a malformed key all store
+  cleanly now and report themselves instead of exploding.
+
 ## 0.46.4 — saving an integration no longer answers 500
 
 ### Fixed
