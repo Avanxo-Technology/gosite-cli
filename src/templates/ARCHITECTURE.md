@@ -43,7 +43,7 @@ cockpit/             Cockpit CMS configuration.
 deploy/              Dockerfiles for production, dev, and CMS images.
 static/              Assets served at /static.
 .gosite/             Bookkeeping written by the CLI, not by you.
-  manifest.tsv       Hash of every file gosite wrote, so `gosite sync` can tell
+  manifest.tsv       Hash of every file gosite wrote, so an upgrade can tell
                      an untouched file from one you hand-edited.
 ```
 
@@ -194,7 +194,7 @@ The CMS container mounts `cockpit/addons/` into `/var/www/html/addons`, which
 Cockpit core loads as first-class modules (bootstrap.php includes it in
 `modulesPaths`). Every scaffold ships with three built-in addons and, when opted
 in at scaffold time, two optional ones. All of them come from gosite's addon
-library (`src/addons/`), so `gosite sync --addons` pulls newer versions into an
+library (`src/addons/`), so `gosite addons add` pulls newer versions into an
 existing project.
 
 #### Built-ins (always installed)
@@ -288,10 +288,10 @@ available for feeding a value to Alpine `x-data` (it returns a string, which
 #### Managing addons
 
 Addons are plain directories, so an addon is added by dropping its folder into
-`cockpit/addons/` or running `gosite sync --addons <name>` and recreating the
+`cockpit/addons/` or running `gosite addons add <name>` and recreating the
 CMS container.
 In non-debug mode Cockpit caches the module list in
-`storage/cache/modules.cache.php`; `gosite sync` clears it, and the container
+`storage/cache/modules.cache.php`; `gosite addons add` clears it, and the container
 must restart because opcache holds the compiled bootstrap.
 
 ## htmx and Alpine
@@ -338,22 +338,18 @@ or from inside the directory without it.
 | `gosite cd __PROJECT__` | Jump to the directory (needs `eval "$(gosite shell-init)"`) |
 | `gosite path __PROJECT__` | Print the directory, for scripts |
  | `gosite remove __PROJECT__` | Delete everything; `--keep-source` keeps the code |
- | `gosite sync __PROJECT__` | Re-apply gosite's templates without overwriting your work (see below) |
- | `gosite sync __PROJECT__ --report` | Show how this project drifted from the templates, writing nothing |
  | `gosite infra up` / `down` / `status` | Shared Traefik, Redis, Mongo and MinIO (datastores bound to loopback) |
 | `gosite dns` | Check that `*.test` resolves to 127.0.0.1 |
 | `gosite doctor` | Check the local toolchain, then audit this project and the infrastructure against the secure defaults (read-only) |
 
-**What `gosite sync` will and will not touch.** gosite records the hash of every
-file it writes in `.gosite/manifest.tsv`. A managed file still matching its
-recorded hash is refreshed silently; one you have edited is left alone and
-reported, so your work survives an update. Files that vanished are restored.
+**How this project gets upgraded.** gosite records the hash of every file it
+writes in `.gosite/manifest.tsv`. Comparing those hashes against the files on
+disk tells you exactly which ones somebody here edited — that list is what a
+gosite upgrade must merge rather than overwrite. There is no command that does
+it for you: the procedure lives in `MIGRATIONS.md` in the gosite repo.
 
-`docker-compose.prod.yml` is the exception: **a normal sync never writes it**,
-not even with `--force`, because it is the file teams edit by hand. Re-rendering
-it takes the explicit `gosite sync __PROJECT__ --compose-prod --force`, which
-backs up the current file with a timestamp first. Use `--report` to see what the
-template would change before deciding.
+`docker-compose.prod.yml` was never gosite's to write. It is the file teams edit
+by hand, and nothing in gosite renders it into an existing project.
 
 Editing a `.go` or `.html` file rebuilds automatically through air in about
 three seconds - no restart needed. Restart for `.env`, compose or Dockerfile

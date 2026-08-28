@@ -193,7 +193,7 @@ _infra_minio_credentials() {
     warn "  2. rm ${credfile} 2>/dev/null; docker volume rm $(docker volume ls --format '{{.Name}}' 2>/dev/null | grep 'gosite-miniodata' | head -1)   # only if the bucket can be emptied"
     warn "  3. gosite infra up          # generates fresh random credentials"
     warn "     (to keep objects: create a new bucket under the new credentials and copy data over with 'mc mirror')"
-    warn "Then update S3_KEY / S3_SECRET in each project's .env ('gosite sync' refreshes them)."
+    warn "Then update S3_KEY / S3_SECRET in each project's .env by hand."
   fi
 }
 

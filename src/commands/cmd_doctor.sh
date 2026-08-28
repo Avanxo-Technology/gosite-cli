@@ -84,7 +84,7 @@ _audit_project() {
   if [[ -f "${config}" ]] && ! grep -q "trustedProxies" "${config}"; then
     _audit_finding "${name}" "forms.trustedProxies" "absent" \
       "the Forms rate limit applies globally, not per visitor" \
-      "gosite sync ${name}"
+      "add forms.trustedProxies to ${dir}/cockpit/config.php"
   fi
 
   # Empty purge token: the cache-purge endpoint answers unauthenticated in

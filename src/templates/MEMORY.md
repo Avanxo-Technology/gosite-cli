@@ -127,7 +127,7 @@ All addons come from gosite's addon library (`src/addons/`), so updating gosite
 keeps every future scaffold current. Update or add addons later with:
 
 ```bash
-gosite sync --addons
+gosite addons add <name>
 ```
 
 `sync` overwrites the addons in place and clears the Cockpit module cache. In

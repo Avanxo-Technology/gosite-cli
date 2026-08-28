@@ -99,7 +99,6 @@ gosite open my-site           # open in Finder (macOS)
 gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site
 gosite remove my-site          # deletes containers, cert and the directory
-gosite sync my-site            # re-apply gosite's templates to an existing project
 gosite addons add Blog my-site # install an addon into a project that already exists
 gosite infra down
 ```
@@ -289,73 +288,42 @@ gosite remove my-site                # everything, including the code
 gosite remove my-site --keep-source  # tear down the stack, keep the directory
 ```
 
-### Syncing templates into an existing project
+### Upgrading a project to a newer gosite
 
-Upgrading across a release that changed more than files — addons removed, SEO
-moved into content — has notes of its own in [MIGRATIONS.md](MIGRATIONS.md).
-Read the section for every version between the project's and the target one.
+There is no `sync` command. It existed until 0.49.0 and was removed: deciding
+file by file whether gosite still owned something produced upgrades that
+compiled and were still wrong, and the failure was always silent — a preserved
+file needing the same change as a refreshed one, a template that quietly
+replaced markup somebody had tuned.
 
-
-The templates that `create` writes are single-sourced: every generated file
-(compose files, Cockpit config, build files, the Go application, docs) is a
-real file under `src/templates/`, and every addon ships in `src/addons/`.
-`gosite sync` re-renders those same sources into a project that already
-exists, without touching your work — it reads the project's `.gosite.env`
-marker, so it always renders the exact values the project was created with.
-This is how an existing site picks up gosite updates.
+Upgrading is a deliberate, reviewed pass instead, written down in
+**[MIGRATIONS.md](MIGRATIONS.md)**: read the section for every version between
+the project's and the target one. The short version:
 
 ```bash
-gosite sync my-site              # compose + config.php + build files + addons + .env keys
-gosite sync my-site --compose    # re-render docker-compose.yml, config.php, deploy/ build files
-gosite sync my-site --addons     # refresh addons present, or --addons "Forms Blog Analytics Replica"
-gosite sync my-site --app        # bring internal/ and static/ up to the current templates
-gosite sync my-site --env        # add keys missing from .env (never overwrites)
-gosite sync my-site --report     # drift report: nothing is written
-gosite sync my-site --report --strict   # ...exit non-zero when there is drift (CI gate)
-gosite sync my-site --compose-prod --force  # the ONLY way docker-compose.prod.yml is rewritten
-gosite sync my-site --build      # ...then rebuild the local images
+# what the project has, per file
+cut -f3 my-site/.gosite/manifest.tsv | sort -u
+
+# which files the project's authors edited - compare each recorded hash
+# against the file on disk; that list is what must be merged, not overwritten
 ```
 
-`--app` is the one mode that touches your application sources (`internal/`, `static/`), which is why it is opt-in.
-The manifest guard still decides file by file: scaffolding you never opened is
-refreshed, anything you edited is preserved and reported. A project scaffolded
-long ago needs it before it can take an addon that ships application pages.
+Files with no drift can be copied from `src/templates/` with `__MODULE__` and
+`__PROJECT__` substituted. Files with drift get a three-way merge against the
+template of the version the manifest records, pulled from that release's tag.
+Then diff the rendered pages before and after: the `<body>` must come out
+byte-identical.
 
-### SEO and the Webapp addon
+`.gosite/manifest.tsv` is still the record of what gosite wrote and the hash it
+had at the time. It is what tells you where the local work is. A file you merge
+by hand keeps its old hash on purpose.
 
-Every project ships one built-in addon, `Webapp`. It owns the site-wide
-defaults that have to exist before a site has any content, and it absorbs the
-infrastructure that used to live in six separate addons (asset uploads, model
-CRUD, S3 storage, asset path normalisation, cache purging, starter content).
-
-Two content models drive it, both created on first admin load:
-
-- **`webapp`** (singleton) — favicon, site name, site URL, language, default
-  title, description and image, author, publisher and logo, X/Twitter handle,
-  `robots.txt`, `llms.txt` and JSON-LD.
-- **`seoPages`** (collection) — the same fields per path, plus `canonical`
-  and `noIndex`. A path here overrides the defaults for that page only.
-
-The application turns them into the document head and four routes:
-
-| Route | Source |
-| --- | --- |
-| `/robots.txt` | the `robotsTxt` field, verbatim |
-| `/llms.txt` | the `llmText` field, verbatim |
-| `/favicon.ico` | redirect to the favicon asset |
-| `/sitemap.xml` | `seoPages` minus `noIndex`, plus what mounted features contribute |
-
-Both `canonical` and `sitemap.xml` need **Site URL** set in the singleton, and
-neither falls back to the request host: behind a proxy or on a preview domain
-that would publish the wrong origin, so the tag is omitted and the route 404s
-until an editor fills the field in. Leave JSON-LD empty and the app emits a
-minimal `WebSite` block built from the other defaults; write your own and it is
-used untouched.
+`docker-compose.prod.yml` was never gosite's to write and still is not: it
+carries your production overrides — extra services, replicas, healthchecks.
 
 ### Addons in an existing project
 
-Adding an addon to a project made months ago has its own command, so it does
-not mean remembering that `sync` has a flag for it:
+Adding an addon to a project made months ago has its own command:
 
 ```bash
 gosite addons list my-site        # the library, and what this project has
@@ -376,26 +344,12 @@ neither:
 gosite restart my-site --build
 ```
 
-Two guarantees make sync safe to run blindly:
+**Hand-edited files are preserved.** Every file gosite writes is recorded in
+the project's `.gosite/manifest.tsv` with its hash at write time. Installing an
+addon refreshes a file that still matches its recorded hash and keeps one that
+differs, reporting it (`--force` takes the template version).
 
-- **`docker-compose.prod.yml` is yours.** No sync mode ever writes it — that
-  file carries your production overrides (extra services, replicas,
-  healthchecks), so sync only reports its drift, structurally, with `yq`
-  (normalized textual diff without it). The single exception is the explicit
-  `--compose-prod --force` above, which first copies the current file to a
-  timestamped `.bak` beside it and prints the backup path.
-- **Hand-edited files are preserved.** Every file gosite writes is recorded
-  in the project's `.gosite/manifest.tsv` with its hash at write time. On
-  sync, a file that still matches its recorded hash is refreshed from the
-  current template; one that differs was edited by hand, so it is kept and
-  reported (re-apply with `--force`). Files that vanished are restored.
-  Projects created before the manifest existed adopt one from their current
-  contents on the first sync — that first pass writes nothing but the
-  manifest itself and shows the drift report instead.
-
-`.env` merging only appends keys that the template has and the project lacks;
-existing values — including `COCKPIT_SEC_KEY` — are never overwritten. After an
-addon sync, Cockpit's module cache is cleared so the refreshed addons register
+After an install, Cockpit's module cache is cleared so the new addons register
 on the next boot.
 
 ### Project registry
@@ -421,7 +375,7 @@ gosite-cli/
     ├── lib/
     │   ├── config.sh             # workspace, network, ports, domains (env-overridable)
     │   ├── helpers.sh            # logging, validation, registry, locking, ports, dep checks
-    │   ├── templates.sh          # placeholder substitution + template-tree renderer (create + sync)
+    │   ├── templates.sh          # placeholder substitution, template renderer, addon install
     │   ├── manifest.sh           # per-project manifest of gosite-managed files (drift detection)
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     ├── templates/                # the project sources as REAL files (design D8):
@@ -432,7 +386,6 @@ gosite-cli/
     │   └── flavors/{tailwind,plain}/  # styling variants, overlaid per project
     └── commands/
         ├── cmd_create.sh         # project scaffolding from the template tree
-        ├── cmd_sync.sh           # re-apply templates safely (manifest guard, drift report)
         ├── cmd_addons.sh         # install/remove addons in an existing project
         ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix

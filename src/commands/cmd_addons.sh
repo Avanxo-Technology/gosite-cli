@@ -2,7 +2,7 @@
 #
 # gosite addons - install, list and remove Cockpit addons in an existing project.
 #
-# The work itself lives in cmd_sync.sh (_install_addons, _sync_addon_overlays):
+# The work itself lives in lib/templates.sh (_install_addons, install_addon_overlays):
 # this command is the discoverable front door for it, so adding an addon to a
 # project made months ago does not mean knowing that `sync` has an --addons
 # flag. There is one implementation, not two.
@@ -111,7 +111,6 @@ _addons_add() {
   require_dependencies
   source "${GOSITE_ROOT}/lib/templates.sh"
   source "${GOSITE_ROOT}/lib/manifest.sh"
-  source "${GOSITE_ROOT}/commands/cmd_sync.sh"
 
   _addons_parse_args "$@"
 
@@ -120,7 +119,7 @@ _addons_add() {
   local one
   for one in ${ADDON_NAMES}; do
     ! _addons_is_builtin "${one}" \
-      || fatal "${one} is built in: every gosite project already has it, and 'gosite sync' keeps it current."
+      || fatal "${one} is built in: every gosite project already has it." 
   done
 
   local dir; dir="$(resolve_project_dir "${ADDON_PROJECT}")"
@@ -130,9 +129,9 @@ _addons_add() {
 
   info "Installing into $(basename "${dir}"): ${ADDON_NAMES}"
 
-  # The CMS half, plus the manifest entries and the module-cache clear that go
-  # with it. Same function 'gosite sync --addons' uses.
-  _sync_addons "${dir}" "${ADDON_NAMES}" "" "${ADDON_FORCE}"
+  # The CMS half, plus the manifest entries, the application pages and the
+  # module-cache clear that go with it.
+  install_addons_into_project "${dir}" "${ADDON_NAMES}" "${ADDON_FORCE}"
 
   ok "Done."
   _addons_rebuild_notice "${dir}" "${ADDON_NAMES}"

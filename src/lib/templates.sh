@@ -117,7 +117,7 @@ _install_addons() {
       cp -R "${GOSITE_ROOT}/addons/${name}/." "${addons_dir}/${name}/"
       ok "Installed ${name}"
     else
-      warn "Addon '${name}' not found in gosite's addon library; check the name (try: gosite sync --list-addons)."
+      warn "Addon '${name}' not found in gosite's addon library; check the name (try: gosite addons list)."
     fi
   done
 
@@ -322,13 +322,102 @@ assert_no_placeholders() {
 
 # -----------------------------------------------------------------------------
 # BUILD FILES. The Dockerfiles, .air.toml and .dockerignore that make the
-# compose files buildable. Shared by create and sync so a synced project always
-# has the files the re-rendered compose files reference (otherwise docker fails
-# with "/deploy: no such file or directory" on old scaffolds).
+# compose files buildable, so a project always has the files its compose files
+# reference (otherwise docker fails with "/deploy: no such file or directory"
+# on old scaffolds).
 # -----------------------------------------------------------------------------
 
 # Writes a file only when its content changed. On an overwrite of an existing
-# file the previous version is kept as <file>.gosite.bak, so a gosite sync
+# file the previous version is kept as <file>.gosite.bak, so writing a template
 # never silently destroys a user-customized Dockerfile or .air.toml.
 
+# --- installing addons into a project ----------------------------------------
+#
+# Lifted out of the old 'gosite sync' when that command was removed. 'gosite
+# addons add' is the only caller now, which is why the manifest guard below
+# speaks in terms of that command.
 
+# Renders an addon's application half (its pages and the file that mounts them)
+# into the project, leaving anything the project has edited exactly as it is.
+install_addon_overlays() {
+  local dir="$1" want="$2" force="${3:-0}" one lower wrote
+
+  # The overlay carries __PROJECT__/__MODULE__ like every template, so the
+  # substitution variables have to describe THIS project before anything is
+  # rendered - not whatever a previous call left behind.
+  load_project_render_vars "${dir}"
+
+  for one in ${want}; do
+    addon_has_overlay "${one}" || continue
+
+    lower="$(printf '%s' "${one}" | tr '[:upper:]' '[:lower:]')"
+
+    # Render into a staging tree first, so a file the project has customised is
+    # never clobbered before it can be compared: matching the recorded hash
+    # means gosite still owns the file and may refresh it; differing means
+    # somebody edited it and it is theirs.
+    local stage
+    stage="$(mktemp -d)"
+    wrote="$(render_addon_overlay "${GOSITE_ROOT}/templates" "${stage}" "${lower}")"
+
+    if [[ -z "${wrote}" ]]; then
+      rm -rf "${stage}"
+      continue
+    fi
+
+    local rel recorded current kept=0 installed=0
+    while IFS= read -r rel; do
+      [[ -n "${rel}" ]] || continue
+
+      render_placeholders "${stage}/${rel}"
+
+      if [[ -f "${dir}/${rel}" && "${force}" -ne 1 ]]; then
+        recorded="$(manifest_get "${dir}" "${rel}")"
+        current="$(sha256_file "${dir}/${rel}")"
+
+        if [[ -n "${recorded}" && "${recorded}" != "${current}" ]]; then
+          warn "Preserved ${rel} (locally modified; re-apply with: gosite addons add ${one} --force)"
+          kept=$((kept + 1))
+          continue
+        fi
+      fi
+
+      mkdir -p "$(dirname "${dir}/${rel}")"
+      cp "${stage}/${rel}" "${dir}/${rel}"
+      printf '%s\n' "${rel}" | manifest_update "${dir}"
+      installed=$((installed + 1))
+    done <<< "${wrote}"
+
+    rm -rf "${stage}"
+
+    [[ "${kept}" -gt 0 ]] && info "${kept} ${one} file(s) left as you edited them; re-run with --force to take the template version."
+
+    ok "Installed the ${one} application pages (${installed} file(s))"
+    warn "${one} changes the application as well as the CMS: rebuild both the CMS image and the app - restarting is not enough."
+  done
+}
+
+# Installs the named addons' CMS half, records them in the manifest, adds their
+# application pages, and clears Cockpit's module cache.
+#
+# The cache clear is not sufficient on its own - addons are baked into the CMS
+# image, so until the rebuild Cockpit is still running the old one and would
+# write the stale list straight back. The clear that counts happens as the
+# container comes up (see clear_cockpit_module_cache); this one keeps a running
+# CMS from serving a list we already know is wrong.
+install_addons_into_project() {
+  local dir="$1" want="$2" force="${3:-0}"
+  local target="${dir}/cockpit/addons" one
+
+  _install_addons "${dir}" "${want}"
+
+  # Newly installed addons join the manifest; other entries are preserved.
+  for one in ${want}; do
+    [[ -d "${target}/${one}" ]] || continue
+    find "${target}/${one}" -type f | sed "s|^${dir}/||" | manifest_update "${dir}"
+  done
+
+  install_addon_overlays "${dir}" "${want}" "${force}"
+
+  clear_cockpit_module_cache "${dir}"
+}

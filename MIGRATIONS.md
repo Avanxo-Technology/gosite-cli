@@ -1,8 +1,9 @@
 # Migrations
 
 Upgrade notes for taking an existing project from an older gosite to a newer
-one. `gosite sync` handles the mechanical part; what is written here is the part
-it cannot decide for you.
+one. There is no `sync` command to do it for you — it was removed in 0.49.0
+because deciding file by file produced upgrades that compiled and were still
+wrong, silently. This is the procedure that replaced it.
 
 Read the section for every version between the project's and the target one.
 Find the project's version per file:

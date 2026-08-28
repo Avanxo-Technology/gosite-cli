@@ -110,8 +110,8 @@ After first login, grant `forms/manage` and `replica/manage` in Settings >
 Roles. To update the addons or add more:
 
 ```bash
-gosite sync --addons            # refresh built-ins + any optional addons already present
-gosite sync --addons Forms      # install or replace a single optional addon
+gosite addons list              # the library, and what this project has
+gosite addons add Forms         # install an optional addon
 ```
 
 ## Local development

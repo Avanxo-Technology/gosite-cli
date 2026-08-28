@@ -2,7 +2,7 @@
 #
 # The Analytics addon has no Go package of its own: its application half is
 # base scaffolding (the reader, the template function, the component and the
-# browser scripts), delivered by create and by `gosite sync --app`. This file
+# browser scripts), delivered by create. This file
 # is what turns "installed the addon into a project too old to have that
 # scaffolding" from a silently dead integration into a refusal that names the
 # missing pieces.

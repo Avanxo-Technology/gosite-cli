@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.49.0 — `gosite sync` is gone
+
+### Removed
+
+- **The `sync` command, and `src/commands/cmd_sync.sh` with it.** It decided
+  file by file whether gosite still owned something, and on a real project that
+  produced upgrades which compiled and were still wrong — a preserved file
+  needing the same change as a refreshed one, a template quietly replacing
+  markup somebody had tuned. The failure was always silent, which is the part
+  that made it worse than no command at all.
+
+  Upgrading an existing project is now a deliberate, reviewed pass, written
+  down in `MIGRATIONS.md`: read the manifest to find what the project's authors
+  edited, three-way merge those files against the template of the version the
+  manifest records, copy the rest, then diff the rendered pages before and
+  after. That is what the last upgrade actually did, by hand, and it caught
+  three regressions the build and the test suite were silent about.
+
+  `.gosite/manifest.tsv` stays. It is still the record of what gosite wrote and
+  the hash it had, which is exactly what tells you where the local work is.
+
+### Changed
+
+- **`gosite addons add` no longer borrows from the sync script.** The two
+  functions it needed — installing an addon's CMS half and rendering its
+  application pages behind the manifest guard — moved to `lib/templates.sh` as
+  `install_addons_into_project` and `install_addon_overlays`, next to the addon
+  primitives that were already there.
+
+- **Docs no longer point at a command that does not exist**: the website's
+  command table, the README, and the `ARCHITECTURE.md`, `README.md` and
+  `MEMORY.md` that ship into every generated project. `gosite doctor` and
+  `gosite infra` suggested `gosite sync` as the fix for two findings; they now
+  name the actual edit.
+
 ## 0.48.1 — two SEO regressions found by migrating a real site
 
 Both were introduced by 0.48.0 and both only show on a blog post, which is why

@@ -100,6 +100,7 @@ cannot show: whether an integration is actually running.
 
 The addon is baked into the CMS image, so an existing project needs a **CMS
 rebuild**, not a restart. The browser plugins are application code, so they need
-`gosite sync --app` and an application rebuild.
+the application files brought up to date by hand (see MIGRATIONS.md in the
+gosite repo) and an application rebuild.
 
 See `src/knowledge/analytics-providers.md` for what each provider needs and why.
