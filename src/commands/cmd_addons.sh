@@ -68,7 +68,7 @@ _addons_available() {
 # valid arguments to add or remove.
 _addons_is_builtin() {
   case "$1" in
-    AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge|StarterContent) return 0 ;;
+    Webapp) return 0 ;;
     *) return 1 ;;
   esac
 }

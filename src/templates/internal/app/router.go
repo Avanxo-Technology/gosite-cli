@@ -54,6 +54,10 @@ func NewRouter(a *App) *echo.Echo {
 	e.GET("/", h.Home)                   // the page, served from cache
 	e.POST("/cache/purge", h.PurgeCache) // htmx button + Cockpit webhook
 	e.GET("/healthz", h.Health)          // liveness, checks Redis
+	e.GET("/robots.txt", h.Robots)       // robots.txt from webapp singleton
+	e.GET("/favicon.ico", h.Favicon)     // favicon redirect to asset
+	e.GET("/llms.txt", h.LLMs)           // LLM Text from webapp singleton
+	e.GET("/sitemap.xml", h.Sitemap)     // built from seoPages + mounted features
 
 	// Optional features, mounted after the routes above so those keep
 	// precedence. The blog serves /{blog} and /{blog}/{slug}; echo resolves a

@@ -6,14 +6,19 @@
   Before going to production, vendor them into /static so the site does not
   depend on third-party uptime and a CSP can be tightened.
 */}}
-{{define "layout"}}<!DOCTYPE html>
-<html lang="en">
+{{define "layout"}}
+{{/* SEO resolved once per render: webapp defaults → seoPages → .SEOData.
+     Resolved before <html> because the document language comes from it; the
+     resolved title wins over .Title and the meta tags follow in $seo.tags. */}}
+{{$seo := seoData .Path .SEOData}}<!DOCTYPE html>
+<html lang="{{or $seo.lang "en"}}">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>{{.Title}}</title>
-	{{/* Pages may add tags to the document head - meta description, canonical,
-	     Open Graph. Pages that define nothing get nothing. */}}
+	<title>{{or $seo.title .Title}}</title>
+	{{$seo.tags}}
+	{{with faviconUrl}}<link rel="icon" href="{{.}}">{{end}}
+	{{/* Pages may add tags to the document head */}}
 	{{block "head" .}}{{end}}
 	{{template "analytics-head" .}}
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@aprinciple/modern-reset@0.1.1/reset.min.css">

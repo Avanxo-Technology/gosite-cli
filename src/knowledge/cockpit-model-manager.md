@@ -8,11 +8,11 @@ but there is no built-in endpoint for managing **model definitions** (schemas)
 themselves — creating, updating, listing, or removing collections and singletons
 programmatically.
 
-## The `ModelManager` addon
+## The consolidated `Webapp` addon
 
 Every gosite project ships this as a built-in addon at
-`cockpit/addons/ModelManager/bootstrap.php`. It registers three endpoints under
-the REST API:
+`cockpit/addons/Webapp/bootstrap.php` (it absorbed the former `ModelManager`
+addon). It registers three endpoints under the REST API:
 
 ### List all models
 

@@ -104,6 +104,10 @@ func purgeTarget(c *echo.Context) (model, id string) {
 // therefore on every page. A change to one of them invalidates everything.
 var siteWideModels = map[string]bool{
 	"analyticsIntegrations": true,
+	// Webapp SEO configuration and per-page SEO overrides are rendered by the
+	// layout on every page, so editing either invalidates the whole site.
+	"webapp":   true,
+	"seoPages": true,
 }
 
 func isSiteWide(model string) bool { return siteWideModels[model] }

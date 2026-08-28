@@ -28,10 +28,11 @@ This registers `POST /api/assets/upload`.
 
 ## gosite — built-in addon
 
-Every project scaffolded with `gosite create` includes this endpoint automatically
-as a Cockpit addon at `cockpit/addons/AssetsUpload/bootstrap.php`. No manual
-Docker exec or api.php editing is needed — the addon is bind-mounted in dev and
-baked into the production image by `Dockerfile.cms`.
+Every project scaffolded with `gosite create` includes this endpoint automatically,
+registered by the consolidated **Webapp** addon (which absorbed the former
+`AssetsUpload` addon) at `cockpit/addons/Webapp/bootstrap.php`. No manual
+Docker exec or api.php editing is needed — the addon is baked into the production
+image by `Dockerfile.cms`.
 
 ## Usage
 
@@ -50,10 +51,10 @@ Returns:
 ## Caveat — manual projects only
 
 Projects that were NOT scaffolded with `gosite create` (or were created before
-this addon was added) do not have the endpoint. For those, add it manually as
-a Cockpit addon at `cockpit/addons/AssetsUpload/bootstrap.php` (see the PHP
-code above). Once the file is in place, restart the CMS container so Cockpit
-discovers the new addon.
+this consolidate addon existed) do not have the endpoint. For those, add it
+manually in a Cockpit addon (the Webapp addon's bootstrap shows the exact hook —
+see `cockpit/addons/Webapp/bootstrap.php`). Once the file is in place, restart
+the CMS container so Cockpit discovers the new addon.
 
 ## Asset field type
 
@@ -75,7 +76,7 @@ object) for backward compatibility. The recommended approach is a custom
 
 Every gosite project that uses this endpoint should document in its `ARCHITECTURE.md`:
 
-1. That `POST /api/assets/upload` exists (via the built-in `AssetsUpload` addon)
+1. That `POST /api/assets/upload` exists (via the built-in `Webapp` addon)
 2. How to upload assets via the API (curl command)
 
 And in `MEMORY.md` under "Common tasks":

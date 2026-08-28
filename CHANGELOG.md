@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.48.0 — one Webapp addon, and a site that can describe itself
+
+Six infrastructure addons became one, and the SEO that projects were writing by
+hand became content an editor owns.
+
+### Added
+
+- **The `Webapp` addon.** It replaces `AssetPathFix`, `AssetsUpload`,
+  `CachePurge`, `CloudStorage`, `ModelManager` and `StarterContent` — the same
+  work, one folder, one admin screen. It creates two models on first admin
+  load: the `webapp` singleton (site-wide SEO defaults) and the `seoPages`
+  collection (per-path overrides).
+
+- **Four routes served from the CMS**: `/robots.txt` and `/llms.txt` emit their
+  fields verbatim, `/favicon.ico` redirects to the favicon asset, and
+  `/sitemap.xml` is built at request time from `seoPages` minus the entries
+  marked `noIndex`. Features that mount their own pages contribute paths
+  through `handlers.OnSitemap`, the same arrangement as `OnPurge`.
+
+- **A document head an auditor recognises**: canonical and `og:url`, `og:type`,
+  `og:locale`, `<html lang>`, `meta author`, `meta publisher`, `twitter:site`
+  and `twitter:creator`, and `meta robots` on every page rather than only when
+  a page opts out of indexing — absent, the tag cannot be told apart from
+  nobody having thought about it.
+
+- **JSON-LD with a floor.** Leave the field empty and the app emits a minimal
+  schema.org `WebSite` built from the other defaults, with the publisher as a
+  nested `Organization`. Write your own and it is used untouched: rewriting an
+  editor's JSON behind their back is the kind of magic nobody can debug later.
+
+### Fixed
+
+- **Assets rendered as "Not set" everywhere.** A Cockpit asset path is relative
+  to the uploads root and carries no leading slash, and with S3 storage the
+  file is not on the app's origin at all. Both halves resolved it wrong: the
+  admin screen called `pathToUrl()`, which only maps local app paths, and the
+  app emitted the bare path — so `og:image` and `rel="icon"` were relative URLs
+  that 404'd, and a favicon that was set displayed as missing. The screen now
+  uses `fileStorage->getURL("uploads://…")` and the app joins the asset base
+  without depending on a leading slash.
+
+- **`llmText` was a wysiwyg**, so text served verbatim to LLM crawlers arrived
+  wrapped in `<p>`. It is a plain textarea now, and existing projects are
+  migrated in place.
+
+### Changed
+
+- **The Webapp admin screen lists whatever the model defines**, one row per
+  field, instead of a fixed set of rows. A field added to the model appears
+  without the screen being touched. Fields nobody wants to write by hand link
+  out to a generator while they are empty.
+
+- **Model migrations run on admin load.** `ensureModels()` only ever created
+  what was missing, so a project scaffolded before a field changed kept the old
+  definition forever. Migrations are idempotent and never touch stored entries.
+
+## 0.47.0 — sync could leave a project that does not compile
+
+Three faults, found by walking a real project through the upgrade path rather
+than reading it.
+
+### Fixed
+
+- **`gosite sync --app` could leave a project unable to build, silently.** The
+  manifest guard decides file by file, but Go source is not a set of
+  independent files. On a real project it refreshed `app.go` and
+  `internal/analytics/` while preserving a hand-edited `render.go` — every
+  decision correct on its own, the result `undefined: views.Integration`, and
+  nobody found out until deploy.
+
+  `--app` now checks that the project still builds and, when it does not,
+  prints the compiler's own words and names the likely cause: a preserved file
+  needing the same change as a refreshed one. Best-effort and never fatal —
+  the files are already written, so failing there would only hide what was
+  done.
+
+- **`create` never recorded `internal/` or `static/` in the manifest.**
+  `managed_files()` carried a hardcoded list written before `--app` existed, so
+  every application source looked unmanaged: a hand-edited one could be
+  overwritten without warning, and the "preserved vs refreshed" split above had
+  nothing to go on.
+
+  The list is now derived from the template tree itself — base, both flavors
+  and every addon overlay — so it cannot drift out of step again. A project's
+  own handlers, pages and images stay out of it.
+
+- **A file gosite has no record of writing is preserved, not overwritten.**
+  Unknown provenance is a reason to be careful, not a licence. `--force` still
+  takes the template version.
+
+- **The stray `REQUIRES` in project roots is cleaned up.** 0.46.x stopped
+  creating it; `sync` now removes the ones already out there, and only when the
+  file is byte-identical to one gosite ships.
+
 ## 0.46.14 — mounting waited for nothing, and threw
 
 ### Fixed

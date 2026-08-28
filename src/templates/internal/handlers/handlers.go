@@ -12,6 +12,7 @@ import (
 	"__MODULE__/internal/cache"
 	"__MODULE__/internal/cms"
 	"__MODULE__/internal/config"
+	"__MODULE__/internal/seo"
 	"__MODULE__/internal/views"
 )
 
@@ -29,6 +30,7 @@ type Deps struct {
 	CMS      *cms.Client
 	Renderer *views.Renderer
 	Redis    *redis.Client
+	SEO      *seo.SEO
 }
 
 // Handlers is the receiver every handler hangs off, so they share dependencies
@@ -36,7 +38,8 @@ type Deps struct {
 type Handlers struct {
 	Deps
 
-	purgeHooks []PurgeHook
+	purgeHooks       []PurgeHook
+	sitemapProviders []SitemapProvider
 }
 
 func New(d Deps) *Handlers { return &Handlers{Deps: d} }

@@ -2,8 +2,8 @@
 
 ## 1. GuzzleHttp `verify` option — must be nested under `http`
 
-The CloudStorage addon builds the S3 client constructor options in
-`cockpit/addons/CloudStorage/bootstrap.php`. AWS SDK v3 uses GuzzleHttp
+The consolidated Webapp addon builds the S3 client constructor options in
+`cockpit/addons/Webapp/bootstrap.php` (section "CloudStorage"). AWS SDK v3 uses GuzzleHttp
 internally, and the TLS verification flag must go inside the `http` key —
 **not** at the root of `$s3Opts`:
 

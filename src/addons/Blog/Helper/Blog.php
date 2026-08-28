@@ -152,6 +152,13 @@ class Blog extends \Lime\Helper {
                     $this->link('category', 'Category', self::MODEL_CATEGORIES, 'title'),
                     $this->link('author', 'Author', self::MODEL_AUTHORS, 'name'),
                     $this->field('publishedAt', 'date', 'Published at', false, ['info' => 'Controls ordering. Set to the save date when left empty.']),
+                    // SEO fields
+                    $this->field('seoTitle', 'text', 'SEO Title', false, ['info' => 'Override the <title> tag. Falls back to the article title when empty.']),
+                    $this->field('seoDescription', 'text', 'SEO Description', false, ['info' => 'Override the meta description. Falls back to excerpt when empty.']),
+                    $this->field('seoImage', 'asset', 'SEO Image', false, ['info' => 'Override the OG image. Falls back to cover when empty.']),
+                    $this->field('seoJsonLd', 'code', 'JSON-LD', false, ['info' => 'Custom structured data for search engines (schema.org).']),
+                    $this->field('seoCanonical', 'text', 'Canonical URL', false, ['info' => 'Override the canonical URL. Leave empty to use the article path.']),
+                    $this->field('seoNoIndex', 'boolean', 'No Index', false, ['info' => 'If set, search engines will not index this article.']),
                 ],
             ]);
             $created = true;

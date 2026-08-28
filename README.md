@@ -316,6 +316,37 @@ The manifest guard still decides file by file: scaffolding you never opened is
 refreshed, anything you edited is preserved and reported. A project scaffolded
 long ago needs it before it can take an addon that ships application pages.
 
+### SEO and the Webapp addon
+
+Every project ships one built-in addon, `Webapp`. It owns the site-wide
+defaults that have to exist before a site has any content, and it absorbs the
+infrastructure that used to live in six separate addons (asset uploads, model
+CRUD, S3 storage, asset path normalisation, cache purging, starter content).
+
+Two content models drive it, both created on first admin load:
+
+- **`webapp`** (singleton) — favicon, site name, site URL, language, default
+  title, description and image, author, publisher and logo, X/Twitter handle,
+  `robots.txt`, `llms.txt` and JSON-LD.
+- **`seoPages`** (collection) — the same fields per path, plus `canonical`
+  and `noIndex`. A path here overrides the defaults for that page only.
+
+The application turns them into the document head and four routes:
+
+| Route | Source |
+| --- | --- |
+| `/robots.txt` | the `robotsTxt` field, verbatim |
+| `/llms.txt` | the `llmText` field, verbatim |
+| `/favicon.ico` | redirect to the favicon asset |
+| `/sitemap.xml` | `seoPages` minus `noIndex`, plus what mounted features contribute |
+
+Both `canonical` and `sitemap.xml` need **Site URL** set in the singleton, and
+neither falls back to the request host: behind a proxy or on a preview domain
+that would publish the wrong origin, so the tag is omitted and the route 404s
+until an editor fills the field in. Leave JSON-LD empty and the app emits a
+minimal `WebSite` block built from the other defaults; write your own and it is
+used untouched.
+
 ### Addons in an existing project
 
 Adding an addon to a project made months ago has its own command, so it does
@@ -424,7 +455,12 @@ my-site/
 │   ├── response.go           # how this app replies (thin layer over Echo)
 │   ├── home.go               # GET /
 │   ├── purge.go              # POST /cache/purge
-│   └── health.go             # GET /healthz
+│   ├── health.go             # GET /healthz
+│   ├── robots.go             # GET /robots.txt      (from the webapp singleton)
+│   ├── llms.go               # GET /llms.txt        (from the webapp singleton)
+│   ├── favicon.go            # GET /favicon.ico     (redirect to the asset)
+│   └── sitemap.go            # GET /sitemap.xml     (built at request time)
+├── seo/                      # resolves meta tags: defaults -> seoPages -> page
 ├── cache/                    # cache-aside over Redis, written once
 ├── cms/                      # the Cockpit API client
 ├── cockpit/config.php        # points Cockpit at MongoDB (production only)

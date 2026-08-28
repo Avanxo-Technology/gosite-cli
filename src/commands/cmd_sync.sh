@@ -123,6 +123,8 @@ USAGE
   # copies out of it behind the manifest guard.
   GOSITE_SYNC_TMP="$(mktemp -d)"
   trap 'rm -rf "${GOSITE_SYNC_TMP}"' RETURN
+  _sync_remove_stray_requires "${dir}"
+
   local exp="${GOSITE_SYNC_TMP}/expected"
   # --app compares against the application sources too, which the default
   # scope does not render.
@@ -161,6 +163,32 @@ USAGE
   ok "Sync complete. Start the project with 'gosite start $(basename "${dir}")'"
 }
 
+# Removes the stray REQUIRES file gosite used to copy into project roots.
+#
+# REQUIRES describes an addon to gosite; it has no business in a project.
+# Versions 0.45.0 to 0.46.x wrote it there when installing an addon with an
+# application half. The rendering fix stopped new ones, and this removes the
+# ones already out there - otherwise every affected project keeps a confusing
+# file forever, and sync would dutifully keep it up to date.
+#
+# Only removed when it is byte-identical to one gosite ships, so a project that
+# happens to have its own REQUIRES is left alone.
+_sync_remove_stray_requires() {
+  local dir="$1" stray="${1}/REQUIRES" addon
+
+  [[ -f "${stray}" ]] || return 0
+
+  for addon in "${GOSITE_ROOT}/templates/addons"/*/REQUIRES; do
+    [[ -f "${addon}" ]] || continue
+    if [[ "$(sha256_file "${stray}")" == "$(sha256_file "${addon}")" ]]; then
+      rm -f "${stray}"
+      manifest_forget "${dir}" "REQUIRES" 2>/dev/null || true
+      ok "Removed the stray REQUIRES from the project root (it describes an addon to gosite, not your project)"
+      return 0
+    fi
+  done
+}
+
 # Brings the application sources (internal/) up to the current templates.
 #
 # Deliberately opt-in. Every other sync mode promises never to touch your Go
@@ -186,7 +214,45 @@ _sync_app() {
   # projects customise - the manifest guard is what keeps that safe.
   info "Syncing application sources (internal/, static/)"
   _sync_apply_expected "${dir}" "${exp}" "${force}" "internal/" "static/"
+
+  _sync_app_verify "${dir}"
+
   warn "The application is compiled, so rebuild it: gosite restart $(basename "${dir}") --build"
+}
+
+# Checks that what sync just left behind still compiles.
+#
+# The manifest guard decides file by file, but Go source is not a set of
+# independent files: refreshing one and preserving another can leave a project
+# that does not build, with every individual decision correct. That happened -
+# app.go was refreshed to call a renderer signature that the preserved
+# render.go did not have - and it was discovered at deploy time rather than
+# here, which is the worst possible moment.
+#
+# Best-effort and never fatal: sync has already written the files, so failing
+# now would only hide what was done. The point is to say it out loud, with the
+# compiler's own words and a pointer at the likely cause.
+_sync_app_verify() {
+  local dir="$1" out
+
+  command -v go >/dev/null 2>&1 || return 0
+  [[ -f "${dir}/go.mod" ]] || return 0
+
+  info "Checking the application still builds"
+
+  if out="$(cd "${dir}" && go build ./... 2>&1)"; then
+    ok "Builds cleanly."
+    return 0
+  fi
+
+  err "The project does not compile after this sync:"
+  printf '%s\n' "${out}" | sed 's/^/    /' | head -20
+
+  printf '\n'
+  warn "This usually means a file gosite preserved needs the same change as one it refreshed."
+  printf "  Preserved files are listed above. Merge the missing pieces by hand, or take\n"
+  printf "  the template version of a specific file with: gosite sync %s --app --force\n" "$(basename "${dir}")"
+  printf "  (--force discards your edits to every managed application file, so prefer the merge.)\n"
 }
 
 # Applies the expected tree to the project, file by file, behind the manifest
@@ -232,6 +298,20 @@ _sync_apply_expected() {
     fi
 
     recorded="$(manifest_get "${dir}" "${rel}")"
+
+    # No manifest entry for a file that already exists and differs from the
+    # template means gosite has no record of writing it - so it cannot claim
+    # the right to replace it. Treat that like a hand edit: unknown provenance
+    # is a reason to be careful, not a licence. Overwriting here silently
+    # destroyed work whenever a file predated the manifest.
+    if [[ -z "${recorded}" ]]; then
+      if [[ "${force}" -ne 1 ]]; then
+        warn "Preserved ${rel} (exists but gosite has no record of writing it; re-apply with: gosite sync --force)"
+        continue
+      fi
+      warn "Force-refreshed ${rel} (unrecorded local file discarded)"
+    fi
+
     if [[ -n "${recorded}" && "${current}" != "${recorded}" ]]; then
       if [[ "${force}" -ne 1 ]]; then
         warn "Preserved ${rel} (locally modified; re-apply with: gosite sync --force)"
@@ -454,7 +534,7 @@ _sync_list_addons() {
     [[ -d "${d}" ]] || continue
     local name; name="$(basename "${d}")"
     case "${name}" in
-      AssetsUpload|ModelManager|CloudStorage|AssetPathFix|CachePurge|StarterContent) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
+      Webapp) printf '  %-16s %s\n' "${name}" "(built-in, always installed)" ;;
       *)
         if addon_has_overlay "${name}"; then
           printf '  %-16s %s\n' "${name}" "(optional, opt-in via --addons; also adds application pages)"

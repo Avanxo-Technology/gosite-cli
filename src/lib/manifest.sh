@@ -23,6 +23,20 @@ manifest_exists() {
 # on disk and what the manifest still records - so a deleted file keeps being
 # tracked (and reported missing) instead of silently dropping out of the
 # managed universe.
+# Relative paths under internal/ and static/ that the template tree provides -
+# the base tree, both styling flavors, and every addon overlay. Printed one per
+# line; callers filter to what the project actually has.
+_managed_template_paths() {
+  local root="${GOSITE_ROOT}/templates" base
+
+  [[ -d "${root}" ]] || return 0
+
+  for base in "${root}" "${root}"/flavors/* "${root}"/addons/*/ "${root}"/addons/*/flavors/*; do
+    [[ -d "${base}" ]] || continue
+    ( cd "${base}" 2>/dev/null && find internal static -type f 2>/dev/null | sed 's|^\./||' ) || true
+  done
+}
+
 managed_files() {
   local dir="$1" f mpath
   {
@@ -46,6 +60,19 @@ managed_files() {
         printf '%s\n' "${f#"${dir}"/}"
       done < <(find "${dir}/cockpit/addons" -type f | sort)
     fi
+
+    # The application sources gosite ships.
+    #
+    # Derived from the template tree rather than listed here: a hardcoded list
+    # is what caused this to miss internal/ entirely once `sync --app` started
+    # writing there, so `create` recorded nothing under it and every one of
+    # those files looked unmanaged. A project could then have its own work
+    # silently overwritten, or - worse - end up with some files refreshed and
+    # others preserved, and not compile.
+    #
+    # Only paths gosite actually ships are listed, so a project's own handlers,
+    # pages and images stay out of the manifest and out of sync's way.
+    _managed_template_paths
 
     # Entries recorded by an earlier write cover files that have since been
     # deleted from the project.
@@ -97,6 +124,24 @@ manifest_ensure_adopted() {
 # current content of those files, leaving every other entry untouched. This is
 # how sync records what it just wrote: entries for preserved (hand-edited)
 # files keep the hash of what gosite last wrote, not the local edits.
+# Drops one entry from the manifest, for a file gosite has removed. Without
+# this the entry lingers and the file keeps being reported as managed - and,
+# worse, a later sync would see it "missing" and restore it.
+manifest_forget() {
+  local dir="$1" rel="$2"
+  manifest_exists "${dir}" || return 0
+  with_lock "$(manifest_path "${dir}")" _manifest_forget_locked "${dir}" "${rel}"
+}
+
+_manifest_forget_locked() {
+  local dir="$1" rel="$2" file tmp
+  file="$(manifest_path "${dir}")"
+  [[ -f "${file}" ]] || return 0
+  tmp="$(mktemp "$(dirname "${file}")/.gosite.XXXXXX")"
+  grep -v -F -e "${rel}	" "${file}" > "${tmp}" 2>/dev/null || true
+  mv "${tmp}" "${file}"
+}
+
 manifest_update() {
   local dir="$1" rel
   local -a rels=()

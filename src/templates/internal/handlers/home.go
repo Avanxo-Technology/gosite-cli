@@ -83,6 +83,7 @@ func (h *Handlers) renderHomeContent(content cms.Content) ([]byte, error) {
 	var buf bytes.Buffer
 	err := h.Renderer.Page(&buf, "home", map[string]any{
 		"Title":   "__PROJECT__",
+		"Path":    "/",
 		"Content": content,
 		"IsDev":   h.Config.IsDev(),
 	})

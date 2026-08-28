@@ -94,10 +94,11 @@ _write_builtin_addons() {
   local addons_src="${GOSITE_ROOT}/addons"
   local target="$1/cockpit/addons"
 
-  for name in AssetsUpload ModelManager CloudStorage AssetPathFix CachePurge StarterContent; do
-    mkdir -p "${target}/${name}"
-    cp -R "${addons_src}/${name}/." "${target}/${name}/"
-  done
+  # Webapp is the single consolidated addon that replaces the six individual
+  # infrastructure addons (AssetsUpload, ModelManager, CloudStorage,
+  # AssetPathFix, CachePurge, StarterContent) and adds SEO management.
+  mkdir -p "${target}/Webapp"
+  cp -R "${addons_src}/Webapp/." "${target}/Webapp/"
 }
 
 # Copies the optional Cockpit addons (default Forms + Replica) into
@@ -295,11 +296,19 @@ addon_has_overlay() {
 
 # A rendered file must never keep a __PLACEHOLDER__ token: a template and the
 # substitution list drifting apart is a bug, not a silent degradation.
+#
+# PHP addon sources legitimately contain the PHP magic constants (__DIR__,
+# __FILE__, __LINE__, ...), which match the __[A-Z_]+__ shape. They ship as-is
+# and are never substituted, so they are exempted from the check below.
 assert_no_placeholders() {
   local dir="$1" f tok bad=0
   while IFS= read -r f; do
     [[ -n "${f}" ]] || continue
     while IFS= read -r tok; do
+      [[ -n "${tok}" ]] || continue
+      case "${tok}" in
+        __LINE__|__FILE__|__DIR__|__FUNCTION__|__CLASS__|__TRAIT__|__METHOD__|__NAMESPACE__) continue ;;
+      esac
       err "Unresolved placeholder ${tok} in ${f}"
       bad=1
     done < <(grep -oE '__[A-Z][A-Z0-9_]*__' "${f}" | sort -u)

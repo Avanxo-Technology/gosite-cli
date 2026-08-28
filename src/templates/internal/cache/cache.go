@@ -108,6 +108,20 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 	return v.([]byte), false, nil
 }
 
+// Get retrieves a cached value by key. Returns nil if not found.
+func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
+	val, err := c.rdb.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+// Set stores a value with the given TTL.
+func (c *Cache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	return c.rdb.Set(ctx, key, value, ttl).Err()
+}
+
 // Purge removes fresh and stale keys so an editor never has to wait out the
 // TTL and stale content is cleared alongside fresh content.
 func (c *Cache) Purge(ctx context.Context, keys ...string) error {

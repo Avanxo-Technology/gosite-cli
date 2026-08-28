@@ -188,6 +188,7 @@ func (b *Blog) renderIndex(blogDoc cms.Content, blogSlug string, page int) ([]by
 
 	data := map[string]any{
 		"Title":   title,
+		"Path":    path,
 		"Blog":    blogDoc,
 		"Posts":   res.Items,
 		"Page":    page,
@@ -228,12 +229,14 @@ func (b *Blog) renderArticle(blogDoc cms.Content, blogSlug, slug string) ([]byte
 	path := "/" + blogSlug + "/" + slug
 
 	data := map[string]any{
-		"Title":  title,
-		"Blog":   blogDoc,
-		"Post":   post,
-		"Author": asDoc(post["author"]),
-		"Meta":   b.meta(title, str(post["excerpt"]), path, post["cover"]),
-		"IsDev":  b.Config.IsDev(),
+		"Title":   title,
+		"Path":    path,
+		"Blog":    blogDoc,
+		"Post":    post,
+		"Author":  asDoc(post["author"]),
+		"SEOData": b.seoData(post),
+		"Meta":    b.meta(title, str(post["excerpt"]), path, post["cover"]),
+		"IsDev":   b.Config.IsDev(),
 	}
 
 	var buf bytes.Buffer
@@ -281,6 +284,59 @@ func (b *Blog) meta(title, description, path string, cover any) map[string]any {
 		"Canonical":   canonical,
 		"Image":       image,
 	}
+}
+
+// seoData creates SEO overrides from a blog post's SEO fields.
+func (b *Blog) seoData(post cms.Content) map[string]any {
+	if post == nil {
+		return nil
+	}
+
+	data := map[string]any{}
+
+	// SEO title: override falls back to article title
+	if v := str(post["seoTitle"]); v != "" {
+		data["title"] = v
+	} else if v := str(post["title"]); v != "" {
+		data["title"] = v
+	}
+
+	// SEO description: override falls back to excerpt
+	if v := str(post["seoDescription"]); v != "" {
+		data["description"] = v
+	} else if v := str(post["excerpt"]); v != "" {
+		data["description"] = v
+	}
+
+	// SEO image: override falls back to cover
+	if v := assetPath(post["seoImage"]); v != "" {
+		data["image"] = b.Config.AssetBaseURL() + v
+		if !strings.HasPrefix(data["image"].(string), "http") && b.Config.SiteURL != "" {
+			data["image"] = b.Config.SiteURL + data["image"].(string)
+		}
+	} else if v := assetPath(post["cover"]); v != "" {
+		data["image"] = b.Config.AssetBaseURL() + v
+		if !strings.HasPrefix(data["image"].(string), "http") && b.Config.SiteURL != "" {
+			data["image"] = b.Config.SiteURL + data["image"].(string)
+		}
+	}
+
+	// JSON-LD
+	if v := str(post["seoJsonLd"]); v != "" {
+		data["jsonLd"] = v
+	}
+
+	// Canonical override
+	if v := str(post["seoCanonical"]); v != "" {
+		data["canonical"] = v
+	}
+
+	// NoIndex
+	if v, ok := post["seoNoIndex"].(bool); ok && v {
+		data["noIndex"] = true
+	}
+
+	return data
 }
 
 // purge invalidates what an edit in the CMS changed.

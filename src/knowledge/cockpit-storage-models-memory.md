@@ -50,7 +50,8 @@ docker exec gosite-mongo mongosh "mongodb://127.0.0.1:27017/<project>" \
 ```
 
 The token must be a registered key (with a role granting
-`content/:models/manage` for ModelManager writes) or the REST API returns 403.
+`content/:models/manage` for model-management writes via the Webapp addon's
+`/api/models/save`) or the REST API returns 403.
 
 ## FrankenPHP warmup vs the REST API
 
