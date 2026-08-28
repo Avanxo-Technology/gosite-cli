@@ -298,3 +298,15 @@ func TestLangAndHandleNormalisation(t *testing.T) {
 		t.Errorf("empty handle must stay empty, got %q", got)
 	}
 }
+
+// A blog post declares og:type "article"; without this the layout falls back to
+// "website" and every post advertises itself as the site's front page.
+func TestMergeCarriesType(t *testing.T) {
+	got := merge(&Data{Type: "website"}, &Data{Type: "article"})
+	if got.Type != "article" {
+		t.Errorf("type: want article, got %q", got.Type)
+	}
+	if got := merge(&Data{Type: "website"}, &Data{}); got.Type != "website" {
+		t.Errorf("an override with no type must not clear it, got %q", got.Type)
+	}
+}

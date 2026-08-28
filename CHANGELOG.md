@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.48.1 — two SEO regressions found by migrating a real site
+
+Both were introduced by 0.48.0 and both only show on a blog post, which is why
+the build and the test suite were quiet about them.
+
+### Fixed
+
+- **Blog posts advertised themselves as `og:type: website`.** `seo.merge()` was
+  written before `Data.Type` existed and never carried it, so the "article" a
+  post declares was dropped on the way to the layout.
+
+- **`og:image` on a blog post was built without a separator.** `AssetBaseURL()`
+  is trimmed of its trailing slash and a Cockpit asset path has no leading one,
+  so concatenating them produced `.../assets2026/08/28/cover.png`. Blog images
+  now go through a join that owns the separator.
+
+### Added
+
+- **`MIGRATIONS.md`** — what `gosite sync` cannot decide for you when taking an
+  existing project to a newer gosite. The 0.48.0 section covers the addon swap
+  that has to happen in one move, the three files to merge rather than
+  overwrite, the language trap that silently turns a Spanish site into
+  `lang="en"`, and how to update the manifest so a later sync does not undo a
+  hand-merge.
+
 ## 0.48.0 — one Webapp addon, and a site that can describe itself
 
 Six infrastructure addons became one, and the SEO that projects were writing by

@@ -291,6 +291,11 @@ gosite remove my-site --keep-source  # tear down the stack, keep the directory
 
 ### Syncing templates into an existing project
 
+Upgrading across a release that changed more than files — addons removed, SEO
+moved into content — has notes of its own in [MIGRATIONS.md](MIGRATIONS.md).
+Read the section for every version between the project's and the target one.
+
+
 The templates that `create` writes are single-sourced: every generated file
 (compose files, Cockpit config, build files, the Go application, docs) is a
 real file under `src/templates/`, and every addon ships in `src/addons/`.

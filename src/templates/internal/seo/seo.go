@@ -450,6 +450,9 @@ func merge(base, override *Data) *Data {
 	if override.NoIndex {
 		result.NoIndex = override.NoIndex
 	}
+	if override.Type != "" {
+		result.Type = override.Type
+	}
 
 	return &result
 }

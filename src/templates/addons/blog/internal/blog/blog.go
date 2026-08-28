@@ -287,12 +287,28 @@ func (b *Blog) meta(title, description, path string, cover any) map[string]any {
 }
 
 // seoData creates SEO overrides from a blog post's SEO fields.
+// assetURL joins the asset base with a Cockpit asset path.
+//
+// Neither side carries the separator - AssetBaseURL is trimmed of its trailing
+// slash and an asset path has no leading one - so joining them by concatenation
+// produced ".../assets2026/08/28/x.png". With local storage the result is a
+// site-root path, which SiteURL then makes absolute for og:image.
+func (b *Blog) assetURL(path string) string {
+	url := strings.TrimRight(b.Config.AssetBaseURL(), "/") + "/" + strings.TrimLeft(path, "/")
+	if !strings.HasPrefix(url, "http") && b.Config.SiteURL != "" {
+		url = strings.TrimRight(b.Config.SiteURL, "/") + url
+	}
+	return url
+}
+
 func (b *Blog) seoData(post cms.Content) map[string]any {
 	if post == nil {
 		return nil
 	}
 
-	data := map[string]any{}
+	// A post is an article, not the site. Set before the overrides so a post
+	// that declares its own type still wins.
+	data := map[string]any{"type": "article"}
 
 	// SEO title: override falls back to article title
 	if v := str(post["seoTitle"]); v != "" {
@@ -310,15 +326,9 @@ func (b *Blog) seoData(post cms.Content) map[string]any {
 
 	// SEO image: override falls back to cover
 	if v := assetPath(post["seoImage"]); v != "" {
-		data["image"] = b.Config.AssetBaseURL() + v
-		if !strings.HasPrefix(data["image"].(string), "http") && b.Config.SiteURL != "" {
-			data["image"] = b.Config.SiteURL + data["image"].(string)
-		}
+		data["image"] = b.assetURL(v)
 	} else if v := assetPath(post["cover"]); v != "" {
-		data["image"] = b.Config.AssetBaseURL() + v
-		if !strings.HasPrefix(data["image"].(string), "http") && b.Config.SiteURL != "" {
-			data["image"] = b.Config.SiteURL + data["image"].(string)
-		}
+		data["image"] = b.assetURL(v)
 	}
 
 	// JSON-LD
