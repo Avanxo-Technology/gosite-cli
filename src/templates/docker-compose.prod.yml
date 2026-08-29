@@ -18,7 +18,7 @@
 # Optional: MONGO_DB (defaults to the project name).
 
 services:
-  app:
+  __PROJECT__-prod-app:
     build:
       context: .
       dockerfile: deploy/Dockerfile
@@ -27,12 +27,12 @@ services:
       - APP_ENV=production
       - PORT=8080
       - SERVICE_FQDN_APP
-      - REDIS_URL=redis://redis:6379/0
-      - COCKPIT_URL=http://cms:80
+      - REDIS_URL=redis://__PROJECT__-prod-redis:6379/0
+      - COCKPIT_URL=http://__PROJECT__-prod-cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
       # Mongo parts so the app can build a credential-aware URI (see
       # buildMongoURI in internal/config) exactly like the CMS does.
-      - MONGO_HOST=mongo
+      - MONGO_HOST=__PROJECT__-prod-mongo
       - MONGO_PORT=27017
       - MONGO_USER=${MONGO_USER}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
@@ -53,12 +53,12 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
-      redis:
+      __PROJECT__-prod-redis:
         condition: service_healthy
-      cms:
+      __PROJECT__-prod-cms:
         condition: service_started
 
-  cms:
+  __PROJECT__-prod-cms:
     build:
       context: .
       dockerfile: deploy/Dockerfile.cms
@@ -66,9 +66,9 @@ services:
     environment:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
       - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
-      - COCKPIT_MEMORY_SERVER=redis://redis:6379
+      - COCKPIT_MEMORY_SERVER=redis://__PROJECT__-prod-redis:6379
       - COCKPIT_DATABASE=${COCKPIT_DATABASE:-mongodb}
-      - MONGO_HOST=mongo
+      - MONGO_HOST=__PROJECT__-prod-mongo
       - MONGO_PORT=27017
       - MONGO_USER=${MONGO_USER}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
@@ -88,12 +88,22 @@ services:
       # self-signed mkcert MinIO certificate.
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
-      # The service name is right HERE, unlike in docker-compose.yml: this file
-      # is deployed one stack per network (Coolify), so "app" resolves to this
-      # project's app and nothing else. Local development is the odd one out -
-      # every project shares gosite-network there, so that file names the
-      # container instead. Do not "fix" one to match the other.
-      - APP_URL=http://app:8080
+      # Every service in this file is named for the project AND the
+      # environment, and the internal URLs use those names.
+      #
+      # A generic `app`/`cms` is not safe here. Coolify deploys stacks onto a
+      # shared predefined network, so a second stack for the same project - a QA
+      # copy alongside production - registers the same names, DNS round-robins
+      # between them, and the application ends up authenticating against the
+      # other stack's CMS. That surfaces as `412 {"error":"Authentication
+      # failed"}` on some requests and not others, which is a miserable thing to
+      # diagnose because the site half works.
+      #
+      # Local development names the container instead (see docker-compose.yml),
+      # for the same reason by a different route: there the service names are
+      # kept so `gosite logs <project> app` keeps working. Do not "fix" one file
+      # to match the other.
+      - APP_URL=http://__PROJECT__-prod-app:8080
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.
@@ -114,10 +124,10 @@ services:
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
     depends_on:
-      mongo:
+      __PROJECT__-prod-mongo:
         condition: service_healthy
 
-  mongo:
+  __PROJECT__-prod-mongo:
     image: mongo:8.0
     restart: unless-stopped
     environment:
@@ -134,7 +144,7 @@ services:
       retries: 10
       start_period: 20s
 
-  redis:
+  __PROJECT__-prod-redis:
     image: redis:8-alpine
     restart: unless-stopped
     # Page cache only: evict rather than refuse writes when memory runs out.

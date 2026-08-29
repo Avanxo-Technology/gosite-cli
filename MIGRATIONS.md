@@ -189,6 +189,29 @@ done | sort -k2 -n | head
 missing — that list is the migration's work order, and it is more reliable than
 reading the diff.
 
+## → 0.49.12 — unique service names in production
+
+`docker-compose.prod.yml` used to name its services `app`, `cms`, `mongo` and
+`redis`. Coolify deploys stacks onto a **shared predefined network**, so a
+second stack - a QA copy beside production, or another project - registers the
+same names. DNS then round-robins between them and the application
+authenticates against the wrong stack's CMS, which surfaces as
+`412 {"error":"Authentication failed"}` on some requests and not others. The
+site half works, which is the worst way for this to present.
+
+Every service is now named `<project>-prod-<role>`, and the internal URLs
+(`COCKPIT_URL`, `APP_URL`, `REDIS_URL`, `MONGO_HOST`) point at those names.
+Apply the same rename to any project deployed this way, and redeploy - the
+containers are recreated.
+
+**Local development is deliberately different.** `docker-compose.yml` keeps the
+service names `app` and `cms`, because `gosite logs <project> app` passes them
+straight to compose, and avoids the collision by setting `container_name` and
+naming the container in its internal URLs. Do not make one file match the
+other.
+
+---
+
 ### Verify before you call it done
 
 Capture the site **before** touching it, then diff:

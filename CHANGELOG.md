@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.49.12 — production services are named per project and environment
+
+### Fixed
+
+- **Two stacks on the same host could authenticate against each other's CMS.**
+  `docker-compose.prod.yml` named its services `app`, `cms`, `mongo` and
+  `redis`. Coolify deploys onto a shared predefined network, so a second stack
+  - a QA copy beside production, or another project - registers the same names.
+  DNS round-robins between them, and the application ends up talking to the
+  wrong CMS, whose API-key registry is different: `412 {"error":"Authentication
+  failed"}` on some requests and not others.
+
+  That is the failure that took a night to find, because a site that half works
+  points you at everything except its own service names.
+
+  Every service is now `<project>-prod-<role>`, and `COCKPIT_URL`, `APP_URL`,
+  `REDIS_URL` and `MONGO_HOST` point at those names. Generalised from a fix
+  made on a live project that runs production and QA side by side.
+
+  `MIGRATIONS.md` has the note for existing deployments.
+
+### Note
+
+Local development keeps the service names `app` and `cms` on purpose:
+`gosite logs <project> app` passes them straight to compose. It avoids the same
+collision by setting `container_name` and naming the container in its internal
+URLs. The two files differ deliberately, and both say so.
+
 ## 0.49.11 — per-article SEO reaches the editor
 
 ### Fixed
