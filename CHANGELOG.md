@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.49.6 — the application's API key now exists where it is deployed
+
+### Fixed
+
+- **`412 {"error":"Authentication failed"}` on every CMS read after a cache
+  flush, permanently.** The application authenticates with `COCKPIT_API_TOKEN`
+  on every read, and that token has to exist as a row in Cockpit's
+  `system/api_keys`. `gosite start` seeds it straight into Mongo - but nothing
+  did so on a deployed site, because Coolify never runs the CLI.
+
+  The gap stayed invisible for as long as it did because Cockpit caches the key
+  registry in memory: a deployed site kept working from a snapshot taken when
+  the key still existed. Clearing the cache emptied that snapshot, the rebuild
+  read a collection with no key in it, and every API call started failing.
+
+  It never recovered on its own either. `memory->get()` falls back to its
+  rebuild closure only when the key is *absent*; an empty registry is a value,
+  so once `[]` was cached nothing rebuilt it until the next flush.
+
+  The Webapp addon now registers the token itself - the same key, role and
+  upsert `gosite start` performs, from inside the CMS where the CLI cannot
+  reach. It runs on admin load and as the first step of the cache-flush hook,
+  before anything else is warmed: until the key registry is back, every read
+  answers 412 and nothing else matters.
+
+  Verified by reproducing the production state exactly - deleting the key row
+  and the cached registry, confirming the 412, then clearing the cache and
+  watching the API answer 200 again. Seeding is idempotent: repeated flushes
+  leave one row.
+
 ## 0.49.5 — a failed CMS call says what Cockpit actually answered
 
 ### Changed

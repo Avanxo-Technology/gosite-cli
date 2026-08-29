@@ -247,6 +247,10 @@ $this->on('restApi.config', function($restApi) {
 // 8. Admin UI (menu entry + screen)
 // ---------------------------------------------------------------------------
 
+// The application's API key must exist in the datastore, not only in the cache
+// Cockpit builds from it. Checked on admin load because that is cheap, happens
+// often enough, and is where somebody would be looking if reads were failing.
 $this->on('app.admin.init', function() {
+    $this->helper('webapp')->ensureApiKey();
     include(__DIR__.'/admin.php');
 });

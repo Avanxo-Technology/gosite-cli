@@ -356,6 +356,66 @@ class Webapp extends \Lime\Helper {
      * exposed as $app->helper('cachepurge') for Replica.
      */
     /**
+     * Makes sure COCKPIT_API_TOKEN is a registered API key.
+     *
+     * The application authenticates with this token on every read. Locally
+     * `gosite start` seeds it straight into Mongo, but nothing does that on a
+     * deployed site - Coolify never runs the CLI - so the key exists there only
+     * if somebody created it by hand in the admin.
+     *
+     * That gap stayed invisible because Cockpit caches the key registry in
+     * memory: the site kept working from a snapshot taken when the key did
+     * exist. The first cache flush cleared it, the rebuild found nothing, and
+     * every API read answered `412 {"error":"Authentication failed"}` - not
+     * just until the CMS warmed up, but permanently, because an empty registry
+     * is cached as a value rather than as a miss.
+     *
+     * Seeding it here is the same key, the same role and the same upsert
+     * `gosite start` performs; it just also happens where the CLI cannot reach.
+     *
+     * Returns true when it had to create the key.
+     */
+    public function ensureApiKey(): bool {
+
+        $token = trim((string)getenv('COCKPIT_API_TOKEN'));
+
+        if ($token === '') {
+            return false;
+        }
+
+        try {
+            $existing = $this->app->dataStorage->findOne('system/api_keys', ['key' => $token]);
+
+            if ($existing) {
+                return false;
+            }
+
+            // save() takes its data by reference, so this cannot be a literal.
+            $entry = [
+                'name'   => 'gosite-seed',
+                'key'    => $token,
+                'role'   => 'admin',
+                'active' => true,
+            ];
+
+            $this->app->dataStorage->save('system/api_keys', $entry);
+
+            // The registry the API gate reads is a cache of that collection, so
+            // the new key is invisible until it is rebuilt.
+            $this->app->helper('api')->cache(true);
+
+            // Deliberately not logging the token itself.
+            $this->log('registered the application API key (it was missing)');
+
+            return true;
+
+        } catch (\Throwable $e) {
+            $this->log('could not register the application API key: '.$e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Rebuilds what a Cockpit cache flush just wiped, so the next read finds a
      * warm CMS instead of an empty one.
      *
@@ -370,6 +430,17 @@ class Webapp extends \Lime\Helper {
     public function warmCockpit(): array {
 
         $warmed = [];
+
+        // The API key registry first: until it is back, every read the
+        // application makes answers 412 and nothing else matters.
+        $this->ensureApiKey();
+
+        try {
+            $keys = $this->app->helper('api')->cache(true);
+            $warmed['apiKeys'] = count($keys);
+        } catch (\Throwable $e) {
+            $this->log('cache flush: api key rebuild failed: '.$e->getMessage());
+        }
 
         try {
             $models = $this->app->helper('content.model')->cache(true);
