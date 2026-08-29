@@ -324,14 +324,29 @@ $notSet = function ($name) use ($fieldHelp) {
                 'X-CSRF-TOKEN': App.csrf || ''
             }
         })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
+        // Read the body as text first. A failed r.json() lands in .catch()
+        // exactly like a network error does, so parsing there would report
+        // "could not reach the CMS" for a response that arrived perfectly well
+        // and simply was not JSON - which is a lie that costs an afternoon.
+        .then(function (r) {
+            return r.text().then(function (body) { return { status: r.status, body: body }; });
+        })
+        .then(function (res) {
+
+            var data = null;
+
+            try { data = JSON.parse(res.body); } catch (e) { /* handled below */ }
+
+            if (!data) {
+                report(false, 'The CMS answered HTTP ' + res.status +
+                    (res.body ? ' with something that is not JSON: ' + res.body.slice(0, 200)
+                              : ' with an empty body.'));
+                return;
+            }
+
             report(!!data.success, data.success ? (data.message || 'Done.') : (data.error || 'The purge failed.'));
         })
         .catch(function (e) {
-            // A network error here is this browser reaching Cockpit, not
-            // Cockpit reaching the application - worth saying, because the two
-            // read the same to somebody staring at a failed button.
             report(false, 'Could not reach the CMS: ' + e.message);
         })
         .finally(function () { button.disabled = false; });

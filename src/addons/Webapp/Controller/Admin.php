@@ -45,11 +45,13 @@ class Admin extends \App\Controller\App {
         }
 
         if (!$this->hasValidCsrfToken()) {
-            return $this->stop($this->json(['success' => false, 'error' => 'Invalid CSRF token.']), 403);
+            return $this->stop(['success' => false, 'error' => 'Invalid CSRF token.'], 403);
         }
 
-        $result = $this->helper('webapp')->purgeNow();
-
-        return $this->json($result);
+        // Return the array. Cockpit serialises it - there is no json() helper,
+        // and calling one is worse than a missing method: Lime\AppAware::__call
+        // returns $this for anything it cannot find, so the handler answers with
+        // the controller object and the browser gets an empty body.
+        return $this->helper('webapp')->purgeNow();
     }
 }

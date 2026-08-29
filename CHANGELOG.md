@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.49.9 — the Refresh button actually answers
+
+### Fixed
+
+- **The "Refresh site cache" button failed with `Unexpected end of JSON
+  input`.** The controller returned `$this->json($result)`, and there is no
+  `json()` method - not on the controller, not on `Lime\App`. That is worse
+  than a fatal error, because `Lime\AppAware::__call` returns `$this` for any
+  method it cannot find: the handler answered with the controller object,
+  Cockpit rendered nothing, and the browser got an empty body.
+
+  It returns the array now, which is what Cockpit's own controllers do
+  (`System\Controller\Utils::flushCache` ends in `return ['success' => true]`).
+
+- **The button's error message was misleading.** A failed `r.json()` rejects
+  exactly like a network error, so the `.catch()` branch reported "Could not
+  reach the CMS" for a response that had arrived perfectly well and simply was
+  not JSON. It reads the body as text first and reports the real status and
+  content, which is the difference between a five-minute fix and an afternoon.
+
 ## 0.49.8 — purging the site is a decision, not a side effect
 
 ### Removed
