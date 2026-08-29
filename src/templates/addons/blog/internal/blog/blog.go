@@ -103,6 +103,14 @@ func (b *Blog) Index(c *echo.Context) error {
 	// requesting random paths.
 	blogDoc, err := b.lookupBlog(c.Request().Context(), blogSlug)
 	if err != nil {
+		// The CMS is unreachable or refusing us. This lookup happens before the
+		// cache is touched, so without this the request would fail with a good
+		// stale copy sitting one lookup away - which is exactly what visitors
+		// hit while Cockpit was answering 412 to everything.
+		if html, ok := b.Cache.Stale(c.Request().Context(), indexKey(blogSlug, page)); ok {
+			b.Log.Warn("blog lookup failed, serving stale index", "blog", blogSlug, "err", err)
+			return b.page(c, html, true)
+		}
 		return b.fail(c, err)
 	}
 	if blogDoc == nil {
@@ -128,6 +136,12 @@ func (b *Blog) Article(c *echo.Context) error {
 
 	blogDoc, err := b.lookupBlog(c.Request().Context(), blogSlug)
 	if err != nil {
+		// Same reasoning as Index: reach the stale copy rather than fail on a
+		// lookup the visitor never asked for.
+		if html, ok := b.Cache.Stale(c.Request().Context(), articleKey(blogSlug, slug)); ok {
+			b.Log.Warn("blog lookup failed, serving stale article", "blog", blogSlug, "slug", slug, "err", err)
+			return b.page(c, html, true)
+		}
 		return b.fail(c, err)
 	}
 	if blogDoc == nil {

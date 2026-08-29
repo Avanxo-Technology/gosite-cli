@@ -112,6 +112,24 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 	return v.([]byte), false, nil
 }
 
+// Stale returns the fallback copy of a key, if one is there.
+//
+// For callers that must reach the CMS before they can name a cache key - the
+// blog resolves which blog a slug belongs to first - a CMS failure would
+// otherwise skip the cache entirely and fail the request, with a perfectly good
+// stale copy sitting one lookup away. This is how they get to it.
+func (c *Cache) Stale(ctx context.Context, key string) ([]byte, bool) {
+	if c.dev {
+		return nil, false
+	}
+
+	stale, err := c.rdb.Get(ctx, staleKey(key)).Bytes()
+	if err != nil || len(stale) == 0 {
+		return nil, false
+	}
+	return stale, true
+}
+
 // Get retrieves a cached value by key. Returns nil if not found.
 func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
 	val, err := c.rdb.Get(ctx, key).Bytes()

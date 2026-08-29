@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.49.7 — the blog reaches its fallback instead of failing
+
+### Fixed
+
+- **A blog page answered 502 while a perfectly good stale copy sat one lookup
+  away.** `Index` and `Article` resolve which blog a slug belongs to *before*
+  touching the cache - a deliberate guard, so an unknown slug cannot fill Redis
+  with entries. But that lookup is a CMS call, and when it failed the handler
+  returned straight away, skipping the cache-aside path and the stale fallback
+  with it.
+
+  That is why `/noticias` went down while the home page stayed up under the
+  same CMS failure, and it is the real reason a Cockpit outage reached
+  visitors. Both handlers now look for the stale copy before giving up.
+
+  Verified by reproducing the production failure exactly - the CMS refusing
+  every call with `412 {"error":"Authentication failed"}` and no fresh copy in
+  the cache. Before: 502. After: 200 with the real page, and a log line saying
+  it served stale.
+
+### Added
+
+- **`Cache.Stale`**, for callers that must reach the CMS before they can name a
+  cache key. It is the only way such a caller can get at the fallback that
+  `Cache.HTML` would have served for it.
+
+### Note on the wider problem
+
+An application page must not depend on the CMS being reachable, and two paths
+still behave differently under the same failure: `cms.Singleton` degrades to
+template fallbacks, `cms.Items` returns the error. The blog is fixed here
+because that is where visitors were hitting it; the asymmetry itself is worth
+removing.
+
 ## 0.49.6 — the application's API key now exists where it is deployed
 
 ### Fixed
