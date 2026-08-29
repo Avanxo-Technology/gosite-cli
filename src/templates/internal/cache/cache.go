@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"fmt"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 	"strings"
@@ -20,6 +21,22 @@ const ttl = 10 * time.Minute
 // slightly outdated content rather than a 502 when the CMS is temporarily
 // unreachable.
 const staleTTL = 24 * time.Hour
+
+// renderRetryDelay is the pause between attempts when a cold render fails.
+// One second gives a CMS that is warming up - rebuilding its registries after a
+// cache flush, reconnecting to the database - time to answer properly.
+const renderRetryDelay = 1 * time.Second
+
+// renderMaxWait bounds the retrying. Past this the caller is served stale, or
+// told the truth; holding a request open longer helps nobody.
+const renderMaxWait = 10 * time.Second
+
+// minRenderSize is the smallest a rendered page can plausibly be. A page with
+// its layout, navigation and footer is comfortably over a kilobyte, so anything
+// shorter is a render that "succeeded" against empty CMS content - a broken
+// page that must never reach the cache, because caching it pins the breakage
+// for a whole TTL.
+const minRenderSize = 1024
 
 type Cache struct {
 	rdb *redis.Client
@@ -79,30 +96,58 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 	}
 
 	v, err, shared := c.sf.Do(key, func() (any, error) {
-		fresh, err := render()
-		if err != nil {
-			// Render failed — serve the last good copy so visitors don't see
-			// a 502 while the CMS warms up. single-flight discards this
-			// result so the next caller retries the render.
-			stale, staleErr := c.rdb.Get(context.Background(), staleKey(key)).Bytes()
-			if staleErr == nil {
-				c.log.Warn("render failed, serving stale", "key", key, "err", err)
-				return stale, nil
+		deadline := time.Now().Add(renderMaxWait)
+		var lastErr error
+
+		for {
+			fresh, err := render()
+
+			// A render that "succeeded" against empty CMS content produces the
+			// template's bare fallbacks - no navigation, no footer. Treating it
+			// as a failure is what keeps it out of the cache, where it would
+			// otherwise be served to everyone for a full TTL.
+			if err == nil && len(fresh) < minRenderSize {
+				err = fmt.Errorf("render produced %d bytes, expected at least %d", len(fresh), minRenderSize)
 			}
-			return nil, err
+
+			if err == nil {
+				// Write with a background context, not the request one: the
+				// caller that happened to win the race may disconnect, and that
+				// must not stop the cache from being warmed for everyone else.
+				bg := context.Background()
+				if setErr := c.rdb.Set(bg, key, fresh, ttl).Err(); setErr != nil {
+					c.log.Warn("cache write failed", "key", key, "err", setErr)
+				}
+				if setErr := c.rdb.Set(bg, staleKey(key), fresh, staleTTL).Err(); setErr != nil {
+					c.log.Warn("stale cache write failed", "key", key, "err", setErr)
+				}
+				return fresh, nil
+			}
+
+			lastErr = err
+
+			if time.Now().Add(renderRetryDelay).After(deadline) {
+				break
+			}
+
+			c.log.Warn("render failed, retrying", "key", key, "err", err, "bytes", len(fresh))
+
+			// Stop early if the visitor has gone: single-flight discards this
+			// result anyway, and the next caller starts a fresh attempt.
+			select {
+			case <-ctx.Done():
+				return nil, lastErr
+			case <-time.After(renderRetryDelay):
+			}
 		}
 
-		// Write with a background context, not the request one: the caller
-		// that happened to win the race may disconnect, and that must not
-		// stop the cache from being warmed for everyone else.
-		bg := context.Background()
-		if err := c.rdb.Set(bg, key, fresh, ttl).Err(); err != nil {
-			c.log.Warn("cache write failed", "key", key, "err", err)
+		// Out of attempts. The last good copy beats an error page.
+		stale, staleErr := c.rdb.Get(context.Background(), staleKey(key)).Bytes()
+		if staleErr == nil {
+			c.log.Warn("render failed after retries, serving stale", "key", key, "err", lastErr)
+			return stale, nil
 		}
-		if err := c.rdb.Set(bg, staleKey(key), fresh, staleTTL).Err(); err != nil {
-			c.log.Warn("stale cache write failed", "key", key, "err", err)
-		}
-		return fresh, nil
+		return nil, lastErr
 	})
 	if err != nil {
 		return nil, false, err

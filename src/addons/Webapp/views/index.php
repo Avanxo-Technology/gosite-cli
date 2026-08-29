@@ -103,11 +103,17 @@ $notSet = function ($name) use ($fieldHelp) {
             <h1 class="kiss-size-4 kiss-margin-remove">Webapp</h1>
             <div class="kiss-size-small kiss-color-muted">Site configuration and SEO management</div>
         </div>
+        <button class="kiss-button kiss-flex kiss-flex-middle kiss-margin-small-right" gap="xsmall"
+                id="webapp-purge" type="button">
+            <icon>refresh</icon> Refresh site cache
+        </button>
         <a class="kiss-button kiss-button-primary kiss-flex kiss-flex-middle" gap="xsmall"
            href="<?= $this->route('/content/singleton/item/'.$model) ?>">
             <icon>edit</icon> Edit in Content
         </a>
     </div>
+
+    <div id="webapp-purge-result" class="kiss-margin-small-bottom" hidden></div>
 
     <kiss-card class="kiss-padding-small kiss-margin-bottom" theme="contrast">
         <div class="kiss-size-small kiss-color-muted">
@@ -289,3 +295,46 @@ $notSet = function ($name) use ($fieldHelp) {
         font-size: 0.8rem;
     }
 </style>
+
+<script>
+(function () {
+    var button = document.getElementById('webapp-purge');
+    var result = document.getElementById('webapp-purge-result');
+
+    if (!button) return;
+
+    function report(ok, message) {
+        result.hidden = false;
+        result.className = 'kiss-margin-small-bottom kiss-size-small ' +
+            (ok ? 'kiss-color-success' : 'kiss-color-danger');
+        result.textContent = message;
+    }
+
+    button.addEventListener('click', function () {
+
+        button.disabled = true;
+        result.hidden = true;
+
+        fetch('<?= $this->route('/webapp/purge') ?>', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': App.csrf || ''
+            }
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            report(!!data.success, data.success ? (data.message || 'Done.') : (data.error || 'The purge failed.'));
+        })
+        .catch(function (e) {
+            // A network error here is this browser reaching Cockpit, not
+            // Cockpit reaching the application - worth saying, because the two
+            // read the same to somebody staring at a failed button.
+            report(false, 'Could not reach the CMS: ' + e.message);
+        })
+        .finally(function () { button.disabled = false; });
+    });
+})();
+</script>

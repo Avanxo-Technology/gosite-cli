@@ -89,9 +89,17 @@ $this->on('bootstrap', function() {
 // ---------------------------------------------------------------------------
 // Purges the Go app cache when Cockpit content changes.
 
-$this->on('content.item.save', function($model, $item) {
-    $this->helper('webapp')->purge($model, $item);
-});
+// Saving content deliberately does NOT purge the application.
+//
+// It used to. The coupling turned every editorial save into a call out to the
+// app, and every CMS cache flush into a site-wide purge - which is how a
+// Cockpit problem became an outage on the public site. Cockpit's own flush
+// empties the whole Redis database it shares with the session and API-key
+// registries, so the CMS could refuse the very purge it had just asked for.
+//
+// The application's TTL is short and its cache carries a stale fallback, so
+// content appears on its own. When it has to be immediate, the Webapp screen
+// has a button that purges on request - a person deciding, not a side effect.
 
 // Settings -> Clear cache. Cockpit empties #cache:, #tmp: and app memory, which
 // includes the model registry, and the application keeps serving pages rendered
@@ -103,14 +111,16 @@ $this->on('content.item.save', function($model, $item) {
 // error page. Warming first costs one query and removes that window entirely.
 $this->on('app.system.cache.flush', function() {
 
-    $webapp = $this->helper('webapp');
+    // Warm only. Cockpit's flush empties the entire Redis database - the model
+    // registry, the API keys, the sessions - so the CMS comes back up needing
+    // repair, and this is where that repair happens.
+    //
+    // It deliberately does not purge the application any more: telling the app
+    // to re-render at the exact moment the CMS cannot authenticate it is how a
+    // routine "Clear cache" became 502s for visitors.
+    $warmed = $this->helper('webapp')->warmCockpit();
 
-    $warmed = $webapp->warmCockpit();
-
-    // No model named: the whole site is stale, not one area of it.
-    $webapp->purge(null, null, 'all');
-
-    error_log('[webapp] cache flush: warmed '.json_encode($warmed).', purged the application');
+    error_log('[webapp] cache flush: warmed '.json_encode($warmed));
 });
 
 // ---------------------------------------------------------------------------

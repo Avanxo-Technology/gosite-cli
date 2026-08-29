@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.49.8 — purging the site is a decision, not a side effect
+
+### Removed
+
+- **Saving content no longer purges the application**, and neither does
+  Cockpit's *Clear cache*.
+
+  The coupling is what turned a CMS problem into an outage. Cockpit's flush
+  calls `flushdb()` - it empties the **entire** Redis database, ignoring the
+  per-project prefix, and that database holds the session and API-key
+  registries. So "Clear cache" told the application to re-render at the exact
+  moment the CMS could no longer authenticate it: every read answered
+  `412 {"error":"Authentication failed"}` and visitors got 502s from a routine
+  editorial action.
+
+  The cache-flush hook still runs - it warms the API keys, the model registry
+  and the database connection, which is repair the flush genuinely needs. It
+  just no longer asks the application to do anything.
+
+### Added
+
+- **A "Refresh site cache" button on the Webapp screen.** Purging on request,
+  by somebody who can read the answer: whether the application accepted it,
+  and if not, whether the CMS has no `APP_URL`, no token, or a token the
+  application rejects.
+
+### Changed
+
+- **`Cache.HTML` retries a cold render** every second for up to ten, and treats
+  a page under 1KB as a failed render rather than a success. A page rendered
+  against empty CMS content - layout fallbacks, no navigation - must never
+  reach the cache, because caching it pins the breakage for a full TTL. Ported
+  from a fix made on a live project.
+
+### The trade
+
+Content now appears on the application's own schedule: within the 10-minute
+TTL, or immediately when somebody presses the button. That is the cost of
+decoupling, and it is smaller than an editor being able to take the public site
+down by clicking "Clear cache".
+
 ## 0.49.7 — the blog reaches its fallback instead of failing
 
 ### Fixed

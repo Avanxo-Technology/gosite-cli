@@ -465,6 +465,70 @@ class Webapp extends \Lime\Helper {
         return $warmed;
     }
 
+    /**
+     * Purges the application's cache and reports what happened.
+     *
+     * purge() is fire-and-forget by design - it runs inside a save and must
+     * never turn a CMS problem into a failed save. This one is called by a
+     * person who pressed a button and is waiting for an answer, so it returns
+     * one: whether the app accepted it, and if not, why.
+     */
+    public function purgeNow(): array {
+
+        $url = trim((string)getenv('APP_URL'));
+
+        if ($url === '') {
+            return [
+                'success' => false,
+                'error'   => 'APP_URL is not set, so this CMS does not know where the application is.',
+            ];
+        }
+
+        $endpoint = rtrim($url, '/').'/cache/purge';
+        $token    = trim((string)getenv('COCKPIT_API_TOKEN'));
+
+        $headers = ['Content-Type: application/json'];
+
+        if ($token !== '') {
+            $headers[] = 'X-Api-Key: '.$token;
+        }
+
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => json_encode(['scope' => 'all']),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_HTTPHEADER     => $headers,
+        ]);
+
+        $body   = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error  = curl_error($ch);
+
+        curl_close($ch);
+
+        if ($error !== '') {
+            return ['success' => false, 'error' => "Could not reach the application at {$endpoint}: {$error}"];
+        }
+
+        if ($status === 401) {
+            return [
+                'success' => false,
+                'error'   => $token === ''
+                    ? 'The application refused the purge: this CMS has no COCKPIT_API_TOKEN to send.'
+                    : "The application refused the purge: this CMS's COCKPIT_API_TOKEN does not match the application's.",
+            ];
+        }
+
+        if ($status < 200 || $status >= 300) {
+            return ['success' => false, 'error' => "The application answered HTTP {$status}: ".trim((string)$body)];
+        }
+
+        return ['success' => true, 'message' => 'The application cache was purged.'];
+    }
+
     public function purge($model = null, $item = null, ?string $scope = null): void {
 
         static $disabledLogged = false;
