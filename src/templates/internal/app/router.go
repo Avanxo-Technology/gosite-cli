@@ -22,7 +22,19 @@ var mountFeatures []func(*echo.Echo, *handlers.Handlers)
 // NewRouter wires middleware and routes. This is the single source of truth
 // for the app's HTTP surface - nothing registers routes anywhere else.
 func NewRouter(a *App) *echo.Echo {
-	e := echo.New()
+	// AutoHandleHEAD makes every GET route answer HEAD as well, with the body
+	// suppressed and the headers intact. Without it echo answers 405, and an
+	// uptime check or a link validator that pings with HEAD reports the site as
+	// broken while a browser sees it perfectly.
+	//
+	// Safe for this scaffold specifically: every GET here is a cached, public,
+	// side-effect-free page. Anything that mutates state is a POST, which HEAD
+	// never reaches. Echo leaves this off by default because a GET handler runs
+	// in full for each HEAD - worth re-reading its caveats before adding a GET
+	// route that writes, counts, or costs real work.
+	e := echo.NewWithConfig(echo.Config{
+		Router: echo.NewRouter(echo.RouterConfig{AutoHandleHEAD: true}),
+	})
 	e.Renderer = a.Renderer
 
 	e.Use(middleware.Recover())

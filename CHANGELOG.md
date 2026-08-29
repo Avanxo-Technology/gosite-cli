@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.49.1 — HEAD answers on every GET route
+
+### Fixed
+
+- **A HEAD request got 405 on every page.** Echo v5 leaves `AutoHandleHEAD`
+  off, so a route registered with `e.GET` refused HEAD outright — and an uptime
+  check or link validator that pings with HEAD reported a perfectly healthy
+  site as broken. The scaffold's router now builds echo with
+  `AutoHandleHEAD: true`: HEAD matches the GET handler, the headers come back
+  intact and the body is suppressed, per HTTP semantics.
+
+  Safe for what this scaffold serves: every GET is a cached, public,
+  side-effect-free page, and anything that mutates state is a POST, which HEAD
+  still cannot reach. Echo disables it by default because the GET handler runs
+  in full for each HEAD — worth re-reading its caveats before adding a GET
+  route that writes, counts, or costs real work.
+
+  Covered by `internal/app/router_test.go`, which asserts both halves: HEAD
+  reaches a GET route with no body, and never reaches a POST one.
+
 ## 0.49.0 — `gosite sync` is gone
 
 ### Removed

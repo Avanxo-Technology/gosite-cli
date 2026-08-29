@@ -143,6 +143,52 @@ tell `sync` the file is untouched and hand it the next overwrite.
 
 Drop the six removed addons from the manifest and add the `Webapp` files.
 
+### 8. Content written from the CLI is a draft
+
+`saveItem()` stores `_state: 0` unless you say otherwise, and Cockpit's read
+API only ever serves published entries. A `seoPages` row loaded this way is
+invisible to the app: the page silently falls back to the site-wide defaults
+and shows the home page's title on every route. Set `_state = 1` explicitly:
+
+```php
+foreach ($c->items("seoPages", ["limit" => 50]) as $it) { $it["_state"] = 1; $c->saveItem("seoPages", $it); }
+```
+
+### 9. Watch for components the project already owns
+
+Copying a component from the templates over one the project wrote is the
+easiest way to break a build. On avanxo-dev the project had its own
+`components/analytics.html` defining `{{define "analytics"}}` — an event
+listener unrelated to the Analytics addon — and every page called it.
+Overwriting it with the addon's version (which defines `analytics-head` and
+`analytics-body`) turned every page into `no such template "analytics"` at
+startup. Check `git show HEAD:<file>` before copying, and when both are needed,
+keep both defines in one file.
+
+The same applies to Go: this project's `cms.Client.Singleton` returns
+`(Content, error)` rather than `Content`, and its `Cache.Purge` deliberately
+keeps stale copies. Adapt the incoming code to the project, not the reverse.
+
+### 10. A project with no manifest
+
+Projects scaffolded before `.gosite/manifest.tsv` existed have no drift signal
+at all. `gosite addons list <project>` adopts one from the current files on its
+first run, writing nothing else — do that first, but understand what it means:
+the baseline is the project *as it is today*, so every local edit is recorded as
+if gosite had written it. Find the real base version by diffing candidate tags:
+
+```bash
+for t in $(git -C <gosite> tag --sort=-v:refname); do
+  n=$(git -C <gosite> show "$t:src/templates/internal/views/render.go" 2>/dev/null \
+      | sed -e "s|__MODULE__|$MODULE|g" | diff - <project>/internal/views/render.go | grep -c '^[<>]')
+  echo "$t $n"
+done | sort -k2 -n | head
+```
+
+`gosite addons add` also refuses with a precise list of what the project is
+missing — that list is the migration's work order, and it is more reliable than
+reading the diff.
+
 ### Verify before you call it done
 
 Capture the site **before** touching it, then diff:
@@ -153,7 +199,13 @@ curl -sS https://<site>/ > before.html   # and the blog index, and one article
 diff <(sed -n '/<body/,/<\/body>/p' before.html) <(sed -n '/<body/,/<\/body>/p' after.html)
 ```
 
-The body must be **byte-identical**. The head must only gain tags. On
-aga-growth-dev this caught three regressions that the build and the test suite
-did not: `lang="es"` becoming `en`, blog posts losing `og:type="article"`, and
-`og:image` built without a separator.
+The body must be **byte-identical**. The head must only gain tags. On aga-growth-dev this caught three regressions that the build and the test
+suite did not: `lang="es"` becoming `en`, blog posts losing `og:type="article"`,
+and `og:image` built without a separator. On avanxo-dev it caught two more: a
+`robots.txt` that lost its `Sitemap:` line, and every solution page serving the
+home page's title because the `seoPages` rows were still drafts.
+
+A project that already has hand-written SEO needs its values **moved into the
+CMS**, not just the pipeline swapped underneath them. Read the titles,
+descriptions and canonicals out of the Go registry, write them to `seoPages`,
+publish them, and only then compare.
