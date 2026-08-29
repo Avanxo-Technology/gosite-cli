@@ -355,7 +355,46 @@ class Webapp extends \Lime\Helper {
      * Absorbed from CachePurge addon. Called on content.item.save and
      * exposed as $app->helper('cachepurge') for Replica.
      */
-    public function purge($model = null, $item = null): void {
+    /**
+     * Rebuilds what a Cockpit cache flush just wiped, so the next read finds a
+     * warm CMS instead of an empty one.
+     *
+     * The flush clears #cache: and #tmp: and empties app memory. The model
+     * registry lives in that cache, so until it is rebuilt Cockpit answers 404
+     * for every model - and the application, told to purge at the same moment,
+     * re-renders against a CMS that reports no content and serves an error
+     * page instead. See src/knowledge/cockpit-cold-render-502.md.
+     *
+     * Returns what it managed to warm, for the log line.
+     */
+    public function warmCockpit(): array {
+
+        $warmed = [];
+
+        try {
+            $models = $this->app->helper('content.model')->cache(true);
+            $warmed['models'] = count($models);
+        } catch (\Throwable $e) {
+            $this->log('cache flush: model registry rebuild failed: '.$e->getMessage());
+        }
+
+        // Read one real item as well: it opens the database connection and
+        // repopulates memory, so the application's first call is not the one
+        // paying for the cold start.
+        try {
+            $content = $this->app->module('content');
+            if ($content && $content->exists(self::MODEL_WEBAPP)) {
+                $content->item(self::MODEL_WEBAPP, []);
+                $warmed['singleton'] = self::MODEL_WEBAPP;
+            }
+        } catch (\Throwable $e) {
+            $this->log('cache flush: singleton warm failed: '.$e->getMessage());
+        }
+
+        return $warmed;
+    }
+
+    public function purge($model = null, $item = null, ?string $scope = null): void {
 
         static $disabledLogged = false;
 
@@ -374,9 +413,12 @@ class Webapp extends \Lime\Helper {
 
         $id = is_array($item) ? ($item['_id'] ?? null) : $item;
 
+        // scope lets the CMS say "everything" when there is no single model to
+        // name - a full cache flush, where no cached page can be trusted.
         $body = json_encode(array_filter([
             'model' => $model ? (string)$model : null,
             'id'    => $id ? (string)$id : null,
+            'scope' => $scope ?: null,
         ], fn($v) => $v !== null));
 
         $headers = ['Content-Type: application/json'];

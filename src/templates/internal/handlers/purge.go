@@ -38,13 +38,14 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	model, id := purgeTarget(c)
+	model, id, scope := purgeTarget(c)
 
 	// Some content is not part of any one page: analytics keys and anything
 	// else the layout carries are on all of them. Purging only the area an
 	// edit "belongs" to would leave every other page serving the old value for
-	// the rest of its cache window.
-	if isSiteWide(model) {
+	// the rest of its cache window. scope == "all" is the CMS saying the same
+	// thing without a model to name, after its own cache was flushed.
+	if scope == "all" || isSiteWide(model) {
 		if err := h.Cache.PurgeAll(ctx, cacheKeyPrefix); err != nil {
 			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 		}
@@ -82,22 +83,28 @@ func (h *Handlers) warmHome() {
 	}
 }
 
-// purgeTarget reads the optional {"model": "...", "id": "..."} body naming what
-// the CMS changed. Missing, malformed or empty bodies yield two empty strings.
-func purgeTarget(c *echo.Context) (model, id string) {
+// purgeTarget reads the optional {"model": "...", "id": "...", "scope": "..."}
+// body naming what the CMS changed. Missing, malformed or empty bodies yield
+// empty strings, which the caller treats as "nothing named".
+//
+// scope is how the CMS says "not one model - everything". Cockpit's Settings ->
+// Clear cache sends it, because after that flush no cached page can be trusted,
+// and there is no single model to name.
+func purgeTarget(c *echo.Context) (model, id, scope string) {
 	body := c.Request().Body
 	if body == nil {
-		return "", ""
+		return "", "", ""
 	}
 
 	var payload struct {
 		Model string `json:"model"`
 		ID    string `json:"id"`
+		Scope string `json:"scope"`
 	}
 	if err := json.NewDecoder(body).Decode(&payload); err != nil {
-		return "", ""
+		return "", "", ""
 	}
-	return payload.Model, payload.ID
+	return payload.Model, payload.ID, payload.Scope
 }
 
 // siteWideModels are the collections whose content appears in the layout, and

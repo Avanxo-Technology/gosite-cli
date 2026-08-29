@@ -27,7 +27,13 @@ const (
 	cacheTTL = 5 * time.Minute
 
 	// cacheKeyPrefix namespaces SEO cache keys per project.
-	cacheKeyPrefix = "seo:"
+	//
+	// The project name is not decoration: several projects share one Redis, and
+	// without it every site on the host reads and overwrites the same
+	// "seo:defaults" - one site serving another's title and description. It also
+	// puts these keys under the prefix PurgeAll sweeps, so a site-wide purge
+	// actually clears them.
+	cacheKeyPrefix = "__PROJECT__:seo:"
 )
 
 // Data holds the resolved SEO metadata for a single page.

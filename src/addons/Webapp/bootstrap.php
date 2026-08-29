@@ -93,6 +93,26 @@ $this->on('content.item.save', function($model, $item) {
     $this->helper('webapp')->purge($model, $item);
 });
 
+// Settings -> Clear cache. Cockpit empties #cache:, #tmp: and app memory, which
+// includes the model registry, and the application keeps serving pages rendered
+// from content that is now gone.
+//
+// Warm first, purge second - the reverse of how it reads. The purge makes the
+// application re-render immediately, and a re-render that arrives while the
+// model registry is still empty gets 404 for every model and answers with an
+// error page. Warming first costs one query and removes that window entirely.
+$this->on('app.system.cache.flush', function() {
+
+    $webapp = $this->helper('webapp');
+
+    $warmed = $webapp->warmCockpit();
+
+    // No model named: the whole site is stale, not one area of it.
+    $webapp->purge(null, null, 'all');
+
+    error_log('[webapp] cache flush: warmed '.json_encode($warmed).', purged the application');
+});
+
 // ---------------------------------------------------------------------------
 // 6. Absorbed addon: CloudStorage
 // ---------------------------------------------------------------------------

@@ -70,7 +70,11 @@ services:
       S3_VERIFY: "${S3_VERIFY:-true}"
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
-      APP_URL: "http://app:8080"
+      # The container name, not the service name: every gosite project has a
+      # service called "app" and they all share gosite-network, so "app" resolves
+      # to whichever neighbour Docker feels like - and this project's cache purge
+      # lands on someone else's site.
+      APP_URL: "http://__PROJECT__-app:8080"
       COCKPIT_API_TOKEN: "${COCKPIT_API_TOKEN}"
     ports:
       - "__CMS_PORT__:80"

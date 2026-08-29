@@ -2,6 +2,7 @@ package seo
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -308,5 +309,17 @@ func TestMergeCarriesType(t *testing.T) {
 	}
 	if got := merge(&Data{Type: "website"}, &Data{}); got.Type != "website" {
 		t.Errorf("an override with no type must not clear it, got %q", got.Type)
+	}
+}
+
+// Several gosite projects share one Redis. An unprefixed key means every site
+// on the host reads and overwrites the same "seo:defaults", serving another
+// site's title - and PurgeAll, which sweeps the project prefix, never clears it.
+func TestCacheKeysArePrefixedPerProject(t *testing.T) {
+	if !strings.HasSuffix(cacheKeyPrefix, ":seo:") {
+		t.Fatalf("cacheKeyPrefix = %q, want it to end in \":seo:\"", cacheKeyPrefix)
+	}
+	if project := strings.TrimSuffix(cacheKeyPrefix, ":seo:"); project == "" {
+		t.Error("cacheKeyPrefix carries no project name; keys would collide across projects")
 	}
 }

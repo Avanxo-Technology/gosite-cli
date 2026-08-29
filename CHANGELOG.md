@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.49.2 — Clear cache reaches the app, and stops reaching the neighbours
+
+Wiring Cockpit's *Settings → Clear cache* to the application's purge turned up
+two faults that had been quiet for a while.
+
+### Added
+
+- **Cockpit's Clear cache now purges the application too.** The Webapp addon
+  hooks `app.system.cache.flush`: it rebuilds the model registry and reads one
+  real item to reopen the database connection, *then* tells the app to purge
+  everything (`{"scope":"all"}`).
+
+  Warm first, purge second - the reverse of how it reads. A purge makes the
+  application re-render immediately, and a re-render arriving while the model
+  registry is still empty gets 404 for every model and answers with an error
+  page. Warming first costs one query and closes that window.
+
+- **`scope` on the purge endpoint**, so the CMS can say "everything" when there
+  is no single model to name. The on-page button and an older CMS send no body
+  and keep their previous behaviour.
+
+### Fixed
+
+- **A project's cache purge landed on another project's site.** The compose
+  files set `APP_URL=http://app:8080`, but every gosite project has a service
+  called `app` and they all share `gosite-network`, so `app` resolved to
+  whichever neighbour Docker picked. On a host with three projects the name
+  answered with three different addresses, and avanxo-dev's purge was clearing
+  analytics-draft's cache. `APP_URL` now names the container.
+
+- **SEO cache keys were shared across every project on the host.** The comment
+  said the prefix namespaced them per project; the value was just `"seo:"`. One
+  site read and overwrote another's `seo:defaults` - a real cross-site content
+  leak - and `PurgeAll`, which sweeps the project prefix, never cleared them.
+  The prefix now carries the project name, pinned by a test.
+
 ## 0.49.1 — HEAD answers on every GET route
 
 ### Fixed
