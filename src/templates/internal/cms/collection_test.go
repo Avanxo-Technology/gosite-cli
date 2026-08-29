@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"__MODULE__/internal/config"
@@ -258,5 +259,25 @@ func TestRetryHappensOnlyOnce(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("calls = %d, want 2", calls)
+	}
+}
+
+// The status alone does not say which of Cockpit's checks refused the request.
+// The body does, and it is the only place it appears - so the error carries it.
+func TestErrorCarriesTheResponseBody(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPreconditionFailed)
+		w.Write([]byte(`{"error":"Not allowed"}`))
+	})
+
+	_, err := c.Items(context.Background(), "blogs", Query{})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if !strings.Contains(err.Error(), "Not allowed") {
+		t.Errorf("error must name what Cockpit said, got %q", err)
+	}
+	if !strings.Contains(err.Error(), "412") {
+		t.Errorf("error must keep the status, got %q", err)
 	}
 }

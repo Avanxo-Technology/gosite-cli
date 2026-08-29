@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -238,7 +240,16 @@ func (c *Client) fetchRawOnce(ctx context.Context, path string) ([]byte, error) 
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		statusErr := fmt.Errorf("cockpit returned %s", res.Status)
+		// Carry a slice of the body into the error. Cockpit says which check
+		// refused the request there and nowhere else - "Not allowed", "Model
+		// <x> not found", "Permission denied" - and a log line with only the
+		// status leaves you guessing at which of a dozen branches fired.
+		var detail bytes.Buffer
+		io.CopyN(&detail, res.Body, 512)
+
+		statusErr := fmt.Errorf("cockpit returned %s: %s", res.Status,
+			strings.TrimSpace(detail.String()))
+
 		if transientStatuses[res.StatusCode] {
 			return nil, transientErr{statusErr}
 		}

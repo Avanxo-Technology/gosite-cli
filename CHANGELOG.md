@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.49.5 — a failed CMS call says what Cockpit actually answered
+
+### Changed
+
+- **CMS errors now carry Cockpit's response body**, up to 512 bytes:
+
+  ```
+  cockpit returned 412 Precondition Failed: {"error":"Not allowed"}
+  ```
+
+  The status alone does not identify which check refused the request - Cockpit
+  has a dozen branches that answer 412 and they differ only in the body, which
+  the client was discarding. Chasing a production 412 meant reading Cockpit's
+  source and guessing at which branch fired; now the log line says it.
+
 ## 0.49.4 — a transient CMS answer no longer fails the page
 
 ### Fixed
