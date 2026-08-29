@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.49.11 — per-article SEO reaches the editor
+
+### Fixed
+
+- **A blog created before the per-article SEO fields existed could never use
+  them.** The application has read `seoTitle`, `seoDescription`, `seoImage`,
+  `seoJsonLd`, `seoCanonical` and `seoNoIndex` from the moment they were added,
+  but `ensureModels()` only ever creates what is missing - so on an older
+  project the code ran, found nothing, and an editor had nowhere to write them.
+  The feature looked present and was unreachable.
+
+  The Blog addon now appends the missing fields to an existing `blogPosts`
+  model. Appends only: existing fields keep their place and their settings, and
+  stored articles are never touched.
+
+  Verified by stripping the six fields from a live model, running the
+  migration, and watching them come back - then running it twice more to
+  confirm it does nothing the second time.
+
 ## 0.49.10 — every addon's JSON endpoint answered with the controller
 
 ### Fixed

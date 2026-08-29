@@ -170,12 +170,69 @@ class Blog extends \Lime\Helper {
         // invisible on any non-debug environment: the API answers
         // "Model <name> not found" while the definition sits correct in the
         // database. See src/knowledge/cockpit-model-registry-cache.md.
-        if ($created) {
+        // Models created before a field existed keep their old definition
+        // forever: ensureModels() only ever creates what is missing.
+        $migrated = $this->migrateModels($content);
+
+        if ($created || $migrated) {
             try {
                 $this->app->helper('content.model')->cache(true);
             } catch (\Throwable $e) {
                 $this->log('model cache rebuild failed: '.$e->getMessage());
             }
+        }
+    }
+
+    /**
+     * Brings an existing blogPosts model up to the current field list.
+     *
+     * The per-article SEO overrides were added after the addon shipped. The
+     * application has read them from day one - seoTitle, seoDescription and the
+     * rest feed the resolved meta tags - so on a project created before they
+     * existed the code runs and finds nothing, and an editor has nowhere to
+     * write them. The feature looks present and is unreachable.
+     *
+     * Appends only. Existing fields keep their place and their settings, and
+     * stored articles are never touched.
+     */
+    protected function migrateModels($content): bool {
+
+        if (!$content->exists(self::MODEL_POSTS)) {
+            return false;
+        }
+
+        $model  = $content->model(self::MODEL_POSTS);
+        $fields = $model['fields'] ?? [];
+        $names  = array_column($fields, 'name');
+
+        $additions = [
+            'seoTitle'       => $this->field('seoTitle', 'text', 'SEO Title', false, ['info' => 'Override the <title> tag. Falls back to the article title when empty.']),
+            'seoDescription' => $this->field('seoDescription', 'text', 'SEO Description', false, ['info' => 'Override the meta description. Falls back to excerpt when empty.']),
+            'seoImage'       => $this->field('seoImage', 'asset', 'SEO Image', false, ['info' => 'Override the OG image. Falls back to cover when empty.']),
+            'seoJsonLd'      => $this->field('seoJsonLd', 'code', 'JSON-LD', false, ['info' => 'Custom structured data for search engines (schema.org).']),
+            'seoCanonical'   => $this->field('seoCanonical', 'text', 'Canonical URL', false, ['info' => 'Override the canonical URL. Leave empty to use the article path.']),
+            'seoNoIndex'     => $this->field('seoNoIndex', 'boolean', 'No Index', false, ['info' => 'If set, search engines will not index this article.']),
+        ];
+
+        $added = [];
+
+        foreach ($additions as $name => $definition) {
+            if (in_array($name, $names, true)) continue;
+            $fields[] = $definition;
+            $added[] = $name;
+        }
+
+        if (!$added) {
+            return false;
+        }
+
+        try {
+            $content->updateModel(self::MODEL_POSTS, ['fields' => $fields]);
+            $this->log('added missing SEO fields to '.self::MODEL_POSTS.': '.implode(', ', $added));
+            return true;
+        } catch (\Throwable $e) {
+            $this->log('blogPosts SEO field migration failed: '.$e->getMessage());
+            return false;
         }
     }
 
