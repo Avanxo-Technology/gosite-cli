@@ -88,8 +88,12 @@ services:
       # self-signed mkcert MinIO certificate.
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
-      # The container name, not the service name - see docker-compose.yml.
-      - APP_URL=http://__PROJECT__-app:8080
+      # The service name is right HERE, unlike in docker-compose.yml: this file
+      # is deployed one stack per network (Coolify), so "app" resolves to this
+      # project's app and nothing else. Local development is the odd one out -
+      # every project shares gosite-network there, so that file names the
+      # container instead. Do not "fix" one to match the other.
+      - APP_URL=http://app:8080
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
     volumes:
       # Uploads and cache still live on disk even when the data is in MongoDB.

@@ -409,7 +409,12 @@ class Webapp extends \Lime\Helper {
         }
 
         $endpoint = rtrim($url, '/') . '/cache/purge';
-        $token    = getenv('COCKPIT_API_TOKEN') ?: '';
+
+        // Trimmed on purpose: a secret pasted into a deployment UI often
+        // arrives with a trailing newline, and the application compares the
+        // header byte for byte - the result is a 401 while both sides look
+        // identical to a human reading the dashboard.
+        $token = trim((string)getenv('COCKPIT_API_TOKEN'));
 
         $id = is_array($item) ? ($item['_id'] ?? null) : $item;
 
@@ -445,6 +450,13 @@ class Webapp extends \Lime\Helper {
 
         if ($error !== '') {
             error_log("[webapp/cachepurge] {$endpoint} transport error: {$error}");
+        } elseif ($status === 401) {
+            // Say which half is wrong. Without this the log states the obvious
+            // and hides the one fact that resolves it.
+            $detail = $token === ''
+                ? 'this CMS has no COCKPIT_API_TOKEN, so no X-Api-Key was sent'
+                : 'the token this CMS sent does not match the application\'s COCKPIT_API_TOKEN';
+            error_log("[webapp/cachepurge] {$endpoint} refused the purge (401): {$detail}");
         } elseif ($status < 200 || $status >= 300) {
             error_log("[webapp/cachepurge] {$endpoint} failed with HTTP {$status}");
         }

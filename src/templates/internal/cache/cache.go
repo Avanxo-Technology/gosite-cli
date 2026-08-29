@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
+	"strings"
 )
 
 // ttl keeps Cockpit almost entirely out of the request path while staying
@@ -36,7 +37,10 @@ func New(rdb *redis.Client, log *slog.Logger, dev bool) *Cache {
 }
 
 // staleKey appends ":stale" so the long-lived copy lives beside the fresh one.
-func staleKey(key string) string { return key + ":stale" }
+// staleSuffix marks the fallback copy of a key.
+const staleSuffix = ":stale"
+
+func staleKey(key string) string { return key + staleSuffix }
 
 // HTML returns the cached bytes for key, calling render only on a miss:
 //
@@ -122,9 +126,31 @@ func (c *Cache) Set(ctx context.Context, key string, value []byte, ttl time.Dura
 	return c.rdb.Set(ctx, key, value, ttl).Err()
 }
 
-// Purge removes fresh and stale keys so an editor never has to wait out the
-// TTL and stale content is cleared alongside fresh content.
+// Purge drops the fresh entries so the next request re-renders.
+//
+// The stale copies are deliberately left in place. They exist to cover a failed
+// render, and a purge is exactly when that cover is needed: the purge is
+// followed immediately by a re-render, and if the CMS is slow, still rebuilding
+// its model registry, or briefly unreachable at that moment, deleting the stale
+// copy too means there is nothing to fall back on - the visitor gets a 502
+// instead of the last good page. Publishing content should never be able to
+// show a customer an error page.
+//
+// A stale entry is never served while a fresh one exists, so keeping it costs
+// nothing in the normal path. Stale copies expire on their own (staleTTL) and
+// are overwritten by the next successful render, so they cannot pin removed
+// content forever. When the stale copy is itself the problem - a page cached
+// from a bad render - PurgeIncludingStale is the way to clear it.
 func (c *Cache) Purge(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	return c.rdb.Del(ctx, keys...).Err()
+}
+
+// PurgeIncludingStale also drops the fallback copies. Use it when the stale
+// content itself is wrong, not as part of routine content updates.
+func (c *Cache) PurgeIncludingStale(ctx context.Context, keys ...string) error {
 	if len(keys) == 0 {
 		return nil
 	}
@@ -153,7 +179,8 @@ func (c *Cache) PurgeAll(ctx context.Context, projectPrefix string) error {
 	return c.PurgeGroup(ctx, projectPrefix)
 }
 
-// PurgeGroup removes every key starting with prefix, fresh and stale alike.
+// PurgeGroup removes every fresh key starting with prefix, leaving the stale
+// fallbacks in place for the same reason Purge does - see there.
 //
 // A page that exists once - the home page - is purged by name. A blog is many
 // keys instead: an article per slug and an index per page number, and
@@ -168,6 +195,26 @@ func (c *Cache) PurgeAll(ctx context.Context, projectPrefix string) error {
 // Deletion happens in batches as the scan proceeds, so memory stays bounded no
 // matter how many keys match.
 func (c *Cache) PurgeGroup(ctx context.Context, prefix string) error {
+	return c.purgeGroup(ctx, prefix, false)
+}
+
+// PurgeGroupIncludingStale removes the fallbacks too. Same warning as
+// PurgeIncludingStale: this is for a group cached from a bad render, not for
+// routine updates.
+func (c *Cache) PurgeGroupIncludingStale(ctx context.Context, prefix string) error {
+	return c.purgeGroup(ctx, prefix, true)
+}
+
+// purges decides whether a scanned key is removed by this group purge.
+//
+// The scan matches both copies of every page. Skipping the stale ones is what
+// keeps a site-wide purge from removing the only thing standing between a
+// failed re-render and a 502 - see Purge.
+func purges(key string, includeStale bool) bool {
+	return includeStale || !strings.HasSuffix(key, staleSuffix)
+}
+
+func (c *Cache) purgeGroup(ctx context.Context, prefix string, includeStale bool) error {
 	if prefix == "" {
 		// Refuse to interpret an empty prefix as "everything": that would let a
 		// caller with a missing value flush the whole cache by accident.
@@ -185,7 +232,12 @@ func (c *Cache) PurgeGroup(ctx context.Context, prefix string) error {
 			return err
 		}
 
-		batch = append(batch, keys...)
+		for _, k := range keys {
+			if !purges(k, includeStale) {
+				continue
+			}
+			batch = append(batch, k)
+		}
 
 		if len(batch) >= purgeScanCount {
 			if err := c.rdb.Del(ctx, batch...).Err(); err != nil {

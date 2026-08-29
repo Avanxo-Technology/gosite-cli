@@ -28,12 +28,16 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Port:           env("PORT", "8080"),
-		RedisURL:       env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"),
-		MongoURI:       buildMongoURI(),
-		MongoDB:        env("MONGO_DB", "__PROJECT__"),
-		CockpitURL:     env("COCKPIT_URL", "http://__PROJECT__-cms:80"),
-		CockpitToken:   os.Getenv("COCKPIT_API_TOKEN"),
+		Port:       env("PORT", "8080"),
+		RedisURL:   env("REDIS_URL", "redis://__REDIS_HOST__:__REDIS_PORT__/0"),
+		MongoURI:   buildMongoURI(),
+		MongoDB:    env("MONGO_DB", "__PROJECT__"),
+		CockpitURL: env("COCKPIT_URL", "http://__PROJECT__-cms:80"),
+		// Trimmed: a secret pasted into a deployment UI often arrives with a
+		// trailing newline, and an untrimmed compare then fails against a CMS
+		// that trimmed it (or did not) - a 401 with both sides "clearly" set to
+		// the same value.
+		CockpitToken:   strings.TrimSpace(os.Getenv("COCKPIT_API_TOKEN")),
 		Environment:    os.Getenv("APP_ENV"),
 		StorageAdapter: env("STORAGE_ADAPTER", "local"),
 		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),

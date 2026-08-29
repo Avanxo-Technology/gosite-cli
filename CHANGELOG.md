@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.49.3 — publishing must never show a visitor an error page
+
+### Fixed
+
+- **A cache purge caused a 502 for the next visitor.** The scaffold keeps a
+  stale copy of every rendered page for exactly one reason - to serve it when a
+  render fails - and the purge deleted it along with the fresh one. So the
+  moment an editor published, the fallback vanished, and if Cockpit was still
+  rebuilding its model registry it answered `412 Precondition Failed` and the
+  visitor got `could not load the page`.
+
+  `Purge` now drops only the fresh entries and `PurgeGroup` skips the `:stale`
+  keys as it scans. A stale copy is never served while a fresh one exists, so
+  this costs nothing on the happy path. `PurgeIncludingStale` and
+  `PurgeGroupIncludingStale` remain for when the stale copy is itself the
+  problem - a page cached from a bad render.
+
+  Verified by stopping Cockpit outright: with the stale copy the visitor gets
+  the real page and a 200; without it, a 502.
+
+- **`APP_URL` in `docker-compose.prod.yml` pointed at a container that does not
+  exist there.** 0.49.2 fixed the local collision by naming the container, and
+  that fix was wrongly carried into the production compose - which sets no
+  `container_name` and is deployed one stack per network, where the service
+  name `app` is already unambiguous. Production is back to `http://app:8080`,
+  with a comment on both files explaining why they differ on purpose.
+
+- **The purge token is trimmed on both sides.** A secret pasted into a
+  deployment UI usually arrives with a trailing newline, and the comparison is
+  byte for byte - a 401 while both halves look identical in the dashboard. The
+  CMS also says which half is wrong now, instead of only reporting the status.
+
 ## 0.49.2 — Clear cache reaches the app, and stops reaching the neighbours
 
 Wiring Cockpit's *Settings → Clear cache* to the application's purge turned up
