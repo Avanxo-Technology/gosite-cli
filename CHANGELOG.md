@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.49.10 — every addon's JSON endpoint answered with the controller
+
+### Fixed
+
+- **35 API calls across Blog, Forms and Replica returned nothing.** They all
+  ended in `$this->json(...)`, and there is no `json()` method anywhere in the
+  chain - not on the controller, not on `App\Controller\Base`, not on
+  `Lime\App`. `Lime\AppAware::__call` returns `$this` for a method it cannot
+  find, so each of those endpoints answered with the controller object,
+  Cockpit rendered nothing, and the browser received an empty body.
+
+  Found by fixing the same mistake in the Webapp addon's new Refresh button,
+  where it surfaced as `Unexpected end of JSON input`. Verified by execution
+  rather than by reading: a controller instance was asked for `json([...])` and
+  handed back `OBJECT Blog\Controller\Api`.
+
+  All of them return the array now, which is what Cockpit's own controllers do.
+  `$this->stop($this->json(X), N)` becomes `$this->stop(X, N)` for the same
+  reason.
+
+  | Addon | Call sites |
+  | --- | --- |
+  | Replica | 16 |
+  | Forms | 13 |
+  | Blog | 6 |
+
 ## 0.49.9 — the Refresh button actually answers
 
 ### Fixed

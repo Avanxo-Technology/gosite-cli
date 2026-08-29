@@ -25,11 +25,11 @@ class Api extends \App\Controller\Base {
 
         if (!$this->guard()) return false;
 
-        return $this->json([
+        return [
             'success' => true,
             'posts'   => $this->helper('blog')->posts($this->param('blog', null)),
             'siteUrl' => $this->helper('blog')->siteUrl(),
-        ]);
+        ];
     }
 
     /**
@@ -47,22 +47,22 @@ class Api extends \App\Controller\Base {
         if (!$this->guard()) return false;
 
         if (!$this->hasValidCsrfToken()) {
-            $this->stop($this->json(['success' => false, 'error' => 'Invalid CSRF token.']), 403);
+            $this->stop(['success' => false, 'error' => 'Invalid CSRF token.'], 403);
             return false;
         }
 
         $purge = $this->app->helper('cachepurge') ?? null;
 
         if (!is_callable($purge)) {
-            return $this->json([
+            return [
                 'success' => false,
                 'error'   => 'The CachePurge addon is not installed, so this site has no cache to purge.',
-            ]);
+            ];
         }
 
         $purge($this->param('model', null), $this->param('id', null));
 
-        return $this->json(['success' => true]);
+        return ['success' => true];
     }
 
     // ---------------------------------------------------------------- helpers
@@ -78,7 +78,7 @@ class Api extends \App\Controller\Base {
         $user = $this->helper('auth')->getUser();
 
         if (!$user) {
-            $this->stop($this->json(['success' => false, 'error' => 'Authentication required.']), 401);
+            $this->stop(['success' => false, 'error' => 'Authentication required.'], 401);
             return false;
         }
 
@@ -86,7 +86,7 @@ class Api extends \App\Controller\Base {
         $this->app->set('user', $user);
 
         if (!$this->helper('acl')->isAllowed('blog/manage')) {
-            $this->stop($this->json(['success' => false, 'error' => 'Permission denied.']), 403);
+            $this->stop(['success' => false, 'error' => 'Permission denied.'], 403);
             return false;
         }
 

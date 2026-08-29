@@ -21,10 +21,10 @@ class Api extends \App\Controller\Base {
         $replica = $this->helper('replica');
 
         // Target::jsonSerialize() masks the api key, so this cannot leak it.
-        return $this->json([
+        return [
             'targets'     => $replica->targets(),
             'collections' => $replica->localModels(),
-        ]);
+        ];
     }
 
     /**
@@ -38,10 +38,10 @@ class Api extends \App\Controller\Base {
             $target = $this->helper('replica')->saveTarget((array)$this->param('target', []));
         } catch (\Throwable $e) {
             $this->app->response->status = 412;
-            return $this->json(['success' => false, 'error' => $e->getMessage()]);
+            return ['success' => false, 'error' => $e->getMessage()];
         }
 
-        return $this->json(['success' => true, 'target' => $target]);
+        return ['success' => true, 'target' => $target];
     }
 
     /**
@@ -53,10 +53,10 @@ class Api extends \App\Controller\Base {
 
         if (!$id || !$this->helper('replica')->removeTarget($id)) {
             $this->app->response->status = 404;
-            return $this->json(['success' => false, 'error' => 'Target not found.']);
+            return ['success' => false, 'error' => 'Target not found.'];
         }
 
-        return $this->json(['success' => true]);
+        return ['success' => true];
     }
 
     /**
@@ -70,10 +70,10 @@ class Api extends \App\Controller\Base {
 
         if (!$target) {
             $this->app->response->status = 404;
-            return $this->json(['ok' => false, 'error' => 'Target not found.']);
+            return ['ok' => false, 'error' => 'Target not found.'];
         }
 
-        return $this->json($this->helper('replica')->client($target)->ping());
+        return $this->helper('replica')->client($target)->ping();
     }
 
     /**
@@ -89,12 +89,12 @@ class Api extends \App\Controller\Base {
 
         if (!$target) {
             $this->app->response->status = 404;
-            return $this->json(['success' => false, 'error' => 'Target not found.']);
+            return ['success' => false, 'error' => 'Target not found.'];
         }
 
         if (!$target->enabled) {
             $this->app->response->status = 412;
-            return $this->json(['success' => false, 'error' => 'Target is disabled.']);
+            return ['success' => false, 'error' => 'Target is disabled.'];
         }
 
         $direction = $this->param('direction', 'push') === 'pull' ? 'pull' : 'push';
@@ -110,7 +110,7 @@ class Api extends \App\Controller\Base {
             ? $replica->pull($target, $options)
             : $replica->push($target, $options);
 
-        return $this->json(['success' => $result['errors'] === 0, 'result' => $result]);
+        return ['success' => $result['errors'] === 0, 'result' => $result];
     }
 
     /**
@@ -132,10 +132,10 @@ class Api extends \App\Controller\Base {
 
         if (!$target) {
             $this->app->response->status = 404;
-            return $this->json(['success' => false, 'error' => 'Target not found.']);
+            return ['success' => false, 'error' => 'Target not found.'];
         }
 
-        return $this->json(['success' => true, 'enabled' => $target->enabled, 'target' => $target]);
+        return ['success' => true, 'enabled' => $target->enabled, 'target' => $target];
     }
 
     /**
@@ -145,11 +145,11 @@ class Api extends \App\Controller\Base {
 
         if (!$this->guard()) return false;
 
-        return $this->json($this->helper('replica')->log(
+        return $this->helper('replica')->log(
             (int)$this->param('page', 1),
             (int)$this->param('limit', 25),
             $this->param('target', null) ?: null
-        ));
+        );
     }
 
     // ---------------------------------------------------------------- helpers
@@ -159,7 +159,7 @@ class Api extends \App\Controller\Base {
         $user = $this->helper('auth')->getUser();
 
         if (!$user) {
-            $this->stop($this->json(['success' => false, 'error' => 'Authentication required.']), 401);
+            $this->stop(['success' => false, 'error' => 'Authentication required.'], 401);
             return false;
         }
 
@@ -167,7 +167,7 @@ class Api extends \App\Controller\Base {
         $this->app->set('user', $user);
 
         if (!$this->helper('acl')->isAllowed('replica/manage')) {
-            $this->stop($this->json(['success' => false, 'error' => 'Permission denied.']), 403);
+            $this->stop(['success' => false, 'error' => 'Permission denied.'], 403);
             return false;
         }
 
@@ -185,7 +185,7 @@ class Api extends \App\Controller\Base {
             return true;
         }
 
-        $this->stop($this->json(['success' => false, 'error' => 'Invalid CSRF token.']), 412);
+        $this->stop(['success' => false, 'error' => 'Invalid CSRF token.'], 412);
 
         return false;
     }

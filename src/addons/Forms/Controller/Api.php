@@ -28,7 +28,7 @@ class Api extends \App\Controller\Base {
 
         if ($this->method() !== 'POST') {
             $this->app->response->status = 405;
-            return $this->json(['success' => false, 'error' => 'Method not allowed.']);
+            return ['success' => false, 'error' => 'Method not allowed.'];
         }
 
         $result = $this->helper('forms')->handleSubmission();
@@ -43,7 +43,7 @@ class Api extends \App\Controller\Base {
 
         unset($result['status'], $result['retryAfter']);
 
-        return $this->json($result);
+        return $result;
     }
 
     /**
@@ -56,11 +56,11 @@ class Api extends \App\Controller\Base {
 
         if (!$this->guard()) return false;
 
-        return $this->json($this->helper('forms')->listSubmissions(
+        return $this->helper('forms')->listSubmissions(
             $this->param('form', null),
             (int)$this->param('page', 1),
             (int)$this->param('limit', 25)
-        ));
+        );
     }
 
     /**
@@ -70,7 +70,7 @@ class Api extends \App\Controller\Base {
 
         if (!$this->guard()) return false;
 
-        return $this->json($this->helper('forms')->forms());
+        return $this->helper('forms')->forms();
     }
 
     /**
@@ -100,20 +100,20 @@ class Api extends \App\Controller\Base {
 
         if (!$this->hasValidCsrfToken()) {
             $this->app->response->status = 412;
-            return $this->json(['success' => false, 'error' => 'Invalid CSRF token.']);
+            return ['success' => false, 'error' => 'Invalid CSRF token.'];
         }
 
         if (!$id) {
             $this->app->response->status = 400;
-            return $this->json(['success' => false, 'error' => 'Missing id.']);
+            return ['success' => false, 'error' => 'Missing id.'];
         }
 
         if (!$this->helper('forms')->remove($id)) {
             $this->app->response->status = 404;
-            return $this->json(['success' => false, 'error' => 'Submission not found.']);
+            return ['success' => false, 'error' => 'Submission not found.'];
         }
 
-        return $this->json(['success' => true]);
+        return ['success' => true];
     }
 
     /**
@@ -125,17 +125,17 @@ class Api extends \App\Controller\Base {
 
         if (!$this->hasValidCsrfToken()) {
             $this->app->response->status = 412;
-            return $this->json(['success' => false, 'error' => 'Invalid CSRF token.']);
+            return ['success' => false, 'error' => 'Invalid CSRF token.'];
         }
 
         $read = $this->param('read', '1') !== '0';
 
         if (!$id || !$this->helper('forms')->markRead($id, $read)) {
             $this->app->response->status = 404;
-            return $this->json(['success' => false, 'error' => 'Submission not found.']);
+            return ['success' => false, 'error' => 'Submission not found.'];
         }
 
-        return $this->json(['success' => true, 'read' => $read]);
+        return ['success' => true, 'read' => $read];
     }
 
     // ---------------------------------------------------------------- helpers
@@ -151,7 +151,7 @@ class Api extends \App\Controller\Base {
         $user = $this->helper('auth')->getUser();
 
         if (!$user) {
-            $this->stop($this->json(['success' => false, 'error' => 'Authentication required.']), 401);
+            $this->stop(['success' => false, 'error' => 'Authentication required.'], 401);
             return false;
         }
 
@@ -159,7 +159,7 @@ class Api extends \App\Controller\Base {
         $this->app->set('user', $user);
 
         if (!$this->helper('acl')->isAllowed('forms/manage')) {
-            $this->stop($this->json(['success' => false, 'error' => 'Permission denied.']), 403);
+            $this->stop(['success' => false, 'error' => 'Permission denied.'], 403);
             return false;
         }
 
