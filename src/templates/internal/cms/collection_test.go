@@ -185,3 +185,78 @@ func TestFirstMissingIsNotAnError(t *testing.T) {
 		t.Fatalf("item = %v, want nil", item)
 	}
 }
+
+// Cockpit's items endpoint answers 412 when the model it looked up is not a
+// collection - which is what a model registry emptied by a cache flush looks
+// like from outside. The same request a moment later succeeds, so failing on
+// the first attempt turns "Clear cache" into an error page for the next
+// visitor.
+func TestTransientStatusIsRetriedOnce(t *testing.T) {
+	for _, status := range []int{
+		http.StatusPreconditionFailed,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls int
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls == 1 {
+					w.WriteHeader(status)
+					return
+				}
+				w.Write([]byte(`{"data":[{"_id":"1"}],"meta":{"total":1}}`))
+			})
+
+			res, err := c.Items(context.Background(), "blogPosts", Query{})
+			if err != nil {
+				t.Fatalf("a %d must be retried and succeed, got %v", status, err)
+			}
+			if calls != 2 {
+				t.Errorf("calls = %d, want exactly 2 (one retry, not a loop)", calls)
+			}
+			if len(res.Items) != 1 {
+				t.Errorf("items = %d, want 1", len(res.Items))
+			}
+		})
+	}
+}
+
+// A wrong request is not worth repeating: retrying a 404 or a 401 only holds
+// the visitor's request open before failing anyway.
+func TestPermanentStatusIsNotRetried(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls int
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(status)
+			})
+
+			if _, err := c.Items(context.Background(), "blogPosts", Query{}); err == nil {
+				t.Fatalf("a %d must still be an error", status)
+			}
+			if calls != 1 {
+				t.Errorf("calls = %d, want 1 - no retry for a permanent answer", calls)
+			}
+		})
+	}
+}
+
+// Two transient answers in a row give up, so a genuinely down CMS does not hold
+// the request open while the caller has a stale copy to serve instead.
+func TestRetryHappensOnlyOnce(t *testing.T) {
+	var calls int
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusPreconditionFailed)
+	})
+
+	if _, err := c.Items(context.Background(), "blogPosts", Query{}); err == nil {
+		t.Fatal("a persistent 412 must still fail")
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+}

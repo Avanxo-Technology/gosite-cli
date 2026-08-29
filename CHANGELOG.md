@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.49.4 — a transient CMS answer no longer fails the page
+
+### Fixed
+
+- **`412 Precondition Failed` from Cockpit failed the render outright.** The
+  items endpoint answers 412 when the model it looked up is not a collection,
+  which is exactly what a model registry emptied by a cache flush looks like
+  from outside. The same request a moment later succeeds - so an editor
+  clicking *Clear cache* turned into `could not load the page` for the next
+  visitor of a blog index.
+
+  The CMS client now retries once, after 300ms, on 412, 502, 503, 504 and on a
+  connection that could not be made. A 404, 401 or 403 is not retried: a wrong
+  request is not worth repeating.
+
+  One retry, not a loop. If Cockpit is genuinely down, retrying harder only
+  holds the request open for a visitor who will be served the stale copy
+  anyway.
+
+  This closes a gap between two paths that behaved very differently: a failed
+  `Singleton` already degraded to template fallbacks, so the home page never
+  showed an error, while `Items` returned the error straight up the stack - and
+  the blog index was the page customers actually saw fail.
+
 ## 0.49.3 — publishing must never show a visitor an error page
 
 ### Fixed

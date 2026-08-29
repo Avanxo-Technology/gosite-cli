@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // Query describes one collection read.
@@ -170,7 +172,56 @@ func decodeItems(body []byte) (Result, error) {
 }
 
 // fetchRaw is fetch's sibling for responses that are not a single JSON object.
+// retryDelay is how long to wait before the one retry a transient failure gets.
+// Long enough for Cockpit to finish rebuilding its model registry, short enough
+// that a visitor waiting on a cold render does not notice it.
+const retryDelay = 300 * time.Millisecond
+
+// transientStatuses are the answers that mean "ask again", not "you asked
+// wrongly".
+//
+// 412 is the one that matters. Cockpit's items endpoint answers it when the
+// model it looked up is not a collection - which is what a model registry that
+// has just been emptied by a cache flush looks like from the outside. The same
+// request a moment later succeeds, so failing the render on the first attempt
+// turns an editor clicking "Clear cache" into an error page for the next
+// visitor.
+var transientStatuses = map[int]bool{
+	http.StatusPreconditionFailed: true, // 412: registry not rebuilt yet
+	http.StatusBadGateway:         true,
+	http.StatusServiceUnavailable: true,
+	http.StatusGatewayTimeout:     true,
+}
+
 func (c *Client) fetchRaw(ctx context.Context, path string) ([]byte, error) {
+	body, err := c.fetchRawOnce(ctx, path)
+	if err == nil || !isTransient(err) {
+		return body, err
+	}
+
+	// One retry, not a loop: if Cockpit is genuinely down, retrying harder only
+	// holds the request open longer for a visitor who is going to be served the
+	// stale copy anyway.
+	c.log.Warn("cockpit answered transiently, retrying once", "path", path, "err", err)
+
+	select {
+	case <-ctx.Done():
+		return nil, err
+	case <-time.After(retryDelay):
+	}
+
+	return c.fetchRawOnce(ctx, path)
+}
+
+// transientErr marks a failure worth one more attempt.
+type transientErr struct{ error }
+
+func isTransient(err error) bool {
+	var t transientErr
+	return errors.As(err, &t)
+}
+
+func (c *Client) fetchRawOnce(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, err
@@ -180,12 +231,18 @@ func (c *Client) fetchRaw(ctx context.Context, path string) ([]byte, error) {
 
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		// A connection that could not be made or was cut is worth one retry
+		// for the same reason a 502 is.
+		return nil, transientErr{err}
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cockpit returned %s", res.Status)
+		statusErr := fmt.Errorf("cockpit returned %s", res.Status)
+		if transientStatuses[res.StatusCode] {
+			return nil, transientErr{statusErr}
+		}
+		return nil, statusErr
 	}
 
 	var buf bytes.Buffer
