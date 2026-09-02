@@ -41,6 +41,9 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
   infra logs [svc]   Tail shared infrastructure logs
   infra repair       Regenerate configs and recreate proxy (fix stale Traefik)
   dns                Check that *.${GOSITE_TLD} resolves to 127.0.0.1
+  setup              Prepare this machine: resolver for *.${GOSITE_TLD}, mkcert
+                     CA, browser trust. Shows the plan and asks first.
+                     flags: --dry-run --yes --dns --tls --undo
 
 $(printf "${C_BOLD}OTHER${C_NC}")
   open   <name>         Open a project directory in Finder
@@ -82,6 +85,7 @@ dispatch() {
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
     dns)             load_command dns; cmd_dns ;;
+    setup)           load_command setup; cmd_setup "$@" ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;
     help|"")         usage ;;
     *)

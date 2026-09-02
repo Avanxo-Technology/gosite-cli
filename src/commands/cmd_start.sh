@@ -26,8 +26,14 @@ cmd_start() {
   ensure_cockpit_storage "${dir}"
   ensure_network
 
-  # Projects created before a certificate existed get one on first start.
-  [[ -n "${GOSITE_APP_DOMAIN:-}" ]] && ensure_project_cert "${GOSITE_PROJECT}" >/dev/null 2>&1 || true
+  # Projects created before a certificate existed get one on first start, and
+  # so does one whose certificate or Traefik config went missing since.
+  if [[ -n "${GOSITE_APP_DOMAIN:-}" ]]; then
+    ensure_project_cert "${GOSITE_PROJECT}" >/dev/null 2>&1 || true
+    # The certificate is only half of it: on Linux the browsers keep their own
+    # trust store, so a valid certificate still warns until the CA is in there.
+    install_mkcert_ca_nss >/dev/null 2>&1 || true
+  fi
 
   container_running "${GOSITE_PROXY_HOST}" || warn "Proxy is not running; local domains will not resolve. Run 'gosite infra up'."
   container_running "${GOSITE_REDIS_HOST}" || warn "Redis is not running. Run 'gosite infra up' or the app will fail to boot."

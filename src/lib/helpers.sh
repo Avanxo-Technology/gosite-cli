@@ -452,6 +452,8 @@ dep_hint() {
     git)    echo "https://git-scm.com/downloads" ;;
     openssl) echo "used to generate project secrets" ;;
     yq)      echo "brew install yq (mikefarah v4) - enables structural YAML drift reports in 'sync --report'" ;;
+    mkcert)  echo "gosite setup - issues the local HTTPS certificates" ;;
+    dnsmasq) echo "gosite setup - resolves *.test to 127.0.0.1" ;;
     *)      echo "" ;;
   esac
 }

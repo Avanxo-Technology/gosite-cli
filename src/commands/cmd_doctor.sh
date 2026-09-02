@@ -39,6 +39,18 @@ USAGE
 
   require_dependencies --report
 
+  # --- host environment -------------------------------------------------------
+  # Docker alone does not make a project reachable: without a resolver for the
+  # TLD and a CA the browser trusts, everything starts and nothing opens. These
+  # used to be undocumented manual steps, so they are named here.
+  info "Checking the host environment ($(host_platform_label))"
+  if hostdeps_report; then
+    ok "Host environment is ready."
+  else
+    warn "Some host dependencies are missing or unconfigured."
+    printf "      ${C_DIM}fix:${C_NC}      ${C_CYAN}gosite setup${C_NC}  (shows what it will change, then asks)\n"
+  fi
+
   # --- security audit (read-only) ---------------------------------------------
   GOSITE_AUDIT_FINDINGS=0
   info "Auditing registered projects and shared infrastructure (read-only)"
@@ -53,6 +65,7 @@ USAGE
     _audit_project "${name}" "${dir}"
   done < <(registry_entries)
 
+  _audit_certificates
   _audit_infra
 
   if [[ "${GOSITE_AUDIT_FINDINGS}" -eq 0 ]]; then
@@ -112,6 +125,35 @@ _audit_project() {
       "submissions retain ip/userAgent personal data indefinitely" \
       "set a retention window in cockpit/config.php (seconds), then: gosite restart ${name}"
   fi
+}
+
+# Certificates: a project whose certificate is missing, does not cover its own
+# domains, or has no dynamic file for Traefik to read. All three present the
+# same way in a browser - "not private" - and none of them is visible from the
+# container logs.
+_audit_certificates() {
+  local name dir state domain cert dyn
+  while IFS=$'\t' read -r name dir state; do
+    [[ -n "${name}" && "${state}" != "unavailable" ]] || continue
+
+    domain="$(project_domain "${name}")"
+    cert="${GOSITE_CERTS_DIR}/${name}.pem"
+    dyn="${GOSITE_DYNAMIC_DIR}/${name}.yml"
+
+    if [[ ! -f "${cert}" ]]; then
+      _audit_finding "${name}" "TLS certificate" "absent" \
+        "https://${domain} serves Traefik's default certificate and the browser refuses it" \
+        "gosite start ${name}   (re-issues it), or: gosite infra repair"
+    elif ! cert_covers_domains "${cert}" "${domain}" "*.${domain}"; then
+      _audit_finding "${name}" "TLS certificate" "does not cover ${domain} and *.${domain}" \
+        "the CMS host, or the site itself, is served a certificate for another name" \
+        "gosite start ${name}   (re-issues it)"
+    elif [[ ! -f "${dyn}" ]]; then
+      _audit_finding "${name}" "Traefik certificate config" "absent (${dyn})" \
+        "the certificate exists but Traefik was never told to use it" \
+        "gosite start ${name}"
+    fi
+  done < <(registry_entries)
 }
 
 # Shared infra: the datastores have no authentication; their only protection

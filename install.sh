@@ -19,7 +19,11 @@ BIN_NAME="gosite"
 GOSITE_REPO="${GOSITE_REPO:-Avanxo-Technology/gosite-cli}"
 GOSITE_REF="${GOSITE_REF:-main}"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; DIM='\033[2m'; NC='\033[0m'
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; DIM='\033[2m'; NC='\033[0m'
+else
+  RED=''; GREEN=''; YELLOW=''; BLUE=''; DIM=''; NC=''
+fi
 info()  { printf "${BLUE}==>${NC} %s\n" "$1"; }
 ok()    { printf "${GREEN} ok${NC} %s\n" "$1"; }
 warn()  { printf "${YELLOW}  ! ${NC}%s\n" "$1"; }
@@ -30,10 +34,17 @@ trap cleanup EXIT
 
 # --- flags -------------------------------------------------------------------
 GOSITE_SYSTEM="${GOSITE_SYSTEM:-0}"
+# Whether to offer 'gosite setup' - which installs dnsmasq/mkcert and edits
+# resolver config - after the files are in place. "ask" is the default; a
+# non-interactive install never reaches the question and just prints the list.
+GOSITE_SETUP="${GOSITE_SETUP:-ask}"
 for arg in "$@"; do
   case "${arg}" in
     --system) GOSITE_SYSTEM=1 ;;
     --user)   GOSITE_SYSTEM=0 ;;
+    --with-setup) GOSITE_SETUP=yes ;;
+    --no-setup)   GOSITE_SETUP=no ;;
+    -y|--yes)     GOSITE_SETUP=yes ;;
     -h|--help)
       cat <<USAGE
 gosite installer
@@ -41,7 +52,12 @@ gosite installer
   ./install.sh             Install into ~/.local (default, no sudo)
   ./install.sh --system    Install into /usr/local for all users (uses sudo)
 
-Environment overrides: GOSITE_REPO, GOSITE_REF, GOSITE_PREFIX
+  --with-setup, -y   After installing, run 'gosite setup' without asking. It
+                     installs dnsmasq and mkcert and edits resolver config;
+                     see 'gosite setup --dry-run' for the exact list.
+  --no-setup         Only install the CLI. Prints what is still missing.
+
+Environment overrides: GOSITE_REPO, GOSITE_REF, GOSITE_PREFIX, GOSITE_SETUP
 USAGE
       exit 0 ;;
     *) fatal "Unknown option: ${arg}" ;;
@@ -128,5 +144,49 @@ else
   ok "gosite is on your PATH ($(command -v ${BIN_NAME} 2>/dev/null || echo "${BIN_DIR}/${BIN_NAME}"))"
 fi
 
-printf "\n${GREEN}Installation complete.${NC} Run '${BIN_NAME} doctor' to check your toolchain.\n"
-printf "${DIM}Uninstall: rm -rf %s %s/%s${NC}\n" "${SHARE_DIR}" "${BIN_DIR}" "${BIN_NAME}"
+printf "\n${GREEN}gosite %s installed.${NC}\n\n" "$("${BIN_DIR}/${BIN_NAME}" version 2>/dev/null | awk '{print $2}')"
+
+# --- host environment --------------------------------------------------------
+#
+# The CLI is only half of what a working machine needs: local projects are
+# served over HTTPS at <name>.test, which takes a resolver for that TLD and a
+# certificate authority the browser trusts. Both used to be manual steps
+# nobody knew about until a project failed to open, so the installer names
+# them here - and offers to do them, out loud, rather than silently.
+info "Checking what this machine still needs"
+
+# 'setup --dry-run' prints the plan and exits 10 when there is work pending.
+SETUP_PENDING=0
+"${BIN_DIR}/${BIN_NAME}" setup --dry-run || [[ "$?" -ne 10 ]] || SETUP_PENDING=1
+
+if [[ "${SETUP_PENDING}" -eq 1 ]]; then
+  case "${GOSITE_SETUP}" in
+    yes)
+      "${BIN_DIR}/${BIN_NAME}" setup --yes || warn "Setup did not finish; run 'gosite setup' again when ready."
+      ;;
+    no)
+      printf "Run ${GREEN}gosite setup${NC} when you are ready.\n"
+      ;;
+    *)
+      # Piped from curl, stdin is the script itself - so ask the terminal, and
+      # when there is not one, do not touch the machine. Opening it is the only
+      # honest test: /dev/tty exists and is unusable in a container, where
+      # [[ -r /dev/tty ]] is still true.
+      if { : >/dev/tty; } 2>/dev/null; then
+        printf "${YELLOW}?${NC} Run 'gosite setup' now to apply the plan above? [y/N] " > /dev/tty
+        read -r REPLY < /dev/tty || REPLY=""
+        if [[ "${REPLY}" =~ ^[Yy]$ ]]; then
+          "${BIN_DIR}/${BIN_NAME}" setup --yes || warn "Setup did not finish; run 'gosite setup' again when ready."
+        else
+          printf "Run ${GREEN}gosite setup${NC} when you are ready.\n"
+        fi
+      else
+        warn "No terminal to ask at; nothing on this machine was changed."
+        printf "Run ${GREEN}gosite setup${NC} to apply the plan above.\n"
+      fi
+      ;;
+  esac
+fi
+
+printf "\nNext: ${GREEN}gosite infra up${NC}, then ${GREEN}gosite create <name>${NC}. Check anything with 'gosite doctor'.\n"
+printf "${DIM}Uninstall: gosite setup --undo && rm -rf %s %s/%s${NC}\n" "${SHARE_DIR}" "${BIN_DIR}" "${BIN_NAME}"

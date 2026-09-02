@@ -216,7 +216,7 @@ ensure_minio_certs() {
   fi
 
   if ! mkcert_available || ! mkcert_ca_installed; then
-    warn "mkcert missing or its CA is not installed; MinIO will run without native TLS."
+    warn "mkcert missing or its CA is not installed; MinIO will run without native TLS. Run: gosite setup"
     return 1
   fi
 
@@ -352,11 +352,14 @@ cmd_infra() {
       fi
 
       if ! mkcert_available; then
-        warn "mkcert not installed; HTTPS certificates cannot be issued (brew install mkcert)."
+        warn "mkcert not installed; HTTPS certificates cannot be issued. Run: gosite setup"
       elif ! mkcert_ca_installed; then
-        warn "mkcert CA not installed. Run: mkcert -install"
+        warn "mkcert CA not installed. Run: gosite setup --tls"
       else
         ok "mkcert CA is installed."
+        if [[ -n "$(nss_databases)" ]] && ! nss_ca_trusted; then
+          warn "The CA is not in the browser trust store; Brave/Chrome/Firefox will still warn. Run: gosite setup --tls"
+        fi
       fi
 
       local svc
@@ -381,6 +384,23 @@ cmd_infra() {
       _infra_minio_credentials
       _infra_write_compose
       ensure_minio_certs || true
+
+      # Re-issue every project's certificate too. Regenerating the proxy's
+      # config while leaving a project without its .pem - or without the
+      # dynamic .yml that points Traefik at it - is how "repair" used to
+      # finish successfully and leave the site serving Traefik's own default
+      # certificate.
+      info "Checking each project's certificate..."
+      # The path column is not needed here; certificates are keyed by name.
+      local pname pstate
+      while IFS=$'\t' read -r pname _ pstate; do
+        [[ -n "${pname}" && "${pstate}" != "unavailable" ]] || continue
+        ensure_project_cert "${pname}" >/dev/null 2>&1 \
+          || warn "Could not issue a certificate for ${pname}."
+      done < <(registry_entries)
+
+      # And make sure the browsers trust the CA that signed them.
+      install_mkcert_ca_nss >/dev/null 2>&1 || true
 
       info "Recreating all services with new config..."
       _infra_compose up -d --force-recreate

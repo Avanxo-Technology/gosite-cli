@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.50.0
+
+### `gosite setup`: the manual steps a new machine needed are now a command
+
+Installing gosite copied the CLI and stopped there. A working machine also
+needs a resolver for `*.test` and a certificate authority the browser trusts,
+and neither was mentioned anywhere - so every new Ubuntu box was rediscovered
+by hand, from a failure, days later.
+
+`gosite setup` does both. It prints every package it will install, every file
+it will write and every service it will restart, then asks. `--dry-run` stops
+after the plan, `--yes` skips the question, `--undo` removes what it wrote.
+Each step checks first, so running it again is not a way to break a machine,
+and anything it replaces is backed up beside itself.
+
+`install.sh` now ends by showing that plan and offering to run it. Piped from
+curl with no terminal to ask at, it prints the plan and changes nothing.
+
+### Fixes
+
+- **Ubuntu: `mkcert -install` never reached the system trust store.** It says
+  so and exits 0, so every check based on "does rootCA.pem exist" passed while
+  curl, wget and git kept refusing the local certificates. setup installs the
+  CA into `/usr/local/share/ca-certificates` itself, and `system_ca_trusted()`
+  now tells the two states apart.
+- **Browsers ignore the system trust store.** Brave, Chrome and Firefox keep
+  their own NSS database, which is why a correctly issued certificate still
+  showed `ERR_CERT_AUTHORITY_INVALID`. `gosite start` and `gosite setup` add
+  the CA to every NSS database the user has.
+- **A certificate could exist and never be used.** `ensure_project_cert` only
+  checked that the `.pem` files were there; with Traefik's dynamic `.yml`
+  missing it served its own default certificate instead. It now restores the
+  dynamic file, and re-issues when the certificate does not cover the
+  project's own domains.
+- **`gosite infra repair` left projects broken.** It regenerated the proxy and
+  MinIO and never looked at the projects' certificates; it now re-issues every
+  registered project's.
+- **The DNS instructions were macOS-only.** `brew install dnsmasq` and
+  `/etc/resolver` on an Ubuntu machine is advice that cannot be followed. The
+  hint is per platform now, and starts with `gosite setup`.
+- **`gosite doctor`** reports the host environment (docker, dnsmasq, mkcert,
+  certutil) and flags projects whose certificate is missing, does not cover
+  its domains, or has no dynamic file.
+
 ## 0.49.12 — production services are named per project and environment
 
 ### Fixed
