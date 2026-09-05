@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
@@ -40,6 +41,7 @@ func NewRouter(a *App) *echo.Echo {
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Gzip())
+	e.Use(assetCacheHeaders())
 
 	e.Static("/static", "static")
 
@@ -80,4 +82,33 @@ func NewRouter(a *App) *echo.Echo {
 	}
 
 	return e
+}
+
+// assetCacheHeaders sets Cache-Control for the two static prefixes, which get
+// deliberately different lifetimes.
+//
+// Cockpit uploads carry a unique name per upload, so a given URL never changes
+// content and is safe to cache forever. Files under /static are served under
+// stable names - a stylesheet or a vendored library keeps its path across
+// deploys - so they get a short freshness window instead: the browser
+// revalidates with its ETag and a new deploy reaches returning visitors within
+// the hour. Marking those immutable would hide a CSS or JS change for a year,
+// visible only to someone arriving with a cold cache, with no way to
+// invalidate it short of renaming the file. If this project ever fingerprints
+// its assets, that prefix can move to the immutable branch.
+//
+// HTML routes are untouched either way - the page cache owns those.
+func assetCacheHeaders() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			p := c.Request().URL.Path
+			switch {
+			case strings.HasPrefix(p, "/storage/uploads/"):
+				c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			case strings.HasPrefix(p, "/static/"):
+				c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+			}
+			return next(c)
+		}
+	}
 }
