@@ -8,6 +8,11 @@
 # Required variables in Coolify:
 #   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
 #   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
+#                        Both are MANDATORY and the stack refuses to start
+#                        without them - an unset one used to render an empty
+#                        Traefik Host() rule and 502 the site silently.
+#                        For several domains on the app, set SERVICE_FQDN_APP to
+#                        one of them and add the rest in Coolify's domain field.
 #   COCKPIT_API_TOKEN    MANDATORY: shared token between the app and Cockpit;
 #                        without it /cache/purge refuses to operate (503)
 #   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
@@ -42,7 +47,12 @@ services:
       - coolify.managed=true
       - coolify.image=true
       - traefik.enable=true
-      - traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP}`)
+      # `:?` and not a bare ${SERVICE_FQDN_APP}: when the variable is unset,
+      # Coolify's magic-variable substitution yields an empty string, Traefik
+      # registers Host(``) - a router that matches nothing - and the site 502s
+      # with no error anywhere explaining why. This fails the deploy instead,
+      # naming the variable to set.
+      - 'traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP:?set SERVICE_FQDN_APP to the app domain, e.g. example.com}`)'
       - traefik.http.routers.__PROJECT__-app.entrypoints=https
       - traefik.http.routers.__PROJECT__-app.tls=true
       - traefik.http.routers.__PROJECT__-app.tls.certresolver=letsencrypt
@@ -118,7 +128,7 @@ services:
     labels:
       - coolify.managed=true
       - traefik.enable=true
-      - traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS}`)
+      - 'traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS:?set SERVICE_FQDN_CMS to the CMS domain, e.g. cms.example.com}`)'
       - traefik.http.routers.__PROJECT__-cms.entrypoints=https
       - traefik.http.routers.__PROJECT__-cms.tls=true
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt

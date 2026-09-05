@@ -1,0 +1,168 @@
+# QA stack for __PROJECT__, in Coolify's native compose format.
+#
+# Mirrors docker-compose.prod.yml: the only services here are the app and the
+# CMS. MongoDB and Redis are the SHARED external services - QA does not run its
+# own copies, it points at the same servers as production and separates itself
+# by database name and Redis database index (see the two notes below).
+#
+# Required variables in Coolify:
+#   SERVICE_FQDN_APP        e.g. qa.__PROJECT__.example.com
+#   SERVICE_FQDN_CMS        e.g. cms.qa.__PROJECT__.example.com
+#   COCKPIT_API_TOKEN       shared token between the app and Cockpit - use a
+#                           DIFFERENT value than production
+#   COCKPIT_SEC_KEY         Cockpit's signing key - the image ships a public
+#                           default, so this must be set to something private
+#   MONGO_HOST              shared MongoDB host
+#   MONGO_USER              MongoDB user
+#   MONGO_PASSWORD          MongoDB password
+#   REDIS_URL               MUST use a different database index than prod,
+#                           e.g. redis://:pass@redis-host:6379/1
+#   COCKPIT_MEMORY_SERVER   e.g. redis://:pass@redis-host:6379
+#
+# Optional: MONGO_DB (defaults to __PROJECT__-qa), MONGO_PORT (27017).
+#
+# MONGO_DB does more than name the database. cockpit/config.php uses it as the
+# key prefix for Cockpit's app memory in Redis, and that memory holds the API
+# key registry the /api/* gate reads. Giving QA and production the same MONGO_DB
+# would have them share one registry - so rotating one environment's
+# COCKPIT_API_TOKEN would silently break the other. Keep them different.
+
+services:
+  __PROJECT__-qa-app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Not "development": IsDev() gates the unauthenticated cache-purge
+      # button, and QA is a deployed environment reachable from the internet.
+      # Anything other than development/dev/local keeps that endpoint behind
+      # the API token, exactly as in production.
+      - APP_ENV=qa
+      - PORT=8080
+      # Page-cache keys are compiled-in constants prefixed "__PROJECT__:" (see
+      # internal/handlers/home.go and internal/seo). They do NOT vary by
+      # environment, so QA and production sharing one Redis database would read
+      # and overwrite each other's rendered HTML - QA content would be served
+      # on the production domain. The database index in this URL is what keeps
+      # the two keyspaces apart, so it must differ from production's.
+      - REDIS_URL=${REDIS_URL}
+      - COCKPIT_URL=http://__PROJECT__-qa-cms:80
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+      # Mongo parts so the app can build a credential-aware URI (see
+      # buildMongoURI in internal/config) exactly like the CMS does.
+      - MONGO_HOST=${MONGO_HOST}
+      - MONGO_PORT=${MONGO_PORT:-27017}
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      # The shared MongoDB server holds both environments; the database name is
+      # what makes QA's content its own. Editing in the QA CMS never touches
+      # production content.
+      - MONGO_DB=${MONGO_DB:-__PROJECT__-qa}
+      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+    labels:
+      # Tells Coolify this service is built from the repository Dockerfile.
+      - coolify.managed=true
+      - coolify.image=true
+      - traefik.enable=true
+      # The router/service name has to satisfy two separate constraints, and
+      # missing either one 502s the site in a different way.
+      #
+      # 1. It must NOT equal the compose service name (__PROJECT__-qa-app).
+      #    When they match, Coolify treats this as the service's own router and
+      #    injects a per-domain https-N-... service whose load balancer port
+      #    falls back to the default 3000 (ports_exposes), ignoring the port
+      #    declared below.
+      # 2. It must NOT equal production's router name either. Traefik keys its
+      #    routing table by router name across every stack on the proxy, so two
+      #    environments naming their routers alike define one router twice with
+      #    different Host rules - and whichever container Traefik reads last
+      #    wins. That surfaces as QA content on the production domain, or a
+      #    domain that intermittently stops resolving, depending on deploy
+      #    order.
+      #
+      # "-qa-web" satisfies both: distinct from the service name here, and
+      # distinct from the "-app" production uses.
+      - 'traefik.http.routers.__PROJECT__-qa-web.rule=Host(`${SERVICE_FQDN_APP:?set SERVICE_FQDN_APP to the QA app domain, e.g. qa.example.com}`)'
+      - traefik.http.routers.__PROJECT__-qa-web.entrypoints=https
+      - traefik.http.routers.__PROJECT__-qa-web.tls=true
+      - traefik.http.routers.__PROJECT__-qa-web.tls.certresolver=letsencrypt
+      - traefik.http.services.__PROJECT__-qa-web.loadbalancer.server.port=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      __PROJECT__-qa-cms:
+        condition: service_started
+
+  __PROJECT__-qa-cms:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.cms
+    restart: unless-stopped
+    environment:
+      # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
+      - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
+      # Distinct session name so a browser signed into the QA CMS and the
+      # production CMS on sibling domains does not share one session cookie.
+      - COCKPIT_SESSION_NAME=__PROJECT__-qa
+      - COCKPIT_MEMORY_SERVER=${COCKPIT_MEMORY_SERVER}
+      - COCKPIT_DATABASE=${COCKPIT_DATABASE:-mongodb}
+      - MONGO_HOST=${MONGO_HOST}
+      - MONGO_PORT=${MONGO_PORT:-27017}
+      - MONGO_USER=${MONGO_USER}
+      - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_DB=${MONGO_DB:-__PROJECT__-qa}
+      # S3 storage (optional - only used when STORAGE_ADAPTER=s3). S3_PREFIX
+      # defaults to a QA folder so uploads never land on production's assets.
+      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
+      - S3_URL=${S3_URL}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - S3_KEY=${S3_KEY}
+      - S3_SECRET=${S3_SECRET}
+      - S3_PREFIX=${S3_PREFIX:-qa}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+      - S3_ACL=${S3_ACL:-}
+      - S3_VERIFY=${S3_VERIFY:-true}
+      # CachePurge addon: the Go app's internal address and shared token so
+      # Cockpit can POST to /cache/purge when content changes or Replica syncs.
+      # Every service in this file is named for the project AND the
+      # environment, and the internal URLs use those names.
+      #
+      # A generic `app`/`cms` is not safe here. Coolify deploys stacks onto a
+      # shared predefined network, so this QA stack sitting alongside the
+      # production one would register the same names, DNS would round-robin
+      # between them, and the application would end up authenticating against
+      # the other stack's CMS. That surfaces as `412 {"error":"Authentication
+      # failed"}` on some requests and not others, which is miserable to
+      # diagnose because the site half works.
+      - APP_URL=http://__PROJECT__-qa-app:8080
+      - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+    volumes:
+      # Uploads and cache still live on disk even when the data is in MongoDB.
+      # Named apart from production's volume so the two never share storage.
+      # Config and addons are NOT mounted here: Dockerfile.cms bakes the
+      # committed cockpit/config.php and addons/ into the image. Relative bind
+      # mounts (./cockpit/config.php, ./addons) resolve against the directory
+      # where Coolify stores the pasted compose file, not the repo checkout, so
+      # they silently mount empty directories. After a deploy that changes an
+      # addon, clear storage/cache/modules.cache.php once so the CMS
+      # re-registers it on the next boot.
+      - cockpit-storage-qa:/var/www/html/storage
+    labels:
+      - coolify.managed=true
+      - traefik.enable=true
+      # Same two constraints as the app above: not the compose service name,
+      # and not production's router name.
+      - 'traefik.http.routers.__PROJECT__-qa-cmsweb.rule=Host(`${SERVICE_FQDN_CMS:?set SERVICE_FQDN_CMS to the QA CMS domain, e.g. cms.qa.example.com}`)'
+      - traefik.http.routers.__PROJECT__-qa-cmsweb.entrypoints=https
+      - traefik.http.routers.__PROJECT__-qa-cmsweb.tls=true
+      - traefik.http.routers.__PROJECT__-qa-cmsweb.tls.certresolver=letsencrypt
+      - traefik.http.services.__PROJECT__-qa-cmsweb.loadbalancer.server.port=80
+
+volumes:
+  cockpit-storage-qa:

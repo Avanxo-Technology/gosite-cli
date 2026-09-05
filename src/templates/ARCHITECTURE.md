@@ -383,6 +383,12 @@ disable certificate checking against the real bucket.
 ## Deployment
 
 `docker-compose.yml` is local only: mapped ports, source bind-mounted, air.
+`docker-compose.qa.yml` is a second Coolify stack for a QA environment. It runs
+no datastores of its own - it points at production's MongoDB and Redis and
+separates itself by `MONGO_DB` and Redis database index. Its Traefik router
+names differ from production's on purpose: Traefik keys routers by name across
+every stack on the proxy, so two environments naming them alike define one
+router twice and the last deploy wins.
 `docker-compose.prod.yml` is what Coolify uses: no host ports, Traefik labels,
 every value from the environment, and the multi-stage `deploy/Dockerfile`
 producing a static binary on Alpine.

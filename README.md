@@ -434,6 +434,7 @@ my-site/
 ├── Dockerfile.dev            # LOCAL: toolchain + air, source bind-mounted
 ├── docker-compose.yml        # LOCAL: mapped ports, external gosite-network
 ├── docker-compose.prod.yml   # COOLIFY: no host ports, Traefik labels, env-driven
+├── docker-compose.qa.yml     # COOLIFY: QA alongside prod, shared Mongo/Redis
 ├── .env / .env.example
 ├── .gosite.env               # project marker read by list/start/stop/remove
 ├── MEMORY.md                 # AI entry point: facts, rules, common tasks
