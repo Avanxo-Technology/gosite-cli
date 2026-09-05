@@ -64,29 +64,37 @@ cmd_start() {
   fi
 }
 
-# Registers COCKPIT_API_TOKEN as an admin API key so the application can read
-# the CMS. Idempotent, and non-fatal: the next start retries.
+# Nudges the CMS into registering COCKPIT_API_TOKEN as an admin API key.
 #
-# It no longer creates the "home" singleton. That used to happen here, over
-# HTTP, after boot - which meant it depended on the CMS being up, on a token
-# existing and on timing, and when any of those was untrue it failed silently
-# and the site answered 502. The StarterContent addon creates the model from
-# inside Cockpit instead: no network, no token, idempotent, and it cannot
-# half-succeed.
+# The registration itself lives in the Webapp addon, which does it on the first
+# request to /api/*. All this has to do is make that first request, so the key
+# exists before the application asks for content rather than after.
+#
+# It used to upsert into Mongo with mongosh instead, and that was the bug behind
+# "the key is there but the CMS says 412": Cockpit's API gate does not read
+# system/api_keys, it reads a registry cached in app memory - Redis here, so it
+# survives every container rebuild - and an empty registry is stored as a value,
+# not as a miss, so nothing ever expires it. Writing straight to Mongo left the
+# two out of step with no path back. See src/knowledge/cockpit-api-key.md.
+#
+# Non-fatal either way: the addon repairs itself on any later API request, so a
+# CMS that is slow to boot costs nothing.
 _register_api_key() {
   local dir="$1"
-  local tok cms_port db base
+  local tok cms_port base
+
   tok="$(grep -E '^COCKPIT_API_TOKEN=' "${dir}/.env" 2>/dev/null | cut -d= -f2-)"
   [[ -n "${tok}" ]] || return 0
 
   cms_port="${GOSITE_CMS_PORT}"
-  db="${GOSITE_PROJECT}"
   base="https://${GOSITE_CMS_DOMAIN}"
 
   # Wait for the CMS API to actually serve requests - the root responds long
   # before FrankenPHP finishes wiring the REST routes on first boot. Prefer the
   # Traefik HTTPS host (works whether or not the host port is published); fall
-  # back to the mapped localhost port. 200/401/412 mean the API is up.
+  # back to the mapped localhost port. A 200 means the key registered; 401/412
+  # mean the API is up but something else is wrong, which is worth reporting
+  # rather than waiting out.
   local _ code=000
   for _ in $(seq 1 45); do
     code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null)"
@@ -99,11 +107,12 @@ _register_api_key() {
     esac
     sleep 2
   done
-  [[ "${code}" == "000" ]] && { warn "CMS API not reachable yet; the API key was not registered."; return 0; }
 
-  # Make sure the token is a registered admin API key. Upsert never touches an
-  # existing key.
-  docker exec "${GOSITE_MONGO_HOST}" mongosh "mongodb://127.0.0.1:27017/${db}" \
-    --quiet --eval "db.system_api_keys.updateOne({key:'${tok}'},{\$setOnInsert:{name:'gosite-seed',key:'${tok}',role:'admin',active:true}},{upsert:true})" \
-    >/dev/null 2>&1 || { warn "Could not register the API key; the app will not be able to read the CMS."; return 0; }
+  case "${code}" in
+    200) return 0 ;;
+    000) warn "CMS API not reachable yet; the API key registers on the first request instead." ;;
+    *)   warn "The CMS answered ${code} for the API key; check COCKPIT_API_TOKEN in ${dir}/.env." ;;
+  esac
+
+  return 0
 }

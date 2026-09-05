@@ -257,10 +257,29 @@ $this->on('restApi.config', function($restApi) {
 // 8. Admin UI (menu entry + screen)
 // ---------------------------------------------------------------------------
 
-// The application's API key must exist in the datastore, not only in the cache
-// Cockpit builds from it. Checked on admin load because that is cheap, happens
-// often enough, and is where somebody would be looking if reads were failing.
+// The application's API key must exist in the datastore AND in the registry
+// Cockpit's API gate reads. Checked on admin load because that is cheap and is
+// where somebody would be looking if reads were failing.
 $this->on('app.admin.init', function() {
     $this->helper('webapp')->ensureApiKey();
     include(__DIR__.'/admin.php');
+});
+
+// Also checked on API requests, because the admin hook alone never fires on a
+// deployed site nobody logs into - which is exactly the site whose reads are
+// failing. The healthy path is one array lookup against a registry the helper
+// has already loaded, so this costs nothing on the requests that work.
+//
+// The hook is Lime's `before`, which fires once per request after the request
+// is built and before anything is dispatched. Binding '/api/*' here would NOT
+// work and is worth naming so nobody tries it: Lime's routes are a map keyed by
+// path (App::bind assigns, it does not append), so a second bind on that path
+// replaces the core's API gate outright and takes authentication with it.
+$this->on('before', function() {
+
+    if (!str_starts_with($this->request->route ?? '', '/api/')) {
+        return;
+    }
+
+    $this->helper('webapp')->ensureApiKey();
 });

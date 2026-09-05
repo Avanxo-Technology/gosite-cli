@@ -373,7 +373,15 @@ class Webapp extends \Lime\Helper {
      * Seeding it here is the same key, the same role and the same upsert
      * `gosite start` performs; it just also happens where the CLI cannot reach.
      *
-     * Returns true when it had to create the key.
+     * Both halves have to be checked, and checking only the datastore was the
+     * bug this method used to have. The API gate does not read `system/api_keys`
+     * - it reads the registry System\Helper\Api caches in app memory, which
+     * for us is Redis and therefore outlives every container rebuild. So a key
+     * present in Mongo and absent from that registry authenticates nothing,
+     * and returning early on the datastore hit left it that way forever: the
+     * admin panel could be opened all day and the site kept answering 412.
+     *
+     * Returns true when it had to create the key or rebuild the registry.
      */
     public function ensureApiKey(): bool {
 
@@ -383,29 +391,55 @@ class Webapp extends \Lime\Helper {
             return false;
         }
 
+        // The registry first, because it is the only thing the gate consults,
+        // and read straight out of app memory rather than through
+        // System\Helper\Api. Going through the helper would construct it, and
+        // its initialize() snapshots the registry into a private array once per
+        // request - so repairing memory afterwards would not reach the instance
+        // the gate is about to query, and the request that triggered the repair
+        // would still answer 412. Fixing memory before anything constructs the
+        // helper means the very first request is already served correctly.
+        //
+        // Healthy is the common case and costs one Redis read plus an array
+        // lookup, which is what makes this affordable on every API request
+        // rather than only when an admin logs in.
+        $registry = $this->app->memory->get('app.api.keys', null);
+
+        if (is_array($registry) && isset($registry[$token])) {
+            return false;
+        }
+
         try {
             $existing = $this->app->dataStorage->findOne('system/api_keys', ['key' => $token]);
 
-            if ($existing) {
-                return false;
+            if (!$existing) {
+
+                // save() takes its data by reference, so this cannot be a literal.
+                $entry = [
+                    'name'   => 'gosite-seed',
+                    'key'    => $token,
+                    'role'   => 'admin',
+                    'active' => true,
+                ];
+
+                $this->app->dataStorage->save('system/api_keys', $entry);
+
+                // Deliberately not logging the token itself.
+                $this->log('registered the application API key (it was missing)');
+            } else {
+                // In the datastore, absent from the registry: the state a
+                // `gosite start` seed leaves behind, since it writes to Mongo
+                // without going through Cockpit. Rebuilding is the fix;
+                // inserting again would only add a duplicate.
+                $this->log('the API key existed but was not registered; rebuilding the registry');
             }
 
-            // save() takes its data by reference, so this cannot be a literal.
-            $entry = [
-                'name'   => 'gosite-seed',
-                'key'    => $token,
-                'role'   => 'admin',
-                'active' => true,
-            ];
-
-            $this->app->dataStorage->save('system/api_keys', $entry);
-
-            // The registry the API gate reads is a cache of that collection, so
-            // the new key is invisible until it is rebuilt.
-            $this->app->helper('api')->cache(true);
-
-            // Deliberately not logging the token itself.
-            $this->log('registered the application API key (it was missing)');
+            // Either way the registry is stale, and it is cached in app memory
+            // - Redis for us, so it outlives every container rebuild. An empty
+            // registry is stored as a value rather than as a miss, so nothing
+            // expires it on its own: without this rebuild the key stays
+            // invisible and every read answers 412 forever.
+            $this->rebuildApiRegistry();
 
             return true;
 
@@ -413,6 +447,38 @@ class Webapp extends \Lime\Helper {
             $this->log('could not register the application API key: '.$e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Rewrites the API key registry in app memory, straight from the
+     * collection.
+     *
+     * This deliberately does NOT call System\Helper\Api::cache(), even though
+     * that is the method whose job this is. Asking for the helper constructs
+     * it, and its initialize() snapshots the current - stale - registry into a
+     * private array before cache() gets to run. The gate then queries that same
+     * instance and still answers 412, so the repair only took effect on the
+     * *next* request. Writing memory directly leaves the helper unbuilt, so
+     * whoever constructs it later reads the corrected value and the request
+     * that triggered the repair is already served correctly.
+     *
+     * The shape must match what Api::cache() writes: the key string mapped to
+     * the whole record, because the gate reads `$key['role']` off it.
+     */
+    private function rebuildApiRegistry(): array {
+
+        $registry = [];
+
+        foreach ($this->app->dataStorage->find('system/api_keys')->toArray() as $key) {
+
+            if (isset($key['key'])) {
+                $registry[$key['key']] = $key;
+            }
+        }
+
+        $this->app->memory->set('app.api.keys', $registry);
+
+        return $registry;
     }
 
     /**
@@ -436,8 +502,7 @@ class Webapp extends \Lime\Helper {
         $this->ensureApiKey();
 
         try {
-            $keys = $this->app->helper('api')->cache(true);
-            $warmed['apiKeys'] = count($keys);
+            $warmed['apiKeys'] = count($this->rebuildApiRegistry());
         } catch (\Throwable $e) {
             $this->log('cache flush: api key rebuild failed: '.$e->getMessage());
         }
