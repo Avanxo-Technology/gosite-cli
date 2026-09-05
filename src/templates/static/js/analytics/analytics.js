@@ -65,7 +65,21 @@
         s.async = true;
         s.src = String(config.host).replace(/\/$/, '') + '/static/array.js';
         s.onload = function () {
-          window.posthog.init(config.key, { api_host: config.host });
+          /*
+           * Session recording, surveys and web experiments each pull their own
+           * chunk of posthog-js on top of the core bundle - together about
+           * 120KiB a visitor downloads whether or not the product uses them.
+           * They are off unless the CMS turns one on explicitly, and
+           * autocapture stays on because pageview and click data is what most
+           * sites configure PostHog for in the first place.
+           */
+          window.posthog.init(config.key, {
+            api_host: config.host,
+            autocapture: config.autocapture !== false,
+            disable_session_recording: config.session_recording !== true,
+            disable_surveys: config.surveys !== true,
+            disable_web_experiments: config.web_experiments !== true,
+          });
         };
         document.head.appendChild(s);
       },

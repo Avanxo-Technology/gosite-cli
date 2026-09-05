@@ -175,6 +175,24 @@ the plugin's `loaded()`.
 
 **Page views:** `capture('$pageview')`.
 
+**Bundle size is opt-in.** `posthog-js` lazy-loads a separate chunk for session
+recording, surveys and web experiments — together roughly 120KiB a visitor
+downloads even on a site that uses none of them. All three are off by default
+and re-enabled per project from the CMS config, which reaches the plugin
+untouched:
+
+| Config key        | Default | Effect when `true`                    |
+| ----------------- | ------- | ------------------------------------- |
+| `session_recording` | off   | records sessions (`disable_session_recording: false`) |
+| `surveys`         | off     | loads and shows surveys               |
+| `web_experiments` | off     | loads web experiments                 |
+| `autocapture`     | **on**  | set to `false` to stop click/pageview autocapture |
+
+`autocapture` is the one that defaults on: click and pageview data is what most
+sites configure PostHog for, and it ships in the core bundle, so turning it off
+saves nothing. The other three are inverted (`disable_x: config.x !== true`) so
+an absent key means off, which is what an untouched CMS config produces.
+
 ## Rules that apply to every provider
 
 **Keys are public.** A GTM container id and a PostHog project key are served in
