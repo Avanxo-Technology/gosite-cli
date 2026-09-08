@@ -1,26 +1,40 @@
 # Production stack for __PROJECT__, in Coolify's native compose format.
 #
 # No host ports are published: Coolify's Traefik proxy routes to the container
-# port declared in the labels below. The stack is self-contained - it brings its
-# own MongoDB and Redis - so the only thing Coolify has to supply is the domain
-# names and the secrets.
+# port declared in the labels below. The only services here are the app and the
+# CMS. MongoDB and Redis are SHARED external services, the same ones QA points
+# at - a stack does not run its own copies, it separates itself by database name
+# and Redis database index.
 #
 # Required variables in Coolify:
-#   SERVICE_FQDN_APP     e.g. __PROJECT__.example.com
-#   SERVICE_FQDN_CMS     e.g. cms.__PROJECT__.example.com
-#                        Both are MANDATORY and the stack refuses to start
-#                        without them - an unset one used to render an empty
-#                        Traefik Host() rule and 502 the site silently.
-#                        For several domains on the app, set SERVICE_FQDN_APP to
-#                        one of them and add the rest in Coolify's domain field.
-#   COCKPIT_API_TOKEN    MANDATORY: shared token between the app and Cockpit;
-#                        without it /cache/purge refuses to operate (503)
-#   COCKPIT_SEC_KEY      Cockpit's signing key - the image ships a public
-#                        default, so this must be set to something private
-#   MONGO_USER           MongoDB root user
-#   MONGO_PASSWORD       MongoDB root password
+#   SERVICE_FQDN_APP        e.g. __PROJECT__.example.com
+#   SERVICE_FQDN_CMS        e.g. cms.__PROJECT__.example.com
+#                           Both are MANDATORY and the stack refuses to start
+#                           without them - an unset one used to render an empty
+#                           Traefik Host() rule and 502 the site silently.
+#                           For several domains on the app, set SERVICE_FQDN_APP
+#                           to one of them and add the rest in Coolify's domain
+#                           field.
+#   COCKPIT_API_TOKEN       MANDATORY: shared token between the app and Cockpit;
+#                           without it /cache/purge refuses to operate (503)
+#   COCKPIT_SEC_KEY         Cockpit's signing key - the image ships a public
+#                           default, so this must be set to something private
+#   MONGO_HOST              shared MongoDB host
+#   MONGO_USER              MongoDB user
+#   MONGO_PASSWORD          MongoDB password
+#   REDIS_URL               page cache backend, e.g.
+#                           redis://:pass@redis-host:6379/0. QA MUST use a
+#                           different database index than this one.
+#   COCKPIT_MEMORY_SERVER   Cockpit cache backend, e.g.
+#                           redis://:pass@redis-host:6379
 #
-# Optional: MONGO_DB (defaults to the project name).
+# Optional: MONGO_DB (defaults to the project name), MONGO_PORT (27017).
+#
+# MONGO_DB does more than name the database. cockpit/config.php uses it as the
+# key prefix for Cockpit's app memory in Redis, and that memory holds the API
+# key registry the /api/* gate reads. Giving two environments the same MONGO_DB
+# would have them share one registry - so rotating one environment's
+# COCKPIT_API_TOKEN would silently break the other. Keep them different.
 
 services:
   __PROJECT__-prod-app:
@@ -32,13 +46,18 @@ services:
       - APP_ENV=production
       - PORT=8080
       - SERVICE_FQDN_APP
-      - REDIS_URL=redis://__PROJECT__-prod-redis:6379/0
+      # Page-cache keys are compiled-in constants prefixed "__PROJECT__:" (see
+      # internal/handlers and internal/seo). They do NOT vary by environment, so
+      # two environments sharing one Redis database would read and overwrite
+      # each other's rendered HTML. The database index in this URL is what keeps
+      # the keyspaces apart.
+      - REDIS_URL=${REDIS_URL}
       - COCKPIT_URL=http://__PROJECT__-prod-cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
       # Mongo parts so the app can build a credential-aware URI (see
       # buildMongoURI in internal/config) exactly like the CMS does.
-      - MONGO_HOST=__PROJECT__-prod-mongo
-      - MONGO_PORT=27017
+      - MONGO_HOST=${MONGO_HOST}
+      - MONGO_PORT=${MONGO_PORT:-27017}
       - MONGO_USER=${MONGO_USER}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
       - MONGO_DB=${MONGO_DB:-__PROJECT__}
@@ -63,8 +82,6 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
-      __PROJECT__-prod-redis:
-        condition: service_healthy
       __PROJECT__-prod-cms:
         condition: service_started
 
@@ -76,10 +93,10 @@ services:
     environment:
       # Read by cockpit/config.php through Cockpit's ${VAR} resolution.
       - COCKPIT_SEC_KEY=${COCKPIT_SEC_KEY}
-      - COCKPIT_MEMORY_SERVER=redis://__PROJECT__-prod-redis:6379
+      - COCKPIT_MEMORY_SERVER=${COCKPIT_MEMORY_SERVER}
       - COCKPIT_DATABASE=${COCKPIT_DATABASE:-mongodb}
-      - MONGO_HOST=__PROJECT__-prod-mongo
-      - MONGO_PORT=27017
+      - MONGO_HOST=${MONGO_HOST}
+      - MONGO_PORT=${MONGO_PORT:-27017}
       - MONGO_USER=${MONGO_USER}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
       - MONGO_DB=${MONGO_DB:-__PROJECT__}
@@ -133,41 +150,6 @@ services:
       - traefik.http.routers.__PROJECT__-cms.tls=true
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
-    depends_on:
-      __PROJECT__-prod-mongo:
-        condition: service_healthy
-
-  __PROJECT__-prod-mongo:
-    image: mongo:8.0
-    restart: unless-stopped
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      # Gate the CMS on a real ping, not just the container being up: Cockpit
-      # fails at boot if it cannot reach the database.
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
-  __PROJECT__-prod-redis:
-    image: redis:8-alpine
-    restart: unless-stopped
-    # Page cache only: evict rather than refuse writes when memory runs out.
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
 
 volumes:
   cockpit-storage:
-  mongo-data:
-  redis-data:

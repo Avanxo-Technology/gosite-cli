@@ -393,12 +393,15 @@ router twice and the last deploy wins.
 every value from the environment, and the multi-stage `deploy/Dockerfile`
 producing a static binary on Alpine.
 
-The production stack is self-contained: it brings its own MongoDB and Redis, so
-Coolify only supplies domains and secrets.
+Neither production nor QA defines MongoDB or Redis. Both point at shared
+external servers and separate themselves by database name and Redis database
+index, so an environment cannot read or overwrite another's content or its
+rendered pages.
 
 Push to Git, point a Coolify Docker Compose resource at
 `docker-compose.prod.yml`, and set `SERVICE_FQDN_APP`, `SERVICE_FQDN_CMS`,
-`COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and `MONGO_PASSWORD`.
+`COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_HOST`, `MONGO_USER`,
+`MONGO_PASSWORD`, `REDIS_URL` and `COCKPIT_MEMORY_SERVER`.
 `COCKPIT_API_TOKEN` is mandatory in production: the cache-purge endpoint fails
 closed (503) in any non-development environment without it.
 

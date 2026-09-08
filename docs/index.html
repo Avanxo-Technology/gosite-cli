@@ -638,7 +638,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>Source</td><td>Bind-mounted, hot reload</td><td>Baked into the image</td><td>Baked into the image</td></tr>
           <tr><td>Config</td><td><code>.env</code> file</td><td>Environment set in the Coolify UI</td><td>Environment set in the Coolify UI</td></tr>
           <tr><td>TLS</td><td>mkcert, trusted locally</td><td>Let's Encrypt via certresolver</td><td>Let's Encrypt via certresolver</td></tr>
-          <tr><td>Datastores</td><td>Shared Redis and MongoDB</td><td>Own MongoDB and Redis in the stack</td><td>Points at production's, separated by <code>MONGO_DB</code> and Redis index</td></tr>
+          <tr><td>Datastores</td><td>Shared Redis and MongoDB</td><td>Shared external MongoDB and Redis — neither is defined in the stack</td><td>The same servers as production, separated by <code>MONGO_DB</code> and Redis index</td></tr>
           <tr><td>Cache purge</td><td>Open — the on-page button posts without a token</td><td>Requires <code>COCKPIT_API_TOKEN</code>; answers <strong>503</strong> until one is set</td><td>Requires <code>COCKPIT_API_TOKEN</code>; use a different one than production</td></tr>
         </tbody>
       </table>

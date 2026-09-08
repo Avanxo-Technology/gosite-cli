@@ -151,8 +151,11 @@ dance.
 `docker-compose.prod.yml` publishes no host ports and takes every value from
 the environment. In Coolify: create a Docker Compose resource from this repo,
 select `docker-compose.prod.yml`, then set `SERVICE_FQDN_APP`,
-`SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_USER` and
-`MONGO_PASSWORD`. The stack brings its own MongoDB and Redis.
+`SERVICE_FQDN_CMS`, `COCKPIT_API_TOKEN`, `COCKPIT_SEC_KEY`, `MONGO_HOST`,
+`MONGO_USER`, `MONGO_PASSWORD`, `REDIS_URL` and `COCKPIT_MEMORY_SERVER`.
+MongoDB and Redis are shared external services - the stack does not run its
+own - so `MONGO_DB` and the Redis database index in `REDIS_URL` are what keep
+this environment's content and page cache apart from any other's.
 `COCKPIT_API_TOKEN` is mandatory in production - without it `/cache/purge`
 responds 503.
 

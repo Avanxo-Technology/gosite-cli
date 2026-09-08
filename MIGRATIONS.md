@@ -210,6 +210,45 @@ straight to compose, and avoids the collision by setting `container_name` and
 naming the container in its internal URLs. Do not make one file match the
 other.
 
+## → 0.52.0 — production uses the shared MongoDB and Redis
+
+`docker-compose.prod.yml` no longer defines `<project>-prod-mongo` and
+`<project>-prod-redis`, and the `mongo-data` and `redis-data` volumes are gone
+with them. `MONGO_HOST`, `REDIS_URL` and `COCKPIT_MEMORY_SERVER` come from the
+environment instead.
+
+**Check what the project actually deployed before changing anything.** Most
+projects never used the self-hosted stack - they were edited to point at shared
+servers long ago, and for those this is a no-op:
+
+```bash
+grep -nE 'prod-mongo|prod-redis|mongo-data|redis-data' <project>/docker-compose.prod.yml
+```
+
+No output means the project is already on shared services. Take the new
+template's wording if you like, but nothing has to move.
+
+If it does print something, the deployed stack is holding live data in its own
+volumes, and **the compose change alone deletes access to it**. Dump and restore
+before you redeploy, not after:
+
+```bash
+docker exec <stack>-prod-mongo mongodump --archive > prod.archive
+mongorestore --uri "mongodb://<user>:<pass>@<shared-host>:27017" \
+  --archive < prod.archive --nsFrom '<olddb>.*' --nsTo '<newdb>.*'
+```
+
+Redis needs nothing carried over - it holds only the rendered page cache, which
+rebuilds on the first request - but the new `REDIS_URL` **must** use a database
+index no other environment uses. The cache keys are compiled in and carry the
+project name, never the environment, so production and QA on one index serve
+each other's HTML.
+
+Set `MONGO_DB` per environment for the same reason, and one more:
+`cockpit/config.php` uses it as the key prefix for Cockpit's app memory, which
+holds the API key registry the `/api/*` gate reads. Two environments sharing it
+means rotating one's `COCKPIT_API_TOKEN` silently breaks the other.
+
 ---
 
 ### Verify before you call it done

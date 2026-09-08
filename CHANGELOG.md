@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.52.0
+
+### Production stops running its own MongoDB and Redis
+
+`docker-compose.prod.yml` defined a `<project>-prod-mongo` and a
+`<project>-prod-redis`, with their own `mongo-data` and `redis-data` volumes.
+Nothing else in gosite works that way: local development attaches to the shared
+`gosite-mongo` and `gosite-redis`, and the QA stack added in 0.51.0 points at
+shared external servers. Production was the only environment carrying its own
+copies, which meant every deployed project quietly ran a second database server
+nobody administered, backed up, or monitored - and made "restore production's
+data" a different procedure per project.
+
+Both services and both volumes are gone. `MONGO_HOST`, `REDIS_URL` and
+`COCKPIT_MEMORY_SERVER` now come from the environment, exactly as QA already
+took them, and `MONGO_PORT` defaults to 27017. `cockpit-storage` stays: uploads
+are still local to the stack.
+
+Environments separate themselves the way QA already did - by `MONGO_DB` and by
+the Redis database index in `REDIS_URL` - so those two values must differ
+between every pair of environments sharing a server. The page cache keys are
+compiled-in and carry only the project name, never the environment, so two
+environments on one Redis database would serve each other's rendered HTML.
+
+Existing projects are unaffected unless they actually deployed the self-hosted
+stack; see `MIGRATIONS.md` for how to tell and what to move.
+
 ## 0.50.0
 
 ### `gosite setup`: the manual steps a new machine needed are now a command

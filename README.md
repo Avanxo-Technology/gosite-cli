@@ -23,8 +23,9 @@ Projects never define Redis, MongoDB or MinIO. They attach to
 container name (`gosite-redis`, `gosite-mongo`, `gosite-minio`) on their
 in-network ports. Cockpit stores its content models and entries in MongoDB and
 its app memory on the infra Redis (DB 1), so nothing project-wide is written to
-local files; production brings its own MongoDB and Redis inside the compose
-stack.
+local files. Production and QA follow the same rule: neither compose defines
+MongoDB or Redis, they point at shared external servers and separate themselves
+by database name and Redis database index.
 
 ## Install
 
