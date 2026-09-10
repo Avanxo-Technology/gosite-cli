@@ -136,7 +136,18 @@ func (r *Reader) Integrations() []views.Integration {
 			continue
 		}
 
-		out = append(out, views.Integration{Provider: provider, Config: config})
+		// The category is passed through without being validated against a
+		// list of categories. The browser owns that list, together with each
+		// provider's default, and duplicating it here would create two places
+		// to keep in step. An unrecognised value there means "no category
+		// granted", which is the fail-closed reading.
+		category, _ := item["category"].(string)
+
+		out = append(out, views.Integration{
+			Provider: provider,
+			Config:   config,
+			Category: strings.TrimSpace(category),
+		})
 	}
 
 	return out

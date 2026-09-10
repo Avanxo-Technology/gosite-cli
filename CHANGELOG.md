@@ -1,5 +1,126 @@
 # Changelog
 
+## 0.53.0
+
+### Cookie consent, and nothing loads without it
+
+The `Analytics` addon shipped in 0.46.0 and loaded third-party tracking
+unconditionally. Its own design said so and named the condition: consent was
+deferred deliberately, on the understanding that it would be the next task and
+not an eventual one. This is that task.
+
+**The `Analytics` addon now has a consent half**, in the same addon rather than
+a new one - what is being gated is exactly what that addon stores, and a
+separate addon would let a project install tracking with no way to ask
+permission for it.
+
+`analyticsConsent`, a singleton: whether to ask at all, the banner copy, the
+four button labels, the policy link, a label and a description per category, and
+a copy version. The copy is content, so changing the wording is not a release.
+
+**It arrives filled in, in Spanish, and switched off.** An empty singleton would
+have meant that ticking the box published an English banner on a Spanish site,
+because the application's last-resort text is all an empty singleton has.
+Seeding real copy makes ticking the box enough. `enabled` and `policyUrl` are
+deliberately left alone: publishing a legal notice is the site owner's decision,
+and there is no privacy-policy URL we could invent. The application's fallbacks
+are Spanish too, so deleting one field cannot produce a banner in two
+languages.
+
+**Off means no banner and no tracking.** That is the line to read twice, because
+it is the opposite of what the code did yesterday and it looks like a fault: a
+healthy list of integrations tracks nobody while the banner is off. It is the
+only defensible default - a site cannot load a tracker on the grounds that
+nobody got round to configuring the way to refuse it.
+
+**Three categories, and only three**: necessary, analytics, marketing. Necessary
+is shown as always on and never refusable, and nothing in the addon belongs to
+it, because a tracking tool is by definition not necessary for a page to work.
+Every provider has a default category in both the PHP registry and the browser
+one; an entry can override it. Google Tag Manager defaults to `marketing`, which
+is a judgement and not a fact: a container can hold nothing but a GA4 tag or it
+can hold an advertising pixel, and only whoever built it knows which. Marketing
+is the safer reading, and the CMS can lower it.
+
+**The gate covers the downloads, not just the mount.** Fetching a bundle from
+unpkg is already a request to a third party carrying this site's referrer, and
+PostHog's plugin fetches from the client's own host - so deferring only the
+mount would have disclosed the visit before anybody agreed to anything. The
+`analytics` core in the layout is the one deliberate exception: a CDN request
+that sets nothing and identifies nobody, kept early so the gap between
+accepting and tracking is short.
+
+**A missing gate means no permission.** If `consent.js` fails to load and
+`analytics.js` does not, nothing is tracked. Treating an absent gate as "no gate
+needed" would load every tracker on a site whose banner simply 404ed.
+
+**Consent never reaches the server.** No handler reads the cookie and no
+rendered page varies by it, because pages are cached in Redis per project: a
+server-rendered banner state would fix the first visitor's choice for everyone
+else until the cache expired. The decision is a first-party cookie the browser
+owns, holding a schema version, the copy version, a timestamp and the granted
+categories. A malformed or hand-edited value is treated as no decision at all,
+never as a partial one.
+
+**Withdrawing a category reloads the page.** `analytics@0.8.19` has no clean
+unmount and the provider has already run its own initialisation by then -
+PostHog has a live instance with its own persistence. Reporting that it stopped
+without reloading would be a claim we cannot back. The reload is honest: what
+comes back is a page that never loaded the tracker.
+
+**Granting a second category later does not reload.** The library fixes its
+plugin list at construction, so each grant mounts its own instance and the page
+keeps one `window.analytics` that fans out to all of them.
+
+`data-consent-open` on any element reopens the preferences, and the layout
+renders one such control. Withdrawing has to be as easy as consenting.
+
+**The browser scripts now have tests.** They were the only part of this feature
+without any, and they are now the files a legal guarantee rests on: "nothing is
+fetched before a decision" is not something to verify by reading. `tests/js/`
+runs both scripts against a DOM stub and asserts on what reached the network and
+what was stored, never on a flag either file set. Building the stub caught the
+first version of those tests passing for the wrong reason - without a stand-in
+for the core bundle, `analytics.js` took its "library did not load" exit before
+ever reaching the gate, so every "nothing was fetched" assertion was vacuous.
+
+### Not in this release, by decision
+
+- **Google Consent Mode v2.** Blocking outright is correct and simple. Consent
+  Mode is the opposite shape, and a client running Google Ads in the EEA will
+  eventually want it as a per-provider mode.
+- **A server-side record of consent.** A cookie the visitor can edit is not
+  proof that anybody agreed. That needs an endpoint, a collection and a
+  retention policy. What ships now is the half that cannot be reconstructed
+  later: the copy version is stored inside the cookie from the first day, so the
+  history remains tied to the text each visitor actually read.
+
+### Changed
+
+- **An existing `analyticsIntegrations` model gains the consent category
+  field on the next admin load.** The provider list was already synced from
+  code for the same reason; a project that installed this addon before consent
+  existed would otherwise have no way to override a category without being
+  recreated. The field is appended rather than inserted, because reordering an
+  editor's fields on upgrade is worse than a field in an odd place.
+- The Analytics admin screen leads with the consent state, since it decides
+  whether any row below it runs at all, and shows each entry's effective
+  category and whether that came from the provider or from you.
+- `analyticsConsent` counts as a site-wide model for cache invalidation, like
+  `analyticsIntegrations`: the banner copy is in the layout of every page.
+  Deliberately no CMS save hook - Webapp removed those, because they turned
+  every editorial save into a call out to the application.
+
+### Upgrading
+
+Both halves, as in 0.46.0 - but by hand, since `sync` was removed in 0.49.0.
+`MIGRATIONS.md` has the file list and the two things the layout must get right.
+In short: copy the four new files, merge `layout.html`, add one line to
+`app.go`, replace the `Analytics` addon directory, rebuild both images.
+
+Then, in the CMS: **Analytics -> Set up the banner**, fill in the copy and turn
+it on. Until that is done the site loads no tracking at all.
+
 ## 0.52.0
 
 ### Production stops running its own MongoDB and Redis

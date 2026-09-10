@@ -103,6 +103,22 @@ for flavor in tailwind plain; do
      && -f "${out}/internal/views/components/analytics.html" ]]
   check $? "analytics application half rendered (${flavor})"
 
+  # Consent travels with them, for the same reason and one more: a project that
+  # got the analytics scripts and not the gate would load every tracker with no
+  # way to refuse. The four files are the whole browser half.
+  [[ -f "${out}/static/js/analytics/consent.js" && -f "${out}/static/css/consent.css" \
+     && -f "${out}/internal/analytics/consent.go" \
+     && -f "${out}/internal/views/components/consent.html" ]]
+  check $? "consent application half rendered (${flavor})"
+
+  # The order is the gate: consent.js has to be parsed before analytics.js asks
+  # it anything. A layout that loads them the other way round has a window in
+  # which the banner flashes at a visitor who already decided.
+  grep -q 'consent-head' "${out}/internal/views/layout.html" \
+    && [[ "$(grep -n 'consent-head' "${out}/internal/views/layout.html" | cut -d: -f1)" \
+           -lt "$(grep -n 'analytics-head' "${out}/internal/views/layout.html" | cut -d: -f1)" ]]
+  check $? "consent loads before analytics (${flavor})"
+
   # gofmt: the Go templates must be canonically formatted.
   if command -v gofmt >/dev/null 2>&1; then
     bad="$(gofmt -l "${out}")"
@@ -145,6 +161,22 @@ if command -v go >/dev/null 2>&1; then
   fi
 else
   step "  skip go vet (go not installed)"
+fi
+
+# The consent gate, on the real script files.
+#
+# It runs here rather than in its own suite because this is the pass that
+# already proves the templates render: a gate that works and a page that does
+# not ship it are the same failure to a visitor.
+if command -v node >/dev/null 2>&1; then
+  step "consent gate (browser scripts)"
+  if node tests/js/consent_gate.test.js >/dev/null 2>&1; then
+    check 0 "consent gate: nothing loads before consent"
+  else
+    check 1 "consent gate (run: node tests/js/consent_gate.test.js)"
+  fi
+else
+  step "  skip consent gate (node not installed)"
 fi
 
 if [[ "${fail}" -eq 0 ]]; then

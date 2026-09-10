@@ -20,6 +20,9 @@
 	{{with faviconUrl}}<link rel="icon" href="{{.}}">{{end}}
 	{{/* Pages may add tags to the document head */}}
 	{{block "head" .}}{{end}}
+	{{/* Consent BEFORE analytics: the gate has to read the cookie before the
+	     thing it gates asks whether it may load. */}}
+	{{template "consent-head" .}}
 	{{template "analytics-head" .}}
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@aprinciple/modern-reset@0.1.1/reset.min.css">
 	<link rel="stylesheet" href="/static/styles.css">
@@ -30,6 +33,9 @@
 	<main class="container">
 		{{template "content" .}}
 		{{template "analytics-body" .}}
+		{{/* The way a visitor changes their mind. Move it into the site's own
+		     footer, or drop this and put data-consent-open on a link there. */}}
+		{{template "consent-link" .}}
 	</main>
 </body>
 </html>{{end}}

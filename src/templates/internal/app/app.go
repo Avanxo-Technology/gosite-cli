@@ -58,8 +58,13 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 	cacheInstance := cache.New(rdb, log, cfg.IsDev())
 	seoResolver := seo.New(cmsClient, cacheInstance, log, seo.WithAssetBase(cfg.AssetBaseURL()))
 
+	// One reader for both halves of the addon: the integrations and the consent
+	// banner that gates them.
+	analyticsReader := analytics.New(cmsClient, cfg, log)
+
 	renderer := views.NewRenderer(cfg.AssetBaseURL(),
-		views.WithIntegrations(analytics.New(cmsClient, cfg, log).Integrations),
+		views.WithIntegrations(analyticsReader.Integrations),
+		views.WithConsent(analyticsReader.Consent),
 		// The adapter keeps views decoupled from the seo package: templates pass
 		// .SEOData as a map, seo.Resolve works on *seo.Data, and renderSEOTags
 		// consumes the map the adapter returns.

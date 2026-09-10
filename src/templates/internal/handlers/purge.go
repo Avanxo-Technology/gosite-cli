@@ -111,6 +111,9 @@ func purgeTarget(c *echo.Context) (model, id, scope string) {
 // therefore on every page. A change to one of them invalidates everything.
 var siteWideModels = map[string]bool{
 	"analyticsIntegrations": true,
+	// The consent banner's copy is in the layout too, so correcting a typo in
+	// it has to reach pages that are already cached.
+	"analyticsConsent": true,
 	// Webapp SEO configuration and per-page SEO overrides are rendered by the
 	// layout on every page, so editing either invalidates the whole site.
 	"webapp":   true,
