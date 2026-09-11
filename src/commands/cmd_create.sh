@@ -40,7 +40,13 @@ cmd_create() {
       --no-addons)    INSTALL_ADDONS=0; ADDONS_PROMPT=0; shift ;;
       --storage)      [[ -n "${2:-}" ]] || fatal "--storage needs a value (s3|local)"; STORAGE_ADAPTER="$2"; STORAGE_PROMPT=0; shift 2 ;;
       --database)     [[ -n "${2:-}" ]] || fatal "--database needs a value (mongodb|local)"; DATABASE="$2"; DATABASE_PROMPT=0; shift 2 ;;
-      -*)             fatal "Unknown flag for 'create': $1 (expected --here, --no-tailwind, --tailwind, --no-addons, --addons, --storage, --database)" ;;
+      # -y is a global flag, so `gosite -y create x` already worked. Accepting
+      # it here too because `gosite create x -y` is what everyone actually
+      # types, it is what the docs say, and `update` and `setup` both take it
+      # in this position. create refusing it was the odd one out - and the
+      # error it produced named every flag except the one being rejected.
+      -y|--yes)       export GOSITE_ASSUME_YES=1; shift ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected -y, --here, --no-tailwind, --tailwind, --no-addons, --addons, --storage, --database)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
