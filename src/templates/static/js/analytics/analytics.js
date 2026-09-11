@@ -14,8 +14,10 @@
  * the parse below and analytics simply does not load - which is correct:
  * analytics failing must never take a page down with it.
  *
- * This is also the single mount point. When consent management arrives, this
- * is where it hooks.
+ * This is also the single mount point, and consent hooks here: nothing below
+ * downloads or mounts anything until window.consent (consent.js) reports a
+ * category granted. If that object is missing, nothing loads at all - an
+ * absent gate has to mean "no permission", never "no gate needed".
  */
 (function () {
   'use strict';
@@ -35,16 +37,47 @@
    * editor types is what the plugin documents. No translation layer to drift.
    */
   var OFFICIAL = {
-    gtm: { path: 'google-tag-manager@0.6.0/dist/@analytics/google-tag-manager.min.js', global: 'analyticsGtagManager' },
-    'google-analytics': { path: 'google-analytics@1.1.0/dist/@analytics/google-analytics.min.js', global: 'analyticsGa' },
-    'google-analytics-v3': { path: 'google-analytics-v3@0.7.0/dist/@analytics/google-analytics-v3.min.js', global: 'analyticsGa3' },
-    mixpanel: { path: 'mixpanel@0.4.0/dist/@analytics/mixpanel.min.js', global: 'analyticsMixpanel' },
-    segment: { path: 'segment@2.1.0/dist/@analytics/segment.min.js', global: 'analyticsSegment' },
-    amplitude: { path: 'amplitude@0.1.3/dist/@analytics/amplitude.min.js', global: 'analyticsAmplitude' },
-    hubspot: { path: 'hubspot@0.5.1/dist/@analytics/hubspot.min.js', global: 'analyticsHubspot' },
-    fullstory: { path: 'fullstory@0.2.7/dist/@analytics/fullstory.min.js', global: 'analyticsFullStory' },
-    customerio: { path: 'customerio@0.2.2/dist/@analytics/customerio.min.js', global: 'analyticsCustomerio' },
+    gtm: { path: 'google-tag-manager@0.6.0/dist/@analytics/google-tag-manager.min.js', global: 'analyticsGtagManager', category: 'marketing' },
+    'google-analytics': { path: 'google-analytics@1.1.0/dist/@analytics/google-analytics.min.js', global: 'analyticsGa', category: 'analytics' },
+    'google-analytics-v3': { path: 'google-analytics-v3@0.7.0/dist/@analytics/google-analytics-v3.min.js', global: 'analyticsGa3', category: 'analytics' },
+    mixpanel: { path: 'mixpanel@0.4.0/dist/@analytics/mixpanel.min.js', global: 'analyticsMixpanel', category: 'analytics' },
+    segment: { path: 'segment@2.1.0/dist/@analytics/segment.min.js', global: 'analyticsSegment', category: 'analytics' },
+    amplitude: { path: 'amplitude@0.1.3/dist/@analytics/amplitude.min.js', global: 'analyticsAmplitude', category: 'analytics' },
+    hubspot: { path: 'hubspot@0.5.1/dist/@analytics/hubspot.min.js', global: 'analyticsHubspot', category: 'marketing' },
+    fullstory: { path: 'fullstory@0.2.7/dist/@analytics/fullstory.min.js', global: 'analyticsFullStory', category: 'analytics' },
+    customerio: { path: 'customerio@0.2.2/dist/@analytics/customerio.min.js', global: 'analyticsCustomerio', category: 'marketing' },
   };
+
+  /*
+   * Which consent category each provider needs, for the ones without an
+   * OFFICIAL entry.
+   *
+   * GTM is marketing, and that is a judgement: a container can hold nothing but
+   * a GA4 tag, or it can hold an advertising pixel, and only whoever built it
+   * knows which. Marketing is the safer reading and the CMS can lower it per
+   * entry. The addon's PROVIDER_CATEGORY holds the same mapping for the admin
+   * screen; this copy is the one that gates.
+   */
+  var CUSTOM_CATEGORY = { posthog: 'analytics' };
+
+  /*
+   * The category an entry actually needs.
+   *
+   * An unrecognised value falls through to marketing, not to "allowed". Every
+   * unknown here has to resolve to the category hardest to obtain, or a typo
+   * in the CMS becomes a way to load a tracker without consent.
+   */
+  function categoryOf(item) {
+    var override = typeof item.Category === 'string' ? item.Category.trim() : '';
+
+    if (override === 'analytics' || override === 'marketing') {
+      return override;
+    }
+
+    var official = OFFICIAL[item.Provider];
+
+    return (official && official.category) || CUSTOM_CATEGORY[item.Provider] || 'marketing';
+  }
 
   /*
    * PostHog: the only plugin we write.
@@ -210,30 +243,85 @@
     return;
   }
 
-  // Fetch every official bundle a configured provider needs, in parallel.
-  var needed = [];
+  /*
+   * Nothing happens until consent says so.
+   *
+   * The gate covers the DOWNLOADS as well as the mount, which is the part that
+   * is easy to get wrong. Fetching a bundle from unpkg is already a request to
+   * a third party carrying this site's referrer, and PostHog's plugin fetches
+   * from the client's own PostHog host - so deferring only the mount would
+   * disclose the visit before anybody agreed to anything.
+   *
+   * The `analytics` core in the layout is the one exception, and a deliberate
+   * one: it is a CDN request that sets nothing and identifies nobody, and
+   * having it already parsed keeps the gap between accepting and tracking
+   * short. That line is argued in the change's design, so it can be revisited
+   * as one decision rather than drifting.
+   */
+  if (!window.consent || typeof window.consent.onChange !== 'function') {
+    /*
+     * consent.js is missing or failed to load.
+     *
+     * Fail closed, always. This is the branch where a mistake is expensive:
+     * treating an absent gate as "no gate needed" would load every tracker on
+     * a site whose banner simply 404ed, which is the exact outcome this whole
+     * change exists to prevent.
+     */
+    console.warn('[analytics] no consent mechanism on this page; nothing will be tracked');
+    return;
+  }
 
-  integrations.forEach(function (item) {
-    var official = OFFICIAL[item.Provider];
-    if (official && needed.indexOf(official) === -1) {
-      needed.push(official);
+  // Providers already loaded, so a later grant adds the new ones instead of
+  // mounting the same plugin twice.
+  var mounted = {};
+
+  // Every instance we have mounted. There is one per grant, because
+  // analytics@0.8.19 fixes its plugin list at construction and offers no way
+  // to add a plugin to a live instance.
+  var instances = [];
+
+  window.consent.onChange(function (state) {
+    var pending = integrations.filter(function (item) {
+      return !mounted[item.Provider] && state.granted[categoryOf(item)] === true;
+    });
+
+    if (!pending.length) {
+      return;
     }
-  });
 
-  Promise.all(
-    needed.map(function (o) {
-      return loadScript(CDN + o.path);
-    })
-  ).then(function () {
-    whenReady(function () {
-      mount();
+    pending.forEach(function (item) { mounted[item.Provider] = true; });
+
+    var needed = [];
+
+    pending.forEach(function (item) {
+      var official = OFFICIAL[item.Provider];
+      if (official && needed.indexOf(official) === -1) {
+        needed.push(official);
+      }
+    });
+
+    Promise.all(
+      needed.map(function (o) {
+        return loadScript(CDN + o.path);
+      })
+    ).then(function () {
+      whenReady(function () {
+        mount(pending);
+      });
     });
   });
 
-  function mount() {
+  /*
+   * Mounts one batch of providers: everything a single grant made loadable.
+   *
+   * A batch rather than the whole list, because a visitor can grant analytics
+   * now and marketing five minutes later, and the second grant must not
+   * re-mount the first grant's plugins.
+   */
+  function mount(batch) {
     var plugins = [];
 
-    integrations.forEach(function (item) {
+    batch.forEach(function (item) {
       var config = item.Config || {};
       var factory;
 
@@ -272,10 +360,27 @@
 
     var instance = createAnalytics({ app: 'site', plugins: plugins });
 
-    // Replace the queue and replay whatever the page recorded meanwhile.
-    window.analytics = instance;
+    instances.push(instance);
+
+    /*
+     * Fan out to every mounted instance.
+     *
+     * With one grant there is one instance and this is just a wrapper. With a
+     * second grant there are two, and a single `analytics.track()` from page
+     * code has to reach both - so the page keeps one object and never has to
+     * know how many times consent was given.
+     */
+    window.analytics = {
+      track: fanOut('track'),
+      page: fanOut('page'),
+      identify: fanOut('identify'),
+    };
+
+    // Replay whatever the page recorded while it was waiting. The queue is
+    // drained on the first mount only; later batches get new events, not the
+    // history of a page they had no permission to see.
     queue.forEach(function (call) {
-      instance[call[0]].apply(instance, call[1]);
+      window.analytics[call[0]].apply(null, call[1]);
     });
     queue.length = 0;
 
@@ -292,5 +397,21 @@
     console.debug('[analytics] tracking with: ' + plugins.map(function (p) {
       return p.name;
     }).join(', '));
+  }
+
+  function fanOut(method) {
+    return function () {
+      var args = arguments;
+
+      instances.forEach(function (instance) {
+        try {
+          instance[method].apply(instance, args);
+        } catch (e) {
+          // One provider throwing must not stop the others from recording the
+          // same event.
+          console.warn('[analytics] ' + method + ' failed on one provider', e);
+        }
+      });
+    };
   }
 })();

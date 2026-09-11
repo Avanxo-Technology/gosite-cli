@@ -249,6 +249,120 @@ Set `MONGO_DB` per environment for the same reason, and one more:
 holds the API key registry the `/api/*` gate reads. Two environments sharing it
 means rotating one's `COCKPIT_API_TOKEN` silently breaks the other.
 
+## → 0.53.0 — cookie consent gates the analytics tags
+
+Only projects with the `Analytics` addon are affected. For everything else this
+release changes nothing.
+
+**Read this first: after the upgrade the site tracks nobody until you configure
+the banner.** That is the intended behaviour, not a regression. The tags shipped
+in 0.46.0 loaded unconditionally; they now load only for a visitor who agreed to
+their category, and with no banner there is nothing to agree to.
+
+### 1. The application half
+
+Four new files, none of which can conflict:
+
+```bash
+G=<gosite> ; P=<project>
+MODULE=$(head -1 $P/go.mod | cut -d" " -f2)
+
+cp $G/src/templates/static/js/analytics/consent.js       $P/static/js/analytics/
+mkdir -p $P/static/css
+cp $G/src/templates/static/css/consent.css               $P/static/css/
+cp $G/src/templates/internal/analytics/consent.go        $P/internal/analytics/
+cp $G/src/templates/flavors/<flavor>/internal/views/components/consent.html \
+   $P/internal/views/components/
+
+sed -i "" "s|__MODULE__|$MODULE|g" $P/internal/analytics/consent.go
+```
+
+`<flavor>` is `tailwind` or `plain`; the two consent components are identical
+today, but take the one matching the project so a later divergence lands
+correctly.
+
+**Do not skip the `sed`.** `consent.go` ships with the `__MODULE__` placeholder
+and the build fails on it - which is the good outcome. The silent version of
+this mistake is forgetting the file entirely: the project still compiles, still
+serves pages, and has no gate.
+
+Then three edited files. `internal/analytics/analytics.go` gains the `Category`
+passthrough, `internal/views/render.go` gains the `Consent` type, the
+`WithConsent` option and the `consentSettings` function, and
+`internal/handlers/purge.go` gains `analyticsConsent` to `siteWideModels`.
+`render.go` is one of the files projects customise, so merge it against the
+project's recorded version the way section 3 of the 0.48.0 migration describes.
+
+`internal/views/layout.html` and `internal/views/components/analytics.html` are
+also customised in most projects, so merge rather than overwrite. Two things
+must be true in the merged layout:
+
+- `{{template "consent-head" .}}` appears **before**
+  `{{template "analytics-head" .}}`. The gate reads its cookie synchronously,
+  and loading it second leaves a window where the banner flashes at a visitor
+  who already decided.
+- `{{template "consent-link" .}}` appears somewhere in the body, or the site's
+  own footer carries an element with `data-consent-open`. Without one of the
+  two, a visitor cannot withdraw, and withdrawing has to be as easy as
+  consenting.
+
+`internal/app/app.go` gains one line, `views.WithConsent(...)`, next to
+`views.WithIntegrations(...)`. A project that has customised `app.go` keeps
+compiling without it — and silently has no banner, so check for it rather than
+trusting the build.
+
+### 2. The CMS half
+
+Replace the addon directory and rebuild the image - addons are baked in, so a
+restart is not enough:
+
+```bash
+rm -rf $P/cockpit/addons/Analytics
+cp -R $G/src/addons/Analytics $P/cockpit/addons/Analytics
+gosite stop <project> && gosite start <project>   # rebuilds both images
+```
+
+Then open the admin once. `ensureModels()` creates `analyticsConsent` and adds
+the consent `category` field to the existing `analyticsIntegrations` model. Both
+are visible on the **Analytics** screen, which now leads with the consent state.
+
+### 3. Configure it, or the site stays silent
+
+**Analytics → Set up the banner.** The singleton arrives already filled in, in
+Spanish, and switched off, so the minimum is to tick **Ask for consent**. Read
+the wording first and adjust it to the site's voice.
+
+Two fields are deliberately left empty and both are worth a moment:
+
+- **the privacy policy link.** Nothing can invent it, and with it empty no link
+  is shown — which most regulators expect you to have.
+- **`copyVersion`** is seeded with the date the singleton was created. It is
+  stored with each visitor's choice so you can tell later which wording they
+  agreed to. Change it when the meaning of the text changes, not for a typo; it
+  does not re-ask anybody.
+
+Then look at the **Needs consent** column. Google Tag Manager defaults to
+`marketing`, which is the safer reading rather than a fact about your container.
+If yours holds analytics tags only, set that entry's `category` to `analytics`
+so the banner asks for less.
+
+### 4. Verify
+
+The body-identical rule below does **not** hold for this upgrade, and that is
+the one exception in this file. Enabling consent adds a stylesheet, a JSON block
+and a script to the head, and the reopen control to the body. What to check
+instead, with the network panel open on a fresh profile:
+
+1. Before touching the banner, **no request to any provider or provider CDN**.
+   Not a deferred one, none. This is the whole guarantee.
+2. Accept, and the provider's own requests appear.
+3. Reload. No banner, and tracking resumes immediately.
+4. Reopen the preferences, refuse, and confirm the page reloads and the requests
+   stop.
+
+A script tag being present proves nothing here, exactly as it proved nothing in
+0.46.0.
+
 ---
 
 ### Verify before you call it done

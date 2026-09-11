@@ -7,6 +7,10 @@ option to the `provider` select — the three go together.
 Verified on 2026-08-27 against the packages themselves, not against blog posts.
 Re-check after a major version of either library.
 
+Each provider also needs a **consent category**, without which it cannot load
+at all. Those are in `analytics-consent-categories.md`, together with the
+reasoning for the arguable ones.
+
 ## The library
 
 `analytics` **v0.8.19** (2025-08-09). Loaded from a **pinned** CDN URL:

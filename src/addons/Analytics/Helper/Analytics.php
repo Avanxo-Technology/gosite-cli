@@ -24,6 +24,56 @@ class Analytics extends \Lime\Helper {
     const MODEL = 'analyticsIntegrations';
 
     /**
+     * The consent singleton.
+     *
+     * It lives in this addon rather than one of its own because the thing being
+     * gated is exactly what this addon stores. A separate addon would let a
+     * project install tracking with no way to ask permission for it, which is
+     * the state this whole model exists to end.
+     */
+    const CONSENT_MODEL = 'analyticsConsent';
+
+    /**
+     * The consent categories, and there are only three.
+     *
+     * More categories look more precise and are worse: every extra switch is
+     * another thing a visitor has to understand before they can leave the
+     * banner, and none of the providers here need a finer split.
+     *
+     * `necessary` is listed for completeness. It is never refusable and no
+     * provider in this addon belongs to it - a tracking tool is by definition
+     * not necessary for a page to work.
+     */
+    const CATEGORIES = ['necessary', 'analytics', 'marketing'];
+
+    /**
+     * Which category each provider needs consent for.
+     *
+     * The browser registry in static/js/analytics/analytics.js holds the same
+     * mapping, and that copy is the one that gates. This one exists so the
+     * admin screen can show an editor what an entry will actually require, and
+     * so the select can be pre-filled. The two are the same fact in two places
+     * for the same reason PROVIDERS already is.
+     *
+     * GTM defaults to marketing, and that is a judgement rather than a fact: a
+     * container can hold nothing but a GA4 tag, or it can hold an advertising
+     * pixel, and only whoever built the container knows which. Marketing is
+     * the safer reading, and the CMS can lower it per entry.
+     */
+    const PROVIDER_CATEGORY = [
+        'gtm'                 => 'marketing',
+        'posthog'             => 'analytics',
+        'google-analytics'    => 'analytics',
+        'google-analytics-v3' => 'analytics',
+        'mixpanel'            => 'analytics',
+        'segment'             => 'analytics',
+        'amplitude'           => 'analytics',
+        'hubspot'             => 'marketing',
+        'fullstory'           => 'analytics',
+        'customerio'          => 'marketing',
+    ];
+
+    /**
      * Providers the application can actually load.
      *
      * All but PostHog are official `analytics` plugins with a browser bundle,
@@ -151,13 +201,15 @@ class Analytics extends \Lime\Helper {
 
         $options = $this->providerOptions();
 
+        $this->ensureConsentModel($content);
+
         if ($content->exists(self::MODEL)) {
             // The model is left alone - with one deliberate exception. The
             // provider list is derived from code, not from anything an editor
             // owns, so a release that adds a provider has to reach projects
             // that already have the model. Without this, the select would be
             // frozen at whatever shipped the day the project was created.
-            $this->syncProviderOptions($options);
+            $this->syncModel($options);
             return;
         }
 
@@ -174,6 +226,10 @@ class Analytics extends \Lime\Helper {
                 ]),
                 $this->field('config', 'object', 'Configuration', true, [
                     'info' => 'The keys the provider documents, stored verbatim. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."}. Full options per provider: '.self::DOCS_INDEX,
+                ]),
+                $this->field('category', 'select', 'Consent category', false, [
+                    'opts' => ['options' => ['', 'analytics', 'marketing']],
+                    'info' => 'Which consent a visitor must give before this loads. Leave empty to use the provider\'s default - Google Tag Manager defaults to marketing, because a container can hold advertising tags and only you know whether yours does.',
                 ]),
                 $this->field('enabled', 'boolean', 'Enabled', false, [
                     'info' => 'Turn a provider off without losing its configuration.',
@@ -200,6 +256,178 @@ class Analytics extends \Lime\Helper {
     }
 
     /**
+     * Creates the consent singleton if it is missing, and leaves an existing
+     * one completely alone - copy included.
+     *
+     * The copy is the part an editor owns. Overwriting it on an upgrade would
+     * replace a client's reviewed wording with our defaults, which for a legal
+     * control is worse than leaving it stale.
+     */
+    protected function ensureConsentModel($content): void {
+
+        if ($content->exists(self::CONSENT_MODEL)) {
+            return;
+        }
+
+        $content->createModel(self::CONSENT_MODEL, [
+            'label' => 'Cookie consent',
+            'info'  => 'The cookie banner. Until this is enabled, no tracking loads at all - which is the safe default, not a bug.',
+            'type'  => 'singleton',
+            'group' => 'Analytics',
+            'fields' => [
+                $this->field('enabled', 'boolean', 'Ask for consent', false, [
+                    'info' => 'Off means no banner AND no tracking. Analytics only loads once a visitor agrees, so leaving this off switches every provider off with it.',
+                ]),
+                $this->field('copyVersion', 'text', 'Copy version', false, [
+                    'info' => 'An identifier for the wording below, stored with each visitor\'s choice so you can tell later which text they agreed to. Bump it when you change the meaning of the text, not for a typo. It does NOT re-ask anybody.',
+                ]),
+
+                $this->field('title', 'text', 'Banner title', false, ['group' => 'Banner', 'i18n' => true]),
+                $this->field('body', 'textarea', 'Banner text', false, [
+                    'group' => 'Banner',
+                    'i18n'  => true,
+                    'info'  => 'Say plainly what is collected and why. Plain text - no markup, because none is rendered.',
+                ]),
+                $this->field('acceptLabel', 'text', 'Accept all', false, ['group' => 'Banner', 'i18n' => true]),
+                $this->field('rejectLabel', 'text', 'Reject all', false, ['group' => 'Banner', 'i18n' => true]),
+                $this->field('prefsLabel', 'text', 'Preferences', false, ['group' => 'Banner', 'i18n' => true]),
+                $this->field('saveLabel', 'text', 'Save choices', false, ['group' => 'Banner', 'i18n' => true]),
+
+                $this->field('policyLabel', 'text', 'Policy link text', false, ['group' => 'Banner', 'i18n' => true]),
+                $this->field('policyUrl', 'text', 'Policy link URL', false, [
+                    'group' => 'Banner',
+                    'info'  => 'Your privacy or cookie policy. Left empty, no link is shown - which most regulators expect you to have.',
+                ]),
+
+                $this->field('necessaryLabel', 'text', 'Necessary - label', false, ['group' => 'Categories', 'i18n' => true]),
+                $this->field('necessaryDescription', 'text', 'Necessary - description', false, [
+                    'group' => 'Categories',
+                    'i18n'  => true,
+                    'info'  => 'Shown as always on and not refusable, because it is what the site needs to work.',
+                ]),
+                $this->field('analyticsLabel', 'text', 'Analytics - label', false, ['group' => 'Categories', 'i18n' => true]),
+                $this->field('analyticsDescription', 'text', 'Analytics - description', false, ['group' => 'Categories', 'i18n' => true]),
+                $this->field('marketingLabel', 'text', 'Marketing - label', false, ['group' => 'Categories', 'i18n' => true]),
+                $this->field('marketingDescription', 'text', 'Marketing - description', false, ['group' => 'Categories', 'i18n' => true]),
+            ],
+        ]);
+
+        /*
+         * Same registry cache as the collection: written to the database and
+         * invisible without this on any environment with debug off.
+         * See src/knowledge/cockpit-model-registry-cache.md.
+         */
+        try {
+            $this->app->helper('content.model')->cache(true);
+        } catch (\Throwable $e) {
+            $this->log('consent model cache rebuild failed: '.$e->getMessage());
+        }
+
+        $this->seedConsentCopy($content);
+
+        $this->log('created the '.self::CONSENT_MODEL.' singleton with Spanish copy; consent is off until an editor enables it');
+    }
+
+    /**
+     * Writes the initial banner copy, once, when the singleton is first created.
+     *
+     * Without this the singleton is created empty, and an editor who simply
+     * ticks "Ask for consent" publishes a banner in English on a Spanish site:
+     * the application carries last-resort text so a legal notice never renders
+     * a blank button, and last-resort text is all an empty singleton has.
+     * Seeding real copy means ticking the box produces something publishable.
+     *
+     * Three things this deliberately does NOT do:
+     *
+     *   - it does not enable consent. Off stays the default, because the copy
+     *     is ours and the decision to publish it is the site owner's.
+     *   - it does not fill policyUrl. There is no value we could invent, and a
+     *     wrong privacy-policy link is worse than a missing one.
+     *   - it does not run for an existing singleton. It is called only from the
+     *     branch that just created the model, so an upgrade never overwrites
+     *     copy a client had reviewed.
+     */
+    protected function seedConsentCopy($content): void {
+
+        $copy = [
+            'enabled'     => false,
+            // A date rather than a counter: this is what a visitor's stored
+            // decision is stamped with, and a date is the version an editor can
+            // actually recognise a year later.
+            'copyVersion' => date('Y-m-d'),
+
+            'title'       => 'Usamos cookies',
+            'body'        => 'Utilizamos cookies para entender cómo se usa este sitio. Tú decides cuáles aceptar.',
+            'acceptLabel' => 'Aceptar todo',
+            'rejectLabel' => 'Rechazar todo',
+            'prefsLabel'  => 'Preferencias',
+            'saveLabel'   => 'Guardar mis preferencias',
+
+            'policyLabel' => 'Política de privacidad',
+            'policyUrl'   => '',
+
+            'necessaryLabel'       => 'Necesarias',
+            'necessaryDescription' => 'Imprescindibles para que el sitio funcione. Siempre activas.',
+            'analyticsLabel'       => 'Analítica',
+            'analyticsDescription' => 'Nos ayudan a entender qué páginas resultan útiles.',
+            'marketingLabel'       => 'Marketing',
+            'marketingDescription' => 'Se usan para medir y orientar la publicidad.',
+
+            /*
+             * Published, explicitly.
+             *
+             * saveItem() stores _state 0 - a draft - unless told otherwise, and
+             * Cockpit's read API only ever serves published content. Seeded copy
+             * left as a draft would be invisible to the website, so the banner
+             * would fall back to the English text this method exists to avoid,
+             * while looking perfectly filled in to whoever opened the editor.
+             * The seoPages rows hit exactly this during the 0.48.0 rollout.
+             */
+            '_state' => 1,
+        ];
+
+        try {
+            $content->saveItem(self::CONSENT_MODEL, $copy);
+        } catch (\Throwable $e) {
+            // Not fatal. An unseeded singleton still works; it just starts
+            // empty, which is where this addon was before.
+            $this->log('could not seed the consent copy: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * The category an entry will actually require: the editor's override if
+     * there is one, otherwise the provider's default.
+     *
+     * The browser resolves this the same way from its own copy of the mapping.
+     * This one is for showing an editor what they are about to get.
+     */
+    public function effectiveCategory(array $item): string {
+
+        $override = $this->selectValue($item['category'] ?? null);
+
+        if (in_array($override, self::CATEGORIES, true) && $override !== 'necessary') {
+            return $override;
+        }
+
+        $provider = $this->selectValue($item['provider'] ?? null);
+
+        return self::PROVIDER_CATEGORY[$provider] ?? 'marketing';
+    }
+
+    /**
+     * Is this entry's category the provider's default, or an editor's choice?
+     * The admin screen says which, so an override is visible rather than
+     * looking like the default it replaced.
+     */
+    public function categoryIsOverridden(array $item): bool {
+
+        $override = $this->selectValue($item['category'] ?? null);
+
+        return in_array($override, self::CATEGORIES, true) && $override !== 'necessary';
+    }
+
+    /**
      * The select's options, from the providers the application can load.
      */
     protected function providerOptions(): array {
@@ -213,14 +441,20 @@ class Analytics extends \Lime\Helper {
     }
 
     /**
-     * Brings an existing model's provider list up to date, and nothing else.
+     * Brings the parts of an existing model that are derived from code up to
+     * date, and nothing else.
      *
-     * Narrow on purpose: only the options of the `provider` field are
-     * rewritten. Labels, other fields, anything an editor changed - untouched.
-     * Nothing is written when the list already matches, so this costs one
-     * comparison per admin load rather than a write.
+     * Two of them, and both for the same reason: they are facts about what the
+     * application can do, not choices an editor made. The provider list, so a
+     * release that adds a provider reaches a project created before it. And the
+     * consent category field, so a project that installed this addon before
+     * consent existed can override a category without being recreated.
+     *
+     * Everything else is left alone - labels, order, info text, anything
+     * edited. Nothing is written when both already match, so the usual cost is
+     * one comparison per admin load.
      */
-    protected function syncProviderOptions(array $options): void {
+    protected function syncModel(array $options): void {
 
         $content = $this->app->module('content');
         $model   = $content->model(self::MODEL);
@@ -229,21 +463,40 @@ class Analytics extends \Lime\Helper {
             return;
         }
 
-        $changed = false;
+        $changed  = false;
+        $hasCategory = false;
 
         foreach ($model['fields'] as $i => $field) {
 
-            if (($field['name'] ?? '') !== 'provider') {
+            $name = $field['name'] ?? '';
+
+            if ($name === 'category') {
+                $hasCategory = true;
                 continue;
             }
 
-            if (($field['opts']['options'] ?? null) == $options) {
-                return;
+            if ($name !== 'provider') {
+                continue;
             }
 
-            $model['fields'][$i]['opts']['options'] = $options;
+            if (($field['opts']['options'] ?? null) != $options) {
+                $model['fields'][$i]['opts']['options'] = $options;
+                $changed = true;
+            }
+        }
+
+        if (!$hasCategory) {
+            /*
+             * Appended rather than inserted next to `provider`, where it
+             * belongs visually. Inserting would reorder an editor's existing
+             * fields, and a field in the wrong place is a smaller problem than
+             * a model that shuffles itself on upgrade.
+             */
+            $model['fields'][] = $this->field('category', 'select', 'Consent category', false, [
+                'opts' => ['options' => ['', 'analytics', 'marketing']],
+                'info' => 'Which consent a visitor must give before this loads. Empty uses the provider default.',
+            ]);
             $changed = true;
-            break;
         }
 
         if (!$changed) {
@@ -253,9 +506,9 @@ class Analytics extends \Lime\Helper {
         try {
             $content->updateModel(self::MODEL, $model);
             $this->app->helper('content.model')->cache(true);
-            $this->log('provider list updated to: '.implode(', ', array_keys(self::PROVIDERS)));
+            $this->log('model brought up to date'.($hasCategory ? '' : ' (added the consent category field)'));
         } catch (\Throwable $e) {
-            $this->log('could not update the provider list: '.$e->getMessage());
+            $this->log('could not update the model: '.$e->getMessage());
         }
     }
 
@@ -307,6 +560,24 @@ class Analytics extends \Lime\Helper {
 
         $item['provider']     = $provider;
         $item['environments'] = in_array($environment, self::ENVIRONMENTS, true) ? $environment : 'all';
+
+        /*
+         * The category override, normalised to empty when it is not one this
+         * addon knows. Empty means "use the provider's default", which is the
+         * fail-closed reading: a value we do not recognise must not become a
+         * category the browser then fails to match, silently blocking a
+         * provider the editor believed they had allowed.
+         *
+         * `necessary` is refused as an override on purpose. It is the one
+         * category a visitor cannot decline, so letting an entry claim it
+         * would be a way to load tracking without consent - the exact thing
+         * this mechanism exists to prevent.
+         */
+        $category = $this->selectValue($item['category'] ?? null);
+
+        $item['category'] = ($category !== 'necessary' && in_array($category, self::CATEGORIES, true))
+            ? $category
+            : '';
 
         $config = is_array($item['config'] ?? null) ? $item['config'] : [];
         $lists  = self::RULES[$provider]['list'] ?? [];
@@ -505,6 +776,26 @@ class Analytics extends \Lime\Helper {
         return $this->app->module('content')->items(self::MODEL, [
             'sort' => ['provider' => 1],
         ]) ?: [];
+    }
+
+    /**
+     * The consent singleton, or an empty array when it does not exist yet.
+     *
+     * Read for the admin screen only. The website reads it through the core
+     * REST API like everything else, and nothing here decides what a visitor
+     * is allowed - that is the browser's, from a cookie the server never sees.
+     */
+    public function consent(): array {
+
+        $content = $this->app->module('content');
+
+        if (!$content || !$content->exists(self::CONSENT_MODEL)) {
+            return [];
+        }
+
+        // The empty filter is required: Content's item() takes one, and the
+        // Webapp addon reads its own singleton the same way.
+        return $content->item(self::CONSENT_MODEL, []) ?: [];
     }
 
     public function providerLabel(string $provider): string {

@@ -46,6 +46,39 @@ $model = Analytics\Helper\Analytics::MODEL;
         </div>
     </kiss-card>
 
+    <?php
+        /*
+         * The consent state, first and unmissable.
+         *
+         * It is the one thing on this screen that decides whether ANY of the
+         * rows below actually run. An editor looking at a healthy list of
+         * integrations and wondering why nothing is tracked has to find the
+         * answer here, not in a browser console.
+         */
+        $consentEnabled = !empty($consent['enabled']);
+        $consentModel   = Analytics\Helper\Analytics::CONSENT_MODEL;
+    ?>
+    <kiss-card class="kiss-padding-small kiss-margin-bottom" theme="<?= $consentEnabled ? 'contrast' : 'danger' ?>">
+        <div class="kiss-flex kiss-flex-middle" gap="small">
+            <icon class="<?= $consentEnabled ? 'kiss-color-success' : 'kiss-color-danger' ?>">
+                <?= $consentEnabled ? 'verified_user' : 'gpp_maybe' ?>
+            </icon>
+            <div class="kiss-flex-1 kiss-size-small">
+                <?php if ($consentEnabled): ?>
+                    <b>Cookie consent is on.</b> Nothing below loads until a visitor agrees to its
+                    category. A visitor who refuses is not tracked at all.
+                <?php else: ?>
+                    <b>Cookie consent is off, so nothing below is loading.</b> Analytics only runs
+                    once a visitor has agreed, so with no banner there is nothing to agree to.
+                    That is deliberate: it is the safe state, not a fault.
+                <?php endif; ?>
+            </div>
+            <a class="kiss-button kiss-button-small" href="<?= $this->route('/content/singleton/item/'.$consentModel) ?>">
+                <?= $consentEnabled ? 'Edit the banner' : 'Set up the banner' ?>
+            </a>
+        </div>
+    </kiss-card>
+
     <kiss-card theme="contrast shadowed" class="kiss-padding-small">
 
         <?php if (!count($integrations)): ?>
@@ -61,6 +94,7 @@ $model = Analytics\Helper\Analytics::MODEL;
                         <th class="kiss-align-center" width="20">OK</th>
                         <th width="180">Provider</th>
                         <th>Configuration</th>
+                        <th width="130">Needs consent</th>
                         <th width="130">Applies to</th>
                     </tr>
                 </thead>
@@ -119,6 +153,18 @@ $model = Analytics\Helper\Analytics::MODEL;
                                             <div><icon class="kiss-margin-xsmall-right">warning</icon><?= htmlspecialchars($problem) ?></div>
                                         <?php endforeach; ?>
                                     </div>
+                                <?php endif; ?>
+                            </td>
+                            <td class="kiss-size-small">
+                                <?php
+                                    $category   = $this->helper('analytics')->effectiveCategory($item);
+                                    $overridden = $this->helper('analytics')->categoryIsOverridden($item);
+                                ?>
+                                <span class="kiss-badge kiss-badge-outline"><?= htmlspecialchars($category) ?></span>
+                                <?php if ($overridden): ?>
+                                    <div class="kiss-size-xsmall kiss-color-muted">set by you</div>
+                                <?php else: ?>
+                                    <div class="kiss-size-xsmall kiss-color-muted">provider default</div>
                                 <?php endif; ?>
                             </td>
                             <td class="kiss-size-small">

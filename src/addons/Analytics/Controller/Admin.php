@@ -19,6 +19,9 @@ class Admin extends \App\Controller\App {
 
         return $this->render('analytics:views/index.php', [
             'integrations' => $analytics->all(),
+            // The banner's state gates every row on the screen, so the screen
+            // has to be able to say so.
+            'consent'      => $analytics->consent(),
             'reference'    => $analytics->providerReference(),
         ]);
     }

@@ -75,4 +75,4 @@
 - [x] 10.3 Add a CHANGELOG entry stating both rebuilds are needed, CMS and application
 - [x] 10.4 Tag the release and publish it with both assets
 - [ ] 10.5 Roll out to one project, add the second provider there, and only then the rest
-- [ ] 10.6 Open the consent task — analytics is now loading on client sites without it
+- [x] 10.6 Open the consent task — analytics is now loading on client sites without it

@@ -29,6 +29,49 @@ var files embed.FS
 type Integration struct {
 	Provider string
 	Config   map[string]any
+
+	// Category is the consent category this entry needs before it may load:
+	// "analytics" or "marketing". Empty means the CMS did not override it and
+	// the browser registry's own default for the provider applies.
+	//
+	// Only the browser ever compares it against a visitor's decision. Nothing
+	// on the server reads consent, because a cached page must be identical for
+	// a visitor who accepted and one who refused.
+	Category string
+}
+
+// Consent is the banner's configuration, as an editor filled it in.
+//
+// It carries no per-visitor state, on purpose. The decision lives in a cookie
+// the browser owns; if any of it reached a rendered page, the first visitor's
+// choice would be cached and served to everyone else.
+type Consent struct {
+	// Enabled is whether this site asks for consent at all. When it is false
+	// the browser treats every optional category as refused, so a site that
+	// forgot to configure the banner loads no tracking rather than all of it.
+	Enabled bool
+
+	// CopyVersion identifies the text below. It is stored inside the visitor's
+	// cookie so a later server-side record can say which wording a decision
+	// was made against. Changing it does not re-ask.
+	CopyVersion string
+
+	Title       string
+	Body        string
+	AcceptLabel string
+	RejectLabel string
+	PrefsLabel  string
+	SaveLabel   string
+
+	PolicyLabel string
+	PolicyURL   string
+
+	AnalyticsLabel       string
+	AnalyticsDescription string
+	MarketingLabel       string
+	MarketingDescription string
+	NecessaryLabel       string
+	NecessaryDescription string
 }
 
 // Renderer implements echo.Renderer. Each entry is a page: layout + page body
@@ -55,6 +98,7 @@ type Option func(*options)
 
 type options struct {
 	integrations func() []Integration
+	consent      func() *Consent
 	seoResolver  func(path string, overrides ...any) map[string]any
 	favicon      func() string
 	robotsTxt    func() string
@@ -68,6 +112,15 @@ type options struct {
 // addon gets.
 func WithIntegrations(fn func() []Integration) Option {
 	return func(o *options) { o.integrations = fn }
+}
+
+// WithConsent supplies the cookie banner's configuration.
+//
+// A function, like WithIntegrations, because it lives in the CMS. Left unset
+// it means no consent configuration, which the browser must read as no consent
+// given - never as consent assumed.
+func WithConsent(fn func() *Consent) Option {
+	return func(o *options) { o.consent = fn }
 }
 
 // WithSEO supplies the SEO resolver for rendering meta tags.
@@ -91,6 +144,7 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		apply(&o)
 	}
 	integrations := o.integrations
+	consent := o.consent
 
 	// assetURL turns a Cockpit asset object (a map with a "path") into a
 	// browser-reachable URL. It returns the empty string when the field is
@@ -109,6 +163,10 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		integrations = func() []Integration { return nil }
 	}
 
+	if consent == nil {
+		consent = func() *Consent { return nil }
+	}
+
 	funcs := template.FuncMap{
 		"assetURL": assetURL,
 		// analyticsIntegrations is what the analytics component reads.
@@ -118,6 +176,9 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		// added later silently loses its tracking, with nobody noticing for
 		// weeks. Views call it as {{range analyticsIntegrations}}.
 		"analyticsIntegrations": integrations,
+		// consentSettings is what the consent component reads. Nil means the
+		// banner renders nothing at all, and the browser gates everything.
+		"consentSettings": consent,
 		// safeHTML renders a value as markup instead of escaping it, for rich
 		// text an editor wrote in the CMS. This deliberately disables the XSS
 		// protection html/template otherwise gives you, so it is only ever

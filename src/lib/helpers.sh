@@ -48,6 +48,33 @@ _lock_release() {
   debug "Lock released: $1"
 }
 
+# Epoch mtime of a path, on both GNU and BSD stat. Empty when neither works.
+#
+# The two must be tried in SEPARATE assignments. Written as one substitution -
+# `$(stat -c %Y x || stat -f %m x)` - the outputs concatenate on whichever
+# platform fails second, because GNU `stat -f` is not a format flag at all: it
+# means --file-system, so it prints a block of filesystem stats for the path
+# AND exits non-zero. The fallback then appends the real number to that block.
+#
+# That is not a cosmetic bug. The caller compared the result against an age
+# bound, the arithmetic failed on the non-numeric string, and a failed test
+# reads as "not stale" - so on Linux an orphaned lock was NEVER reclaimed and
+# every later gosite command on that state file waited its full timeout and
+# gave up. Caught by CI, which runs on Linux; macOS happened to try BSD first
+# and never saw it.
+_mtime() {
+  local out
+  if out="$(stat -c %Y "$1" 2>/dev/null)"; then
+    printf '%s' "${out}"
+    return 0
+  fi
+  if out="$(stat -f %m "$1" 2>/dev/null)"; then
+    printf '%s' "${out}"
+    return 0
+  fi
+  return 1
+}
+
 # Returns 0 when the lock was reclaimed (removed), 1 while an owner may live.
 _lock_reclaim() {
   local lockdir="$1" pid mtime now
@@ -61,7 +88,13 @@ _lock_reclaim() {
   # Pid gone or never written. Only reclaim past an age bound so a live owner
   # still between mkdir and its pid write keeps its lock.
   now="$(date +%s)"
-  mtime="$(stat -f %m "${lockdir}" 2>/dev/null || stat -c %Y "${lockdir}" 2>/dev/null || echo "${now}")"
+  mtime="$(_mtime "${lockdir}")"
+
+  # A mtime we could not read is treated as "now", which means NOT stale and so
+  # not reclaimed. Refusing to reclaim costs a manual rm; reclaiming a lock a
+  # live process still holds corrupts the file it was protecting.
+  [[ "${mtime}" =~ ^[0-9]+$ ]] || mtime="${now}"
+
   if (( now - mtime < GOSITE_LOCK_STALE_SECONDS )); then
     return 1
   fi
