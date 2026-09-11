@@ -95,13 +95,23 @@ _register_api_key() {
   # back to the mapped localhost port. A 200 means the key registered; 401/412
   # mean the API is up but something else is wrong, which is worth reporting
   # rather than waiting out.
+  # `|| code=000` on both, and it is load-bearing rather than defensive.
+  #
+  # main.sh runs under `set -e`, and an assignment takes the exit status of its
+  # command substitution - so a curl that cannot resolve the host exits 6 and
+  # kills `gosite start` outright. Every line of this function says it is
+  # non-fatal, and it was the one thing that could fail the command.
+  #
+  # It fires whenever *.test does not resolve: CI always, and any machine where
+  # `gosite setup` has not configured local DNS. The site itself is fine on its
+  # published ports, so failing the start was wrong twice over.
   local _ code=000
   for _ in $(seq 1 45); do
-    code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null)"
+    code="$(curl -sk --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "${base}/api/models" 2>/dev/null)" || code=000
     case "${code}" in
       200|401|412) break ;;
     esac
-    code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "http://localhost:${cms_port}/api/models" 2>/dev/null)"
+    code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' -H "api-key: ${tok}" "http://localhost:${cms_port}/api/models" 2>/dev/null)" || code=000
     case "${code}" in
       200|401|412) base="http://localhost:${cms_port}"; break ;;
     esac
