@@ -34,8 +34,8 @@ core/
   page.go            Page view model
   cms/               client (public: sites read collections)
   gositetest/        contract checks
-  addons/blog, addons/analytics, addons/webapp, addons/forms   (Go halves, self-registering)
   internal/cache, internal/seo, internal/views, internal/handlers, internal/config
+  internal/addon (registry), internal/addons/blog (the only Go half), internal/siteconfig (gosite.yml)
   theme/             embedded default partials (embed.FS)
 ```
 Only `gosite`, `cms`, `gositetest` and the Page types are public. Keeping the public surface small is what makes the deprecation rule affordable.
@@ -62,7 +62,7 @@ Cache keys move from `<project>:*` to `<project>:cache:*`. Purge scans only `<pr
 YAML, read by `gosite.Run` (addons, feature toggles) and by the CLI. The CLI reads it with a minimal parser: flat keys plus one `addons:` list, so bash needs no YAML dependency. Legacy detection: a project with no `gosite.yml` takes the existing code paths, untouched.
 
 ### D7. PHP addons installed into the CMS image
-`Dockerfile.cms` gets `ARG GOSITE_CORE_VERSION` and copies `core/cockpit-addons/*` from the release tarball for that tag, or from the local repo in development. Which addons are enabled is controlled by `config.core.php`, generated from `gosite.yml`, so all addons can sit in the image with only the listed ones active.
+`Dockerfile.cms` installs gosite's PHP addons from a named build context, `gosite-addons`: in production that context is `src/addons` of this repo at the `core/vX.Y.Z` tag (BuildKit fetches a git URL with a subdirectory), in development it is the installed gosite's `src/addons`. `src/addons` stays the single source; nothing is copied into `core/`. Which addons are enabled is controlled by `config.core.php`, generated from `gosite.yml`, so all addons can sit in the image with only the listed ones active.
 - *Alternative: copy only the listed addons.* It needs a rebuild on every add or remove either way. Controlling activation through config is simpler.
 - *Verified (spike 0.1, cockpithq/cockpit:core-2.14.0):* `Lime\App::__construct` merges the config array into its registry, and `loadModule()` skips any module whose name is in `$registry['modules.disabled']`. So `config.core.php` sets `'modules.disabled' => [<every gosite addon not in gosite.yml>]`. The names are the directory basenames (`Blog`, `Forms`, …), because gosite addons load without a prefix.
 

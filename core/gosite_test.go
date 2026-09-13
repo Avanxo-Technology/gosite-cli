@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -41,17 +44,25 @@ func (s middlewareSite) Middleware() []Middleware { return s.middleware }
 // answers every request with an empty object.
 func newTestServer(t *testing.T, site App, opts ...Option) (*Server, *miniredis.Miniredis) {
 	t.Helper()
-	mr := miniredis.RunT(t)
-	cms := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newTestServerCMS(t, site, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{}`))
-	}))
+	}, opts...)
+}
+
+func newTestServerCMS(t *testing.T, site App, cmsHandler http.HandlerFunc, opts ...Option) (*Server, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cms := httptest.NewServer(cmsHandler)
 	t.Cleanup(cms.Close)
 
 	t.Setenv("GOSITE_PROJECT", "demo")
 	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/0")
 	t.Setenv("COCKPIT_URL", cms.URL)
 	t.Setenv("APP_ENV", "development")
+	if os.Getenv("GOSITE_CONFIG") == "" {
+		t.Setenv("GOSITE_CONFIG", filepath.Join(t.TempDir(), "none.yml"))
+	}
 
 	opts = append([]Option{WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))}, opts...)
 	s, err := New(site, opts...)
@@ -241,5 +252,49 @@ func TestRenderPageWithThemeAndTemplateData(t *testing.T) {
 	}
 	if !strings.Contains(body, "<title>About</title>") {
 		t.Errorf("gosite:head did not render the title: %s", body)
+	}
+}
+
+func writeSiteConfig(t *testing.T, body string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gosite.yml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOSITE_CONFIG", path)
+}
+
+// Blog's routes exist exactly when gosite.yml lists it. Both cases answer 404
+// (the stub CMS knows no blog), so the difference is whether the blog asked
+// the CMS for one.
+func TestAddonsFromSiteConfig(t *testing.T) {
+	askedForBlogs := func(t *testing.T, config string) bool {
+		writeSiteConfig(t, config)
+		var asked atomic.Bool
+		s, _ := newTestServerCMS(t, &testSite{}, func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/blogs") {
+				asked.Store(true)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":[],"meta":{"total":0}}`))
+		})
+		do(t, s, http.MethodGet, "/noticias/hola", "")
+		return asked.Load()
+	}
+	if !askedForBlogs(t, "project: demo\naddons:\n  - Blog\n") {
+		t.Error("Blog is listed but /:blog/:slug did not reach the blog")
+	}
+	if askedForBlogs(t, "project: demo\naddons: []\n") {
+		t.Error("Blog is not listed but /:blog/:slug reached the blog")
+	}
+}
+
+func TestUnknownAddonFailsStartup(t *testing.T) {
+	writeSiteConfig(t, "addons:\n  - Blgo\n")
+	mr := miniredis.RunT(t)
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/0")
+	_, err := New(&testSite{}, WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	if err == nil || !strings.Contains(err.Error(), `"Blgo"`) || !strings.Contains(err.Error(), "Blog") {
+		t.Fatalf("err = %v, want it to name the unknown addon and the library", err)
 	}
 }

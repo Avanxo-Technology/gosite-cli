@@ -26,9 +26,14 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/addon"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/app"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/config"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/siteconfig"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/views"
+
+	// Every addon with a Go half registers itself; gosite.yml decides which run.
+	_ "github.com/Avanxo-Technology/gosite-cli/core/internal/addons/blog"
 )
 
 // Context, HandlerFunc and Middleware are the HTTP types site handlers use.
@@ -83,6 +88,8 @@ type options struct {
 	log      *slog.Logger
 	disabled map[string]bool
 	theme    fs.FS
+	addons   []string
+	setAdd   bool
 }
 
 // WithLogger replaces the default text logger on stdout.
@@ -95,6 +102,12 @@ func WithLogger(log *slog.Logger) Option {
 // it. Without this option core renders its default demo theme.
 func WithTheme(theme fs.FS) Option {
 	return func(o *options) { o.theme = theme }
+}
+
+// WithAddons enables addons by name instead of reading the addons list from
+// gosite.yml. Mostly for tests; a site declares its addons in gosite.yml.
+func WithAddons(names ...string) Option {
+	return func(o *options) { o.addons, o.setAdd = names, true }
 }
 
 // WithoutRoutes switches off core routes by name (RouteHome, RouteRobots, ...).
@@ -133,9 +146,34 @@ func New(site App, opts ...Option) (*Server, error) {
 	}
 
 	cfg := config.Load()
+
+	// Addons come from gosite.yml in the working directory (GOSITE_CONFIG
+	// names another file). A name gosite does not ship stops startup: a typo
+	// would otherwise be a feature silently missing in production.
+	if !o.setAdd {
+		path := os.Getenv("GOSITE_CONFIG")
+		if path == "" {
+			path = siteconfig.File
+		}
+		sc, err := siteconfig.Load(path)
+		if err != nil {
+			return nil, err
+		}
+		o.addons = sc.Addons()
+	}
+	enabled, err := addon.Resolve(o.addons)
+	if err != nil {
+		return nil, err
+	}
+
 	var viewOpts []views.Option
 	if o.theme != nil {
 		viewOpts = append(viewOpts, views.WithTheme(o.theme))
+	}
+	for _, a := range enabled {
+		if a.Pages != nil {
+			viewOpts = append(viewOpts, views.WithPages(a.Pages))
+		}
 	}
 	core, err := app.NewApp(cfg, o.log, viewOpts...)
 	if err != nil {
@@ -145,6 +183,11 @@ func New(site App, opts ...Option) (*Server, error) {
 	s := &Server{core: core, log: o.log}
 
 	routerOpts := app.RouterOptions{Disabled: o.disabled}
+	for _, a := range enabled {
+		if a.Mount != nil {
+			routerOpts.Mounts = append(routerOpts.Mounts, a.Mount)
+		}
+	}
 	if m, ok := site.(Middlewarer); ok {
 		routerOpts.Middleware = m.Middleware()
 	}

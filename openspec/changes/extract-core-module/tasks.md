@@ -29,9 +29,9 @@
 
 ## 4. Addons as module packages
 
-- [ ] 4.1 Move addon Go halves (`src/templates/addons/*/internal/**`) into `core/addons/<name>` with self-registration keyed by name
-- [ ] 4.2 `gosite.Run` reads `addons` from `gosite.yml`, enables listed addons, fails on unknown names
-- [ ] 4.3 Move PHP addons into `core/cockpit-addons/`; `Dockerfile.cms` installs them for `GOSITE_CORE_VERSION`
+- [x] 4.1 Move addon Go halves (`src/templates/addons/*/internal/**`, only Blog has one) into `core/internal/addons/<name>` with self-registration keyed by name; addon pages come from the addon unless the theme ships a page of the same name
+- [x] 4.2 `gosite.Run` reads `addons` from `gosite.yml`, enables listed addons, fails on unknown names
+- [ ] 4.3 Thin sites' `Dockerfile.cms` installs the PHP addons from `src/addons` at the core version (single source, not copied into `core/`); done with the generated files in 5.4
 - [ ] 4.4 Generate `modules.disabled` (gosite addons not listed in gosite.yml) into `config.core.php`
 
 ## 5. Thin scaffold and CLI

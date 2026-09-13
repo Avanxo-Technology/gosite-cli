@@ -154,6 +154,7 @@ type Option func(*options)
 type options struct {
 	theme        fs.FS
 	partials     []fs.FS
+	pages        []fs.FS
 	slotPartials map[string][]string
 	log          *slog.Logger
 
@@ -195,6 +196,12 @@ func WithTheme(theme fs.FS) Option {
 // use it together with WithSlotPartial.
 func WithPartials(fsys fs.FS) Option {
 	return func(o *options) { o.partials = append(o.partials, fsys) }
+}
+
+// WithPages adds default pages (pages/*.html in fsys), used when the theme has
+// no page of the same name. Addons bring their pages this way.
+func WithPages(fsys fs.FS) Option {
+	return func(o *options) { o.pages = append(o.pages, fsys) }
 }
 
 // WithSlotPartial appends a template to a slot, after core's own partials.
@@ -372,6 +379,7 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 	// theme's layout, components and that page. Later definitions replace
 	// earlier ones with the same name, which is how a theme overrides a core
 	// partial. A page can use any component without declaring anything.
+	pageSource := map[string]fs.FS{} // page name -> where its file lives
 	page := func(name string) *template.Template {
 		t := template.New(name).Funcs(funcs)
 		template.Must(t.ParseFS(corePartials, "partials/*.html"))
@@ -381,7 +389,7 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		}
 		parseGlob(t, o.theme, "layout.html")
 		parseGlob(t, o.theme, "components/*.html")
-		parseGlob(t, o.theme, "pages/"+name+".html")
+		parseGlob(t, pageSource[name], "pages/"+name+".html")
 		return t
 	}
 
@@ -389,17 +397,20 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 	// page is dropping a file in - nothing to register here, and a feature that
 	// brings its own pages (the blog) does not have to edit this file to
 	// install or to be removed again.
-	entries, err := fs.ReadDir(o.theme, "pages")
-	if err != nil {
+	if _, err := fs.ReadDir(o.theme, "pages"); err != nil {
 		panic("views: the theme has no pages directory: " + err.Error())
 	}
 
-	pages := map[string]*template.Template{}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
-			continue
+	// Addon pages first, theme pages last: a theme page of the same name wins.
+	for _, fsys := range append(append([]fs.FS{}, o.pages...), o.theme) {
+		matches, _ := fs.Glob(fsys, "pages/*.html")
+		for _, m := range matches {
+			pageSource[strings.TrimSuffix(path.Base(m), ".html")] = fsys
 		}
-		name := strings.TrimSuffix(entry.Name(), ".html")
+	}
+
+	pages := map[string]*template.Template{}
+	for name := range pageSource {
 		pages[name] = page(name)
 	}
 

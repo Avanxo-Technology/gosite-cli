@@ -10,16 +10,6 @@ import (
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/handlers"
 )
 
-// mountFeatures are optional features that bring their own routes. A feature
-// installed into this project registers itself here from its own file (the
-// blog does this in router_blog.go), so installing or removing one is adding
-// or deleting files - this file is never rewritten by a tool and stays yours
-// to edit.
-//
-// The call still happens below, in plain sight: the HTTP surface remains
-// readable from this file alone.
-var mountFeatures []func(*echo.Echo, *handlers.Handlers)
-
 // RouterOptions is what gosite.Run passes in from the site.
 type RouterOptions struct {
 	// Disabled names core routes the site switched off: "home", "robots",
@@ -27,6 +17,9 @@ type RouterOptions struct {
 	Disabled map[string]bool
 	// Middleware from the site's gosite.Middlewarer, applied after core's.
 	Middleware []echo.MiddlewareFunc
+	// Mounts are enabled addons' route registrations. They run after core's
+	// routes and before the site's.
+	Mounts []func(*echo.Echo, *handlers.Handlers)
 	// Site registers the site's routes. It runs last, so a site route on a
 	// path core also serves replaces core's handler.
 	Site func(e *echo.Echo)
@@ -107,7 +100,7 @@ func NewRouter(a *App, opts RouterOptions) *echo.Echo {
 	// precedence. The blog serves /{blog} and /{blog}/{slug}; echo resolves a
 	// concrete path segment before a `:param` one regardless of registration
 	// order, so a page this file serves always wins over a blog slug.
-	for _, mount := range mountFeatures {
+	for _, mount := range opts.Mounts {
 		mount(e, h)
 	}
 
