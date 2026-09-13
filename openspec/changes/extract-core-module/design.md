@@ -81,7 +81,7 @@ YAML, read by `gosite.Run` (addons, feature toggles) and by the CLI. The CLI rea
 
 ## Migration Plan
 
-1. Build `core/` by moving code with its tests (git mv so history is kept), and adapt imports. CI builds the module on its own.
+1. Build `core/` by copying code with its tests, and adapt imports. Copy, not move: legacy `create`/`sync`/`addons` still render `src/templates/internal`, which stays frozen until the thin default flips and is then deleted. CI builds the module on its own.
 2. Add the `gosite.Run`/slots/Page layers. Port the scaffold's own tests to them.
 3. Add the thin scaffold behind `gosite create --thin` while the existing path is still the default. Verify on a sandbox site in a redirected `GOSITE_HOME`, never on `~/gosites` projects other than analytics-draft.
 4. Release workflow: tag `vX.Y.Z` and `core/vX.Y.Z` together, plus the CMS image assets.

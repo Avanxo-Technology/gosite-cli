@@ -6,10 +6,10 @@
 
 ## 1. Core module skeleton
 
-- [ ] 1.1 Create `core/go.mod` (`github.com/Avanxo-Technology/gosite-cli/core`, go 1.25, echo v5, go-redis v9)
-- [ ] 1.2 `git mv` `src/templates/internal/{cache,seo,views,handlers,config}` into `core/internal/` with their tests; `cms` into `core/cms`
-- [ ] 1.3 Replace `__MODULE__` imports with the module path; `go build ./... && go test ./...` passes in `core/`
-- [ ] 1.4 Add a CI job that builds and tests `core/` on Linux
+- [x] 1.1 Create `core/go.mod` (`github.com/Avanxo-Technology/gosite-cli/core`, go 1.25, echo v5, go-redis v9)
+- [x] 1.2 Copy (not move: the legacy scaffold still reads them) `src/templates/internal/{app,cache,config,seo,views,handlers,analytics}` into `core/internal/` with their tests, `cms` into `core/cms`, and the tailwind views as the interim default theme
+- [x] 1.3 Replace `__MODULE__` imports with the module path and `__PROJECT__`/`__REDIS_*__` with runtime config (`GOSITE_PROJECT`); `go build ./... && go test ./...` passes in `core/`
+- [x] 1.4 Add a CI job that builds and tests `core/` on Linux
 
 ## 2. App extension API
 

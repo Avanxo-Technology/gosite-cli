@@ -67,6 +67,30 @@ jobs:
       - name: Verify rendered fixture
         run: bash tests/template_fixture.sh
 
+  core:
+    name: Core module (gofmt, vet, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: core/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
   smoke:
     name: Smoke (create -> build -> start -> healthz)
     runs-on: ubuntu-latest
