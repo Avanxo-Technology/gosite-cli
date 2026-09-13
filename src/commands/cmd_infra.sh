@@ -114,7 +114,12 @@ services:
     networks: [gosite]
 
   minio:
-    image: minio/minio:latest
+    # coollabsio/minio, not minio/minio: the official image stopped being
+    # pullable from Docker Hub ("pull access denied", September 2026), which left
+    # gosite infra up failing on any machine without a cached copy. This build
+    # has the same entrypoint, command and root user, so the certificate mounts
+    # below are unchanged, and it ships mc as well.
+    image: coollabsio/minio:latest
     container_name: ${GOSITE_MINIO_HOST}
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -157,10 +162,21 @@ services:
       - traefik.http.routers.gosite-minio-console.tls=true
       - traefik.http.routers.gosite-minio-console.service=gosite-minio-console
     healthcheck:
-      # -k because the probe talks to MinIO's own mkcert certificate.
-      test: ["CMD", "curl", "-fk", "https://127.0.0.1:9000/minio/health/live"]
+      # mc, not curl: coollabsio/minio ships no curl, wget or nc, and a probe
+      # that cannot run marks the container unhealthy forever - which Traefik
+      # reads as "do not route here". mc ready asks the server itself.
+      # The escaped dollars survive this heredoc as $$, which compose turns into
+      # a literal $ for the container's shell, reading the root credentials from
+      # its own environment instead of writing them into the probe.
+      # --insecure because the probe talks to MinIO's own mkcert certificate.
+      # Both schemes, each attempt bounded: MinIO serves plain HTTP on a machine
+      # without mkcert (CI, a fresh laptop before gosite setup), and this file
+      # is written before the certificate is issued, so the scheme cannot be
+      # decided here. An unbounded mc against the wrong scheme retries instead
+      # of failing.
+      test: ["CMD-SHELL", "for s in https http; do MC_HOST_x=\$\$s://\$\$MINIO_ROOT_USER:\$\$MINIO_ROOT_PASSWORD@127.0.0.1:9000 timeout 3 mc ready x --insecure >/dev/null 2>&1 && exit 0; done; exit 1"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks: [gosite]
 
@@ -206,6 +222,31 @@ _infra_compose() {
 # hostnames minio.<TLD> / minio-console.<TLD> and localhost. The same files are
 # mounted into the MinIO container as its native TLS cert and registered with
 # Traefik for both public hostnames.
+# Creates the assets bucket with a public-read policy, if it is not there.
+#
+# The scheme follows the certificate: MinIO only serves HTTPS when mkcert issued
+# one, and asking over the wrong scheme is not a quick failure with current mc -
+# it retries. The whole exchange is bounded by `timeout` for the same reason: this
+# runs with its output discarded, so a hang would stall `gosite infra up` with
+# nothing on screen. (It did, in CI, for the full length of the job.)
+#
+# --insecure on EVERY mc command: MinIO serves its mkcert certificate, whose CA
+# the container does not trust, and current mc no longer carries the flag over
+# from `alias set` - without it `mc mb` fails and the bucket never exists.
+_infra_ensure_bucket() {
+  local scheme=http
+  if [[ -f "${GOSITE_CERTS_DIR}/minio.pem" && -f "${GOSITE_CERTS_DIR}/minio-key.pem" ]]; then
+    scheme=https
+  fi
+
+  docker run --rm --network "${GOSITE_NETWORK}" \
+    --entrypoint timeout coollabsio/minio:latest 60 \
+    sh -c "mc alias set local ${scheme}://${GOSITE_MINIO_HOST}:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --insecure \
+        && mc mb -p local/assets --insecure \
+        && mc anonymous set download local/assets --insecure" \
+    >/dev/null 2>&1 || true
+}
+
 ensure_minio_certs() {
   local cert="${GOSITE_CERTS_DIR}/minio.pem"
   local key="${GOSITE_CERTS_DIR}/minio-key.pem"
@@ -305,13 +346,7 @@ cmd_infra() {
       rm -f "${GOSITE_DYNAMIC_DIR}/minio-console.yml"
 
       # Create the default bucket in MinIO so projects can use it immediately.
-      # -k/--insecure because MinIO serves its mkcert certificate.
-      docker run --rm --network ${GOSITE_NETWORK} \
-        --entrypoint sh minio/mc:latest \
-        -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --insecure \
-            && mc mb -p local/assets \
-            && mc anonymous set download local/assets" \
-        >/dev/null 2>&1 || true
+      _infra_ensure_bucket
 
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
       ok "Redis     -> ${GOSITE_BIND_ADDRESS}:${GOSITE_REDIS_PORT}"
@@ -406,12 +441,7 @@ cmd_infra() {
       _infra_compose up -d --force-recreate
 
       # Ensure the assets bucket exists and has a public-read policy.
-      docker run --rm --network ${GOSITE_NETWORK} \
-        --entrypoint sh minio/mc:latest \
-        -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --insecure \
-            && mc mb -p local/assets \
-            && mc anonymous set download local/assets" \
-        >/dev/null 2>&1 || true
+      _infra_ensure_bucket
 
       ok "Infrastructure configs repaired and services recreated."
       ;;

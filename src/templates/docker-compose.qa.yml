@@ -16,7 +16,10 @@
 #   MONGO_USER              MongoDB user
 #   MONGO_PASSWORD          MongoDB password
 #   REDIS_URL               MUST use a different database index than prod,
-#                           e.g. redis://:pass@redis-host:6379/1
+#                           e.g. redis://:pass@redis-host:6379/2 - and NEVER 1:
+#                           cockpit/config.php pins Cockpit's memory there,
+#                           keyed by MONGO_DB, so a QA purge of "__PROJECT__:*" on
+#                           database 1 deletes production's API key registry.
 #   COCKPIT_MEMORY_SERVER   e.g. redis://:pass@redis-host:6379
 #
 # Optional: MONGO_DB (defaults to __PROJECT__-qa), MONGO_PORT (27017).
@@ -84,7 +87,7 @@ services:
       #
       # "-qa-web" satisfies both: distinct from the service name here, and
       # distinct from the "-app" production uses.
-      - 'traefik.http.routers.__PROJECT__-qa-web.rule=Host(`${SERVICE_FQDN_APP:?set SERVICE_FQDN_APP to the QA app domain, e.g. qa.example.com}`)'
+      - traefik.http.routers.__PROJECT__-qa-web.rule=Host(`${SERVICE_FQDN_APP}`)
       - traefik.http.routers.__PROJECT__-qa-web.entrypoints=https
       - traefik.http.routers.__PROJECT__-qa-web.tls=true
       - traefik.http.routers.__PROJECT__-qa-web.tls.certresolver=letsencrypt
@@ -158,7 +161,7 @@ services:
       - traefik.enable=true
       # Same two constraints as the app above: not the compose service name,
       # and not production's router name.
-      - 'traefik.http.routers.__PROJECT__-qa-cmsweb.rule=Host(`${SERVICE_FQDN_CMS:?set SERVICE_FQDN_CMS to the QA CMS domain, e.g. cms.qa.example.com}`)'
+      - traefik.http.routers.__PROJECT__-qa-cmsweb.rule=Host(`${SERVICE_FQDN_CMS}`)
       - traefik.http.routers.__PROJECT__-qa-cmsweb.entrypoints=https
       - traefik.http.routers.__PROJECT__-qa-cmsweb.tls=true
       - traefik.http.routers.__PROJECT__-qa-cmsweb.tls.certresolver=letsencrypt

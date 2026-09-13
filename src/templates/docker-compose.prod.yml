@@ -9,9 +9,11 @@
 # Required variables in Coolify:
 #   SERVICE_FQDN_APP        e.g. __PROJECT__.example.com
 #   SERVICE_FQDN_CMS        e.g. cms.__PROJECT__.example.com
-#                           Both are MANDATORY and the stack refuses to start
-#                           without them - an unset one used to render an empty
-#                           Traefik Host() rule and 502 the site silently.
+#                           Coolify generates both. Referenced ONLY as a bare
+#                           ${SERVICE_FQDN_APP} inside the Traefik rule: Coolify
+#                           recognises its magic variables by that exact form,
+#                           so `${SERVICE_FQDN_APP:?...}` or listing the variable
+#                           under `environment:` stops the domain from resolving.
 #                           For several domains on the app, set SERVICE_FQDN_APP
 #                           to one of them and add the rest in Coolify's domain
 #                           field.
@@ -45,7 +47,6 @@ services:
     environment:
       - APP_ENV=production
       - PORT=8080
-      - SERVICE_FQDN_APP
       # Page-cache keys are compiled-in constants prefixed "__PROJECT__:" (see
       # internal/handlers and internal/seo). They do NOT vary by environment, so
       # two environments sharing one Redis database would read and overwrite
@@ -66,12 +67,12 @@ services:
       - coolify.managed=true
       - coolify.image=true
       - traefik.enable=true
-      # `:?` and not a bare ${SERVICE_FQDN_APP}: when the variable is unset,
-      # Coolify's magic-variable substitution yields an empty string, Traefik
-      # registers Host(``) - a router that matches nothing - and the site 502s
-      # with no error anywhere explaining why. This fails the deploy instead,
-      # naming the variable to set.
-      - 'traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP:?set SERVICE_FQDN_APP to the app domain, e.g. example.com}`)'
+      # A bare ${SERVICE_FQDN_APP}, deliberately. 0.51.0 wrote `${SERVICE_FQDN_APP:?...}`
+      # to fail the deploy on an unset domain, and listed the variable under
+      # environment: - and neither works on Coolify, which only recognises its
+      # magic variables in this exact form. Every project deployed from that
+      # template had to have both removed by hand.
+      - traefik.http.routers.__PROJECT__-app.rule=Host(`${SERVICE_FQDN_APP}`)
       - traefik.http.routers.__PROJECT__-app.entrypoints=https
       - traefik.http.routers.__PROJECT__-app.tls=true
       - traefik.http.routers.__PROJECT__-app.tls.certresolver=letsencrypt
@@ -145,7 +146,7 @@ services:
     labels:
       - coolify.managed=true
       - traefik.enable=true
-      - 'traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS:?set SERVICE_FQDN_CMS to the CMS domain, e.g. cms.example.com}`)'
+      - traefik.http.routers.__PROJECT__-cms.rule=Host(`${SERVICE_FQDN_CMS}`)
       - traefik.http.routers.__PROJECT__-cms.entrypoints=https
       - traefik.http.routers.__PROJECT__-cms.tls=true
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
