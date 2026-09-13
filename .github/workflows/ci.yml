@@ -124,7 +124,10 @@ jobs:
           trap cleanup EXIT
 
           gosite infra up
-          gosite create "${project}" -y
+          # create makes a thin site. Build it against this checkout's core/,
+          # not a published core/vX.Y.Z: the tag for the version under test
+          # does not exist until after this passes.
+          GOSITE_CORE_DEV="${GITHUB_WORKSPACE}/core" gosite create "${project}" -y
           gosite start "${project}"
 
           # The app publishes its container port on a host port recorded in

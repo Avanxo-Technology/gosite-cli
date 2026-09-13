@@ -1,0 +1,194 @@
+/*
+ * The cookie banner.
+ *
+ * A file rather than inline styles, for the same reason the configuration is a
+ * JSON block rather than generated JavaScript: no inline anything, so a
+ * Content-Security-Policy stays possible.
+ *
+ * Everything is namespaced under .consent and nothing here is a global rule, so
+ * dropping this into a project cannot restyle the site around it. It uses no
+ * framework, so the plain and tailwind flavors share one file.
+ */
+
+.consent {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  /* System stack: the banner must render before a webfont arrives, since it is
+     the first thing a visitor is asked to read. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.consent__panel {
+  width: 100%;
+  max-width: 40rem;
+  box-sizing: border-box;
+  padding: 1.25rem;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #1a1a1a;
+  /* A real shadow rather than a border: the banner sits over content and has
+     to read as being in front of it. */
+  box-shadow: 0 10px 40px rgb(0 0 0 / 25%);
+}
+
+.consent__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.consent__body {
+  margin: 0 0 0.75rem;
+}
+
+.consent__policy {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  color: #1a56db;
+  text-decoration: underline;
+}
+
+.consent__categories {
+  margin: 0 0 1rem;
+  border-top: 1px solid #e5e5e5;
+}
+
+.consent__category {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.consent__category input {
+  /* 1.15rem rather than the default: the checkbox is the control the whole
+     dialog exists for, and the default is a small target on a phone. */
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.15rem 0 0;
+  flex: 0 0 auto;
+}
+
+.consent__category input:disabled {
+  /* Necessary is shown as on and not editable. Dimmed, not hidden: the visitor
+     should see everything that runs, including what they cannot refuse. */
+  opacity: 0.55;
+}
+
+.consent__category-name {
+  display: block;
+  font-weight: 600;
+}
+
+.consent__category-info {
+  margin: 0.15rem 0 0;
+  color: #555;
+  font-size: 0.875rem;
+}
+
+.consent__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.consent__button {
+  padding: 0.55rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  /* 44px of touch target, which is the smallest a control should be on a
+     phone - and this one is shown to every visitor on every device. */
+  min-height: 44px;
+}
+
+/*
+ * Accept and reject are the same size and the same weight on purpose.
+ *
+ * A refusal that is smaller, quieter or further away than an acceptance is not
+ * a free choice, and several supervisory authorities have said exactly that.
+ * If this ever needs restyling, that symmetry is the part to keep.
+ */
+.consent__button--primary {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.consent__button--secondary {
+  background: #fff;
+  color: #1a1a1a;
+  border-color: #1a1a1a;
+}
+
+.consent__button--quiet {
+  background: transparent;
+  color: #555;
+  border-color: transparent;
+  text-decoration: underline;
+  /* Preferences is the only control that may be quieter: it opens a choice
+     rather than making one. */
+  margin-right: auto;
+}
+
+.consent__button:focus-visible {
+  /* Never remove this. The dialog traps focus, so a visitor navigating by
+     keyboard with no visible focus ring would be stuck in an invisible box. */
+  outline: 2px solid #1a56db;
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .consent__panel {
+    background: #17171a;
+    color: #f2f2f2;
+  }
+
+  .consent__categories,
+  .consent__category {
+    border-color: #333;
+  }
+
+  .consent__category-info {
+    color: #aaa;
+  }
+
+  .consent__policy {
+    color: #8ab4f8;
+  }
+
+  .consent__button--primary {
+    background: #f2f2f2;
+    color: #17171a;
+  }
+
+  .consent__button--secondary {
+    background: transparent;
+    color: #f2f2f2;
+    border-color: #f2f2f2;
+  }
+
+  .consent__button--quiet {
+    color: #aaa;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .consent__panel {
+    animation: consent-in 160ms ease-out;
+  }
+
+  @keyframes consent-in {
+    from { transform: translateY(0.5rem); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+}

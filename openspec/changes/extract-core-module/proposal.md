@@ -12,7 +12,7 @@
 - Make the Cockpit REST client the only way core and sites read content. There is no direct Mongo reader.
 - **BREAKING** (for newly created sites only): `gosite create` generates a thin site with `main.go`, `site/`, `theme/`, `gosite.yml` and a `go.mod` that requires the core module, instead of copying `internal/`.
 - `gosite addons add/remove/list` edit and read the `addons` list in `gosite.yml`. The Go half of each addon becomes a package inside the core module that is enabled by that list. The PHP half is installed into the CMS image at the core version.
-- `gosite sync` generates compose files, Dockerfiles and the core part of `cockpit/config.php` from `gosite.yml`. Local changes go in override files that sync never touches.
+- A new `gosite generate` (thin sites only; the removed `gosite sync` stays removed) generates compose files, Dockerfiles and the core part of `cockpit/config.php` from `gosite.yml`. Local changes go in override files that sync never touches.
 - Add a deprecation policy (a slot, field or option keeps working and logs a warning for at least one minor version before removal) and a `gositetest` contract-test helper.
 - Existing sites keep working with no change. Moving them is a separate change (`migrate-sites-to-core-module`).
 

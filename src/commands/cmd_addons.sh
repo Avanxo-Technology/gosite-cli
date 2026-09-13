@@ -110,6 +110,8 @@ _addons_parse_args() {
 _addons_add() {
   require_dependencies
   source "${GOSITE_ROOT}/lib/templates.sh"
+  source "${GOSITE_ROOT}/lib/siteyml.sh"
+  source "${GOSITE_ROOT}/lib/thin.sh"
   source "${GOSITE_ROOT}/lib/manifest.sh"
 
   _addons_parse_args "$@"
@@ -123,6 +125,11 @@ _addons_add() {
   done
 
   local dir; dir="$(resolve_project_dir "${ADDON_PROJECT}")"
+  if thin_is_project "${dir}"; then
+    # shellcheck disable=SC2086 # ADDON_NAMES is a space-separated list of names
+    _addons_thin_update "${dir}" add ${ADDON_NAMES}
+    return
+  fi
   manifest_ensure_adopted "${dir}"
 
   _addons_preflight "${dir}" "${ADDON_NAMES}" || return 1
@@ -179,6 +186,8 @@ _addons_preflight() {
 _addons_remove() {
   require_dependencies
   source "${GOSITE_ROOT}/lib/templates.sh"
+  source "${GOSITE_ROOT}/lib/siteyml.sh"
+  source "${GOSITE_ROOT}/lib/thin.sh"
   source "${GOSITE_ROOT}/lib/manifest.sh"
 
   _addons_parse_args "$@"
@@ -192,6 +201,11 @@ _addons_remove() {
   done
 
   local dir; dir="$(resolve_project_dir "${ADDON_PROJECT}")"
+  if thin_is_project "${dir}"; then
+    # shellcheck disable=SC2086 # ADDON_NAMES is a space-separated list of names
+    _addons_thin_update "${dir}" remove ${ADDON_NAMES}
+    return
+  fi
 
   local lower removed=0
   for one in ${ADDON_NAMES}; do
@@ -242,6 +256,8 @@ _addons_remove() {
 
 _addons_list() {
   source "${GOSITE_ROOT}/lib/templates.sh"
+  source "${GOSITE_ROOT}/lib/siteyml.sh"
+  source "${GOSITE_ROOT}/lib/thin.sh"
 
   _addons_parse_args "$@"
 
@@ -265,6 +281,12 @@ _addons_list() {
 
     if _addons_is_builtin "${name}"; then
       status="built-in"
+    elif [[ -n "${dir}" ]] && thin_is_project "${dir}"; then
+      if siteyml_list "${dir}/gosite.yml" addons | grep -qix "${name}"; then
+        status="enabled"
+      else
+        status="available"
+      fi
     elif [[ -n "${dir}" && -d "${dir}/cockpit/addons/${name}" ]]; then
       status="installed"
     else
@@ -272,12 +294,64 @@ _addons_list() {
     fi
 
     extra=""
-    addon_has_overlay "${name}" && extra=" - also installs application pages"
+    if [[ -n "${dir}" ]] && thin_is_project "${dir}"; then
+      : # thin sites carry no addon files; both halves come from gosite
+    elif addon_has_overlay "${name}"; then
+      extra=" - also installs application pages"
+    fi
 
     printf '  %-14s %-11s %s\n' "${name}" "${status}" "${extra}"
   done < <(_addons_available)
 
   printf '\nAdd one with: gosite addons add <name>%s\n' "${ADDON_PROJECT:+ ${ADDON_PROJECT}}"
+}
+
+# Thin sites: enabling an addon is one line in gosite.yml. Nothing is copied or
+# deleted - the Go half is in the core module and the Cockpit half is in the
+# CMS image - so the change is the list, the regenerated config.core.php that
+# tells Cockpit which addons to skip, and a rebuild.
+_addons_thin_update() {
+  local dir="$1" mode="$2"; shift 2
+  local file="${dir}/gosite.yml" current=() next=() name one keep changed=0
+
+  while IFS= read -r name; do current+=("${name}"); done < <(siteyml_list "${file}" addons)
+
+  if [[ "${mode}" == "add" ]]; then
+    next=("${current[@]+"${current[@]}"}")
+    for one in "$@"; do
+      if printf '%s\n' "${current[@]+"${current[@]}"}" | grep -qix "${one}"; then
+        warn "${one} is already enabled in $(basename "${dir}")."
+        continue
+      fi
+      next+=("${one}"); changed=1
+      ok "Enabled ${one} in gosite.yml"
+    done
+  else
+    for name in "${current[@]+"${current[@]}"}"; do
+      keep=1
+      for one in "$@"; do
+        [[ "$(printf '%s' "${name}" | tr '[:upper:]' '[:lower:]')" == "$(printf '%s' "${one}" | tr '[:upper:]' '[:lower:]')" ]] && keep=0
+      done
+      if [[ "${keep}" -eq 1 ]]; then next+=("${name}"); else changed=1; ok "Disabled ${name} in gosite.yml"; fi
+    done
+    for one in "$@"; do
+      printf '%s\n' "${current[@]+"${current[@]}"}" | grep -qix "${one}" || warn "${one} is not enabled in $(basename "${dir}")."
+    done
+  fi
+
+  [[ "${changed}" -eq 1 ]] || return 0
+
+  siteyml_set_list "${file}" addons "${next[@]+"${next[@]}"}"
+  thin_generate "${dir}" >/dev/null
+
+  # Cockpit caches which addons are registered; without clearing it the change
+  # is invisible until the cache expires.
+  rm -f "${dir}/cockpit-storage/cache/modules.cache.php" \
+        "${dir}/cockpit-storage/cache/addons.cache.php"
+
+  [[ "${mode}" == "remove" ]] && warn "Content the addon created is left untouched: its models and entries are still in the database, and removing them is a data decision, not an install one."
+  warn "Rebuild both images for the change to take effect - restarting is not enough:"
+  printf '    gosite restart %s --build\n' "$(basename "${dir}")"
 }
 
 # Says what has to be rebuilt for the change to be visible. Addons are baked

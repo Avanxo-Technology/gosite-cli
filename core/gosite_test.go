@@ -59,7 +59,9 @@ func newTestServerCMS(t *testing.T, site App, cmsHandler http.HandlerFunc, opts 
 	t.Setenv("GOSITE_PROJECT", "demo")
 	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/0")
 	t.Setenv("COCKPIT_URL", cms.URL)
-	t.Setenv("APP_ENV", "development")
+	if os.Getenv("APP_ENV") == "" {
+		t.Setenv("APP_ENV", "development")
+	}
 	if os.Getenv("GOSITE_CONFIG") == "" {
 		t.Setenv("GOSITE_CONFIG", filepath.Join(t.TempDir(), "none.yml"))
 	}
@@ -296,5 +298,49 @@ func TestUnknownAddonFailsStartup(t *testing.T) {
 	_, err := New(&testSite{}, WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	if err == nil || !strings.Contains(err.Error(), `"Blgo"`) || !strings.Contains(err.Error(), "Blog") {
 		t.Fatalf("err = %v, want it to name the unknown addon and the library", err)
+	}
+}
+
+// A cached page builds once, is served from cache after that, and a purge -
+// even one naming a single model - makes the next request build it again.
+func TestCachedRenderBuildsOnceUntilPurge(t *testing.T) {
+	t.Setenv("APP_ENV", "production") // development bypasses the cache
+	t.Setenv("COCKPIT_API_TOKEN", "secret")
+	theme := fstest.MapFS{
+		"layout.html":     {Data: []byte(`{{define "layout"}}{{template "gosite:head" .}}{{template "gosite:body-start" .}}{{template "content" .}}{{template "gosite:body-end" .}}{{end}}`)},
+		"pages/news.html": {Data: []byte(`{{define "content"}}build {{.Data.N}}` + strings.Repeat("<p>news</p>", 200) + `{{end}}`)}, // over the cache's minimum render size
+	}
+	var builds int
+	base := &testSite{}
+	base.routes = func(r Router) {
+		r.GET("/news", func(c *Context) error {
+			return r.CachedRender(c, "news", func(ctx context.Context) (Page, error) {
+				builds++
+				return Page{Data: map[string]any{"N": builds}}, nil
+			})
+		})
+	}
+	s, _ := newTestServer(t, base, WithTheme(theme))
+
+	first := do(t, s, http.MethodGet, "/news", "")
+	second := do(t, s, http.MethodGet, "/news", "")
+	if builds != 1 || !strings.Contains(second.Body.String(), "build 1") {
+		t.Fatalf("builds = %d, second body %q; want one build served twice", builds, second.Body.String())
+	}
+	if first.Header().Get("X-Cache") != "MISS" || second.Header().Get("X-Cache") != "HIT" {
+		t.Errorf("X-Cache = %q then %q, want MISS then HIT", first.Header().Get("X-Cache"), second.Header().Get("X-Cache"))
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/cache/purge", strings.NewReader(`{"model":"news","id":"1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Api-Key", "secret")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("purge: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if body := do(t, s, http.MethodGet, "/news", "").Body.String(); builds != 2 || !strings.Contains(body, "build 2") {
+		t.Fatalf("after purge: builds = %d, body %q", builds, body)
 	}
 }

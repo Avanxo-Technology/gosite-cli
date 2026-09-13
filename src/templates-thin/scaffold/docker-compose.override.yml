@@ -1,0 +1,10 @@
+# Local changes to the development stack. `gosite generate` rewrites
+# docker-compose.yml but never this file, and `gosite start` merges it in.
+#
+# Example: an extra environment variable for the app.
+#   services:
+#     app:
+#       environment:
+#         FEATURE_FLAG: "on"
+
+services: {}

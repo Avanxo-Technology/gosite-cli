@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -92,5 +93,29 @@ func TestAssetCacheHeaders(t *testing.T) {
 				t.Errorf("Cache-Control = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Core's consent and analytics scripts come from the module, not from a copy
+// in the site's static/ that would drift from the partials that link to them.
+func TestCoreAssetsServedFromModule(t *testing.T) {
+	e := echo.NewWithConfig(echo.Config{
+		Router: echo.NewRouter(echo.RouterConfig{AutoHandleHEAD: true, AllowOverwritingRoute: true}),
+	})
+	mountCoreAssets(e)
+
+	for path, wantType := range map[string]string{
+		"/static/js/analytics/consent.js":   "javascript",
+		"/static/js/analytics/analytics.js": "javascript",
+		"/static/css/consent.css":           "text/css",
+	} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK || rec.Body.Len() == 0 {
+			t.Errorf("%s: status %d, %d bytes", path, rec.Code, rec.Body.Len())
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, wantType) {
+			t.Errorf("%s: Content-Type %q, want %s", path, ct, wantType)
+		}
 	}
 }

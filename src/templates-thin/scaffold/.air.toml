@@ -1,0 +1,20 @@
+# air - hot reload for local development inside the dev container.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd        = "go build -o ./tmp/main ."
+  entrypoint = "./tmp/main"
+  delay    = 300
+  include_ext  = ["go", "html", "css", "js", "yml"]
+  exclude_dir  = ["tmp", "static/vendor", ".git", "cockpit-storage", "cockpit"]
+  exclude_regex = ["_test\\.go"]
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = "1s"
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

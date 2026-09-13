@@ -1,0 +1,10 @@
+.git
+.gitignore
+tmp/
+cockpit-storage/
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+deploy/
+README.md

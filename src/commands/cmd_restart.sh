@@ -35,7 +35,7 @@ cmd_restart() {
   info "Restarting '${GOSITE_PROJECT}'"
   local args=(up -d --force-recreate)
   [[ "${build}" -eq 1 ]] && args+=(--build)
-  compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" "${args[@]}"
+  project_compose "${dir}" "${args[@]}"
 
   if [[ -n "${GOSITE_APP_DOMAIN:-}" ]]; then
     ok "App -> https://${GOSITE_APP_DOMAIN}"

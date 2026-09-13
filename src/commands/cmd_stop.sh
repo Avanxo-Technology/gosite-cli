@@ -14,6 +14,6 @@ cmd_stop() {
   source "${dir}/${GOSITE_MARKER}"
 
   info "Stopping '${GOSITE_PROJECT}'"
-  compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" down
+  project_compose "${dir}" down
   ok "'${GOSITE_PROJECT}' stopped."
 }

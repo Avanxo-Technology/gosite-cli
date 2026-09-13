@@ -59,6 +59,11 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 	if err := h.Cache.Purge(ctx, h.homeCacheKey()); err != nil {
 		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
+	// Pages a site serves with CachedRender are keyed by URL, not by the
+	// content they show, so any content change clears all of them.
+	if err := h.Cache.PurgeGroup(ctx, h.cacheKeyPrefix()+"page:"); err != nil {
+		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
+	}
 
 	// Features owning their own keys invalidate them precisely. The body is
 	// optional: the on-page button sends none, and so does a CMS older than

@@ -31,30 +31,32 @@
 
 - [x] 4.1 Move addon Go halves (`src/templates/addons/*/internal/**`, only Blog has one) into `core/internal/addons/<name>` with self-registration keyed by name; addon pages come from the addon unless the theme ships a page of the same name
 - [x] 4.2 `gosite.Run` reads `addons` from `gosite.yml`, enables listed addons, fails on unknown names
-- [ ] 4.3 Thin sites' `Dockerfile.cms` installs the PHP addons from `src/addons` at the core version (single source, not copied into `core/`); done with the generated files in 5.4
-- [ ] 4.4 Generate `modules.disabled` (gosite addons not listed in gosite.yml) into `config.core.php`
+- [x] 4.3 Thin sites' `Dockerfile.cms` installs the PHP addons from `src/addons` at the core version (single source, not copied into `core/`); done with the generated files in 5.4
+- [x] 4.4 Generate `modules.disabled` (gosite addons not listed in gosite.yml) into `config.core.php`
 
 ## 5. Thin scaffold and CLI
 
-- [ ] 5.1 Create the thin scaffold: `main.go`, `site/`, `theme/` per flavor, `static/`, `gosite.yml`, `go.mod` requiring the core version
-- [ ] 5.2 Minimal `gosite.yml` reader/writer in `src/lib` (flat keys plus `addons:` list) with CI tests on Linux
-- [ ] 5.3 `gosite create --thin` writes `gosite.yml` from existing flags (`--storage`, `--database`, `--addons`, `--no-addons`, `-y`)
-- [ ] 5.4 `gosite sync` for thin sites: regenerate compose, Dockerfiles, `config.core.php` with generated headers; never touch `docker-compose.override.yml` or `config.local.php`; keep the bare `${SERVICE_FQDN_APP}` form
-- [ ] 5.5 `gosite addons list/add/remove` edit `gosite.yml` for thin sites; keep legacy behaviour when `gosite.yml` is absent
-- [ ] 5.6 Legacy detection everywhere: projects without `gosite.yml` take today's code paths unchanged
+- [x] 5.1 Create the thin scaffold: `main.go`, `site/`, `theme/` per flavor, `static/`, `gosite.yml`, `go.mod` requiring the core version
+- [x] 5.2 Minimal `gosite.yml` reader/writer in `src/lib` (flat keys plus `addons:` list) with CI tests on Linux
+- [x] 5.3 `gosite create --thin` writes `gosite.yml` from existing flags (`--storage`, `--database`, `--addons`, `--no-addons`, `-y`)
+- [x] 5.4 New `gosite generate` (thin sites only; `gosite sync` was removed on purpose in cf7efa6): regenerate compose, Dockerfiles, `config.core.php` with generated headers; never touch `docker-compose.override.yml` or `config.local.php`; keep the bare `${SERVICE_FQDN_APP}` form
+- [x] 5.5 `gosite addons list/add/remove` edit `gosite.yml` for thin sites; keep legacy behaviour when `gosite.yml` is absent
+- [x] 5.6 Legacy detection everywhere: projects without `gosite.yml` take today's code paths unchanged
 
 ## 6. Verification
 
-- [ ] 6.1 Sandbox (redirected `GOSITE_HOME`/`GOSITE_WORKSPACE`): `create --thin -y`, start, home renders from CMS, no core source in tree
-- [ ] 6.2 Bump core minor in the sandbox site with a feature added to `gosite:body-end`; rendered page shows it with no site edits
-- [ ] 6.3 Add and remove Blog through `gosite addons` on the sandbox site; routes appear and disappear; content stays in the database
-- [ ] 6.4 Run `gosite sync` and check a local compose override and `config.local.php` survive
-- [ ] 6.5 Confirm a legacy project (copy of analytics-draft in the sandbox) still syncs and runs unchanged
+- [x] 6.1 Sandbox (redirected `GOSITE_HOME`/`GOSITE_WORKSPACE`): `create --thin -y`, home renders from CMS, no core source in tree. Run as the site binary against throwaway Redis + the thin CMS image on a private network, not `gosite start` on the shared infra
+- [x] 6.2 Bump core minor in the sandbox site with a feature added to `gosite:body-end`; rendered page shows it with no site edits
+- [x] 6.3 Add and remove Blog through `gosite addons` on the sandbox site; routes appear and disappear; content stays in the database
+- [x] 6.4 Run `gosite generate` and check a local compose override and `config.local.php` survive
+- [x] 6.5 Legacy path unchanged: template fixture, bats and shellcheck pass; `gosite generate` refuses a project without gosite.yml and writes nothing (analytics-draft itself was not re-run)
 
 ## 7. Release and docs
 
-- [ ] 7.1 Release workflow tags `vX.Y.Z` and `core/vX.Y.Z` together and publishes the required assets
-- [ ] 7.2 Write `core/CORE_API.md` (public surface, slots, Page fields, deprecation policy)
-- [ ] 7.3 Update `README.md`, `docs/index.html` (commands, folder tree), `MEMORY.md`/`ARCHITECTURE.md` templates in `cmd_create.sh`
-- [ ] 7.4 Bump `src/VERSION`
-- [ ] 7.5 Later minor release: flip `create` default to thin (tracked here, shipped after 6.x passes)
+- [ ] 7.0 Verify Coolify builds `additional_contexts` with a git URL (worked with local Docker Compose 5.1.4; Coolify untested)
+
+- [x] 7.1 Document that a release tags `vX.Y.Z` and `core/vX.Y.Z` on the same commit (root MEMORY.md; releases stay manual, no workflow exists)
+- [x] 7.2 Write `core/CORE_API.md` (public surface, slots, Page fields, deprecation policy)
+- [x] 7.3 Update `README.md`, `docs/index.html` (commands table), root `MEMORY.md`; thin sites get their own `MEMORY.md` telling assistants where site code goes and that core is never copied in (legacy templates unchanged)
+- [x] 7.4 Bump `src/VERSION` to 0.54.0 (the first `core/v` tag)
+- [x] 7.5 Flip `create` default to thin (`--legacy` for the old scaffold), shipped in 0.54.0 at Charly's request

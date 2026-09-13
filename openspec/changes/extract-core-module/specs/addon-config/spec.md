@@ -12,11 +12,11 @@ A thin site's enabled addons SHALL be the `addons` list in `gosite.yml`, and at 
 - **THEN** startup fails with an error naming the unknown addon and the available ones
 
 ### Requirement: CLI manages addons through gosite.yml
-For thin sites, `gosite addons list [project]` SHALL show gosite's addon library and which addons the project enables, `gosite addons add <name>...` SHALL add them to `gosite.yml` after checking `REQUIRES`, and `gosite addons remove <name>...` SHALL remove them from `gosite.yml`, all without copying or deleting addon source in the project.
+For thin sites, `gosite addons list [project]` SHALL show gosite's addon library and which addons the project enables, `gosite addons add <name>...` SHALL add them to `gosite.yml`, and `gosite addons remove <name>...` SHALL remove them from `gosite.yml`, all without copying or deleting addon source in the project.
 
 #### Scenario: Add an addon
 - **WHEN** a user runs `gosite addons add Forms my-site`
-- **THEN** `Forms` is appended to `addons` in `my-site/gosite.yml` and the CLI tells the user to run `gosite sync` and restart
+- **THEN** `Forms` is appended to `addons` in `my-site/gosite.yml` and the CLI tells the user to run `gosite generate` and restart
 
 #### Scenario: Remove keeps content
 - **WHEN** a user runs `gosite addons remove Blog my-site`

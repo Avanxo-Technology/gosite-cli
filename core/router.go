@@ -1,6 +1,8 @@
 package gosite
 
 import (
+	"context"
+
 	"github.com/labstack/echo/v5"
 
 	"github.com/Avanxo-Technology/gosite-cli/core/cms"
@@ -28,6 +30,11 @@ type Router interface {
 
 	// Render renders a page of the site's theme with p and writes it as HTML.
 	Render(c *Context, status int, page string, p Page) error
+
+	// CachedRender serves a page from the page cache and calls build only on
+	// a miss. Every purge clears these pages. build must not depend on who is
+	// visiting: its result is served to everyone until the next purge.
+	CachedRender(c *Context, page string, build func(ctx context.Context) (Page, error)) error
 }
 
 // routes is the registration surface shared by *echo.Echo and *echo.Group.
@@ -62,4 +69,8 @@ func (r *router) State() *State    { return r.state }
 
 func (r *router) Render(c *Context, status int, page string, p Page) error {
 	return r.server.render(c, status, page, p)
+}
+
+func (r *router) CachedRender(c *Context, page string, build func(ctx context.Context) (Page, error)) error {
+	return r.server.cachedRender(c, page, build)
 }

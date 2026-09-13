@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build output
+/app
+tmp/
+
+# CMS storage
+cockpit-storage/
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+._*
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log

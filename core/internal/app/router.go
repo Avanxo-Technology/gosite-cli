@@ -1,7 +1,12 @@
 package app
 
 import (
+	"embed"
+	"io/fs"
+	"mime"
+	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -53,6 +58,11 @@ func NewRouter(a *App, opts RouterOptions) *echo.Echo {
 		e.Use(m)
 	}
 
+	// Core's own browser assets (consent banner, analytics loader) are served
+	// from the module, at the paths core's partials link to. Registered as
+	// exact routes, so they win over a same-named file in the site's static/:
+	// a site cannot end up running an old copy of core's consent script.
+	mountCoreAssets(e)
 	e.Static("/static", "static")
 
 	// Cockpit uploads: in development with local storage they live on the host
@@ -138,4 +148,30 @@ func assetCacheHeaders() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+// coreAssets are core's browser files, served under /static/.
+//
+//go:embed assets
+var coreAssets embed.FS
+
+// mountCoreAssets registers one GET route per embedded asset.
+func mountCoreAssets(e *echo.Echo) {
+	_ = fs.WalkDir(coreAssets, "assets", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := coreAssets.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		contentType := mime.TypeByExtension(path.Ext(p))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		e.GET("/static/"+strings.TrimPrefix(p, "assets/"), func(c *echo.Context) error {
+			return c.Blob(http.StatusOK, contentType, body)
+		})
+		return nil
+	})
 }

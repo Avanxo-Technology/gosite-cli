@@ -20,10 +20,18 @@
 source "${GOSITE_ROOT}/lib/templates.sh"
 # shellcheck source=../lib/manifest.sh
 source "${GOSITE_ROOT}/lib/manifest.sh"
+# shellcheck source=../lib/siteyml.sh
+source "${GOSITE_ROOT}/lib/siteyml.sh"
+# shellcheck source=../lib/thin.sh
+source "${GOSITE_ROOT}/lib/thin.sh"
 
 cmd_create() {
   local PROJECT_NAME="" here=0 ADDONS="" INSTALL_ADDONS=0 ADDONS_PROMPT=1
   local STORAGE_PROMPT=1 DATABASE_PROMPT=1 TAILWIND_PROMPT=1
+  # Thin is the default since 0.54.0: the core is the gosite Go module the
+  # site requires, not code copied into it. --legacy keeps the old scaffold
+  # for the projects that have not been migrated yet.
+  local THIN=1
   # Tailwind is on by default but prompted; --no-tailwind swaps it for a small
   # stylesheet. Either way the generated markup is clean: no orphan utility classes.
   TAILWIND=1
@@ -34,6 +42,8 @@ cmd_create() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --here)         here=1; shift ;;
+      --thin)         THIN=1; shift ;;
+      --legacy)       THIN=0; shift ;;
       --no-tailwind)  TAILWIND=0; TAILWIND_PROMPT=0; shift ;;
       --tailwind)     TAILWIND=1; TAILWIND_PROMPT=0; shift ;;
       --addons)       INSTALL_ADDONS=1; ADDONS_PROMPT=0; [[ -n "${2:-}" ]] || fatal "--addons needs a list of addon names"; ADDONS="$2"; shift 2 ;;
@@ -46,7 +56,7 @@ cmd_create() {
       # in this position. create refusing it was the odd one out - and the
       # error it produced named every flag except the one being rejected.
       -y|--yes)       export GOSITE_ASSUME_YES=1; shift ;;
-      -*)             fatal "Unknown flag for 'create': $1 (expected -y, --here, --no-tailwind, --tailwind, --no-addons, --addons, --storage, --database)" ;;
+      -*)             fatal "Unknown flag for 'create': $1 (expected -y, --here, --thin, --legacy, --no-tailwind, --tailwind, --no-addons, --addons, --storage, --database)" ;;
       *)              PROJECT_NAME="$1"; shift ;;
     esac
   done
@@ -94,6 +104,10 @@ cmd_create() {
 
   info "Creating project '${PROJECT_NAME}'"
   debug "module=${PROJECT_MODULE} app=${APP_PORT} cms=${CMS_PORT}"
+
+  if [[ "${THIN}" -eq 1 ]]; then
+    _create_thin "${PROJECT_DIR}"
+  else
 
   mkdir -p "${PROJECT_DIR}"/{cmd/server,internal/{app,config,cache,cms,handlers,views/{pages,components}},cockpit/addons,static,deploy}
   # Keep static/ in Git so the production COPY stage always finds it.
@@ -147,12 +161,14 @@ cmd_create() {
   # written by _write_builtin_addons.
   [[ "${INSTALL_ADDONS}" -eq 1 ]] && _install_addons "${PROJECT_DIR}" "${ADDONS}"
 
+  # Record what gosite just wrote, so the files a project later edits can be
+  # told apart from the ones it never touched. Thin sites need no manifest:
+  # every generated file carries its own header instead.
+  manifest_write_from_dir "${PROJECT_DIR}"
+  fi
+
   # Issue the local TLS certificate covering <name>.test and cms.<name>.test.
   ensure_project_cert "${PROJECT_NAME}" || true
-
-  # Record what gosite just wrote, so future syncs can tell untouched files
-  # apart from hand-edited ones.
-  manifest_write_from_dir "${PROJECT_DIR}"
 
   # Index the project so it can be reached by name from any directory.
   registry_register "${PROJECT_DIR}"
@@ -172,6 +188,58 @@ $(if docker ps -q --filter name=gosite-proxy 2>/dev/null | grep -q .; then
 fi)
 $(printf "${C_DIM}Production: push to Git and point Coolify at docker-compose.prod.yml.${C_NC}")
 EOF
+}
+
+# -----------------------------------------------------------------------------
+# A thin site: gosite.yml, the site-owned scaffold, the generated files, and
+# go.sum against the core module. Nothing of core is copied in.
+#
+# GOSITE_CORE_DEV=<path to core/> builds against a local checkout instead of a
+# published core version: go.mod gets a replace to that path and the override
+# compose mounts it at the same path inside the dev container. For developing
+# gosite itself only - the production image cannot see that path.
+_create_thin() {
+  local dir="$1" sub addon addons=()
+  mkdir -p "${dir}"
+  for sub in cache data logs tmp uploads; do
+    mkdir -p "${dir}/cockpit-storage/${sub}"
+    touch "${dir}/cockpit-storage/${sub}/.gitkeep"
+  done
+  chmod -R 0777 "${dir}/cockpit-storage"
+
+  if [[ "${INSTALL_ADDONS}" -eq 1 ]]; then
+    for addon in ${ADDONS}; do addons+=("${addon}"); done
+  fi
+  thin_write_siteyml "${dir}" "${addons[@]+"${addons[@]}"}"
+  thin_scaffold "${dir}"
+
+  # The runtime marker every other command reads (start, list, remove).
+  _copy_template_file "${GOSITE_ROOT}/templates" "${dir}" gosite.env
+  render_placeholders "${dir}/${GOSITE_MARKER}"
+
+  thin_generate "${dir}" >/dev/null
+
+  if [[ -n "${GOSITE_CORE_DEV:-}" ]]; then
+    local core
+    core="$(cd "${GOSITE_CORE_DEV}" && pwd)"
+    printf '\nreplace github.com/Avanxo-Technology/gosite-cli/core => %s\n' "${core}" >> "${dir}/go.mod"
+    cat > "${dir}/docker-compose.override.yml" <<OVERRIDE
+# Local changes to the development stack. 'gosite generate' rewrites
+# docker-compose.yml but never this file, and 'gosite start' merges it in.
+#
+# GOSITE_CORE_DEV: go.mod replaces the core module with ${core},
+# mounted here at the same path so the dev container resolves it too.
+
+services:
+  app:
+    volumes:
+      - ${core}:${core}:ro
+OVERRIDE
+    warn "Built against the local core at ${core} (GOSITE_CORE_DEV). Remove the replace from go.mod before deploying."
+  fi
+
+  assert_no_placeholders "${dir}"
+  _resolve_dependencies "${dir}"
 }
 
 # -----------------------------------------------------------------------------
