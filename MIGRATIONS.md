@@ -14,6 +14,120 @@ cut -f3 <project>/.gosite/manifest.tsv | sort -u   # a project is usually a mix
 
 ---
 
+## How to merge a project forward
+
+Learned taking six client sites to 0.53.0 in September 2026. Every point below
+is something a build, the test suite or a clean-looking merge let through.
+
+### The manifest's version is a claim, not a fact
+
+A site migrated by hand records the target version on files that were never
+brought forward: soyarnold-dev's manifest said 0.49.12 for a home page that is
+0.45.0 code. Merging against the claimed version makes every template change the
+file missed look like a deletion by the project, and the merge silently drops
+it. For each file take as base the template version that reproduces the
+manifest hash exactly; failing that, the version whose rendered file is closest
+to the project's.
+
+### Old manifests do not cover the application
+
+Manifests written before 0.44.0 track addons, compose and deploy files only -
+nothing under `internal/`. There is no drift signal for the code that matters.
+Scaffold the project twice in a sandbox, at its old version and the target, with
+the options it was created with (`.gosite.env`, plus the addons in
+`cockpit/addons`), using each tag's own `src/main.sh` and a redirected
+`GOSITE_HOME`/`GOSITE_WORKSPACE`. Normalise what differs per project - host ports
+in `docker-compose.yml`, the `sec-key` fallback in `cockpit/config.php` - and
+confirm the old scaffold reproduces the hashes the manifest did record. Then
+`git merge-file` project / old / new, file by file.
+
+### "Edited" is often just old
+
+Before resolving a conflict by hand, check whether the project's copy matches a
+version gosite shipped - against every commit, not only tags, and comparing code
+with comments stripped. On these sites Webapp was byte-identical to an untagged
+commit from `main`, Forms' helper to gosite 0.12.0, and aga-growth-dev's cache
+retry loop was the code later upstreamed from it. None of that is a local edit.
+Take the target version and keep only what matches no release.
+
+When a port of yours is still pending on the project, merge from the commit
+before it. Otherwise its adaptations fight the template's native version of the
+same feature and bury the real conflicts.
+
+### A merge with zero conflicts can still be wrong
+
+Both sides adding the same thing in different places merges cleanly and
+duplicates it. Seen in this rollout, none caught by `git merge-file`:
+
+- two `config()` methods in `Forms.php` - the CMS would not start;
+- `ErrNotFound` and `SingletonErr` declared twice in `cms.go`;
+- `categoryOf` defined twice in `analytics.js`, which JavaScript accepts;
+- `analytics-body` and `consent-link` called twice in a layout - a second
+  consent button, and GTM's noscript loaded twice.
+
+After every merge run `php -l` over `cockpit/`, build, count each
+`{{template ...}}` call in the layout, and diff the rendered page (below).
+
+### Semantics a clean build hides
+
+- **`content` versus `content.Map()`.** Template helpers that assert
+  `map[string]any` fail on the named `cms.Content` type, and every block renders
+  its fallback text with no error.
+- **`cms.Items` pages at 100.** A caller written for the old client, which
+  returned everything, silently counts only the first page.
+- **Page discovery registers every file in `pages/`.** An htmx fragment file
+  that defines no `content` block becomes a "page" and the boot probe panics.
+  Register fragments by their own template names.
+- **Mongo-direct projects** (lnequipos-v2) keep their `cms` package. Do not add
+  `internal/cms/collection.go` or the reader tests that start a REST server.
+
+### Redis keys under the project prefix are wiped by every purge
+
+The site-wide purge SCANs `<project>:*` and spares only `:stale` keys. Anything
+stored there that is not cache goes with it: ba-pow's vote limits ("one vote
+per address, ever") and aga-growth-dev's last good financial signals both did.
+Look for Redis writes outside `internal/cache` and `internal/seo`; move that
+state to a prefix the purge cannot match (`<project>-state:`) and move the
+existing keys with `RENAMENX` at startup, which keeps their TTL. Renaming the
+constants alone resets the data at deploy.
+
+### QA's REDIS_URL must never use database 1
+
+`cockpit/config.php` pins Cockpit's memory to database 1, keyed by `MONGO_DB` -
+production's API key registry is `<project>:app.api.keys` there. A QA page cache
+on database 1 of the same server purges `<project>:*` and deletes it. The
+template's own QA example currently suggests `/1`; use 2 or higher.
+
+### Forms needs its config block
+
+The Forms addon since 0.43.0 reads `trustedProxies` from the `forms` block of
+`cockpit/config.php` and defaults to 0. Behind Traefik that keys the rate
+limiter on the proxy's address - every visitor shares one bucket - and every
+submission stores the proxy IP. Several projects had no block at all. Copy the
+template's.
+
+**Upgrading Forms is data-affecting:** the first time the Forms screen opens,
+`ip` and `userAgent` are cleared from submissions older than
+`personal_data_retention` (90 days by default). Decide before deploying; set it
+to `0` to keep them.
+
+### The stock tests assume the demo site
+
+The template's view tests render with the scaffold's data. A project's layout
+that indexes its own keys (`.Chat`, `.Globals`, a typed `.SEO`) fails them on
+test data alone. Add the keys, or run the SEO render test on `home` only -
+`NewRenderer`'s boot probe already executes every page with the data it needs.
+Adapt what they check, never what they protect: check for the GTM fallback, not
+for any `<noscript>` a layout carries.
+
+### Prove the new build is the one answering
+
+Diffing before and after proves nothing if the old container is still serving.
+Check for something only the new code does - a response header the site did not
+send before, or a canary Redis key that only the new purge removes.
+
+---
+
 ## → 0.48.0 — the Webapp addon and CMS-driven SEO
 
 The largest migration so far. It removes six addons, adds four routes, and
@@ -375,7 +489,9 @@ curl -sS https://<site>/ > before.html   # and the blog index, and one article
 diff <(sed -n '/<body/,/<\/body>/p' before.html) <(sed -n '/<body/,/<\/body>/p' after.html)
 ```
 
-The body must be **byte-identical**. The head must only gain tags. On aga-growth-dev this caught three regressions that the build and the test
+The body must be **byte-identical**. The head must only gain tags. Compare
+the body ignoring blank lines - template comments and `{{if}}` guards leave
+whitespace that does not render. On aga-growth-dev this caught three regressions that the build and the test
 suite did not: `lang="es"` becoming `en`, blog posts losing `og:type="article"`,
 and `og:image` built without a separator. On avanxo-dev it caught two more: a
 `robots.txt` that lost its `Sitemap:` line, and every solution page serving the
@@ -385,3 +501,6 @@ A project that already has hand-written SEO needs its values **moved into the
 CMS**, not just the pipeline swapped underneath them. Read the titles,
 descriptions and canonicals out of the Go registry, write them to `seoPages`,
 publish them, and only then compare.
+
+In the 0.53.0 rollout the body diff caught the duplicated consent button on
+aga-growth-dev, which the build, `go vet` and every test package passed.
