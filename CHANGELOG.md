@@ -34,6 +34,13 @@ Two things the swap would otherwise have broken, both silently:
   `alias set`, so `mc mb` failed on the mkcert certificate. The output is
   discarded, so the assets bucket would simply never have been created. Every
   mc command now passes `--insecure`.
+- **A hang with no output.** On a machine without mkcert MinIO serves plain
+  HTTP, and current `mc` retries a wrong-scheme request instead of failing. The
+  bucket step asked over HTTPS unconditionally with its output discarded, so
+  `gosite infra up` sat silent - in CI, for the length of the job. The scheme
+  now follows whether the certificate exists, and the step is bounded by a
+  60-second timeout. The healthcheck tries both schemes, each bounded, because
+  the compose file is written before the certificate is issued.
 
 Existing installations keep their data: the volume and the credentials are
 the same. `gosite infra up` recreates the container on the new image.
