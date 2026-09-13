@@ -311,6 +311,19 @@ compose() {
   fi
 }
 
+# Runs compose for a project stack. A thin site (one with gosite.yml) also
+# loads its docker-compose.override.yml, which holds the local changes that
+# `gosite generate` must never overwrite. Compose only merges that file on its
+# own when no -f is given, and every call here names the main file.
+project_compose() {
+  local dir="$1"; shift
+  local files=(-f "${dir}/docker-compose.yml")
+  if [[ -f "${dir}/gosite.yml" && -f "${dir}/docker-compose.override.yml" ]]; then
+    files+=(-f "${dir}/docker-compose.override.yml")
+  fi
+  compose -p "${GOSITE_PROJECT}" "${files[@]}" --project-directory "${dir}" "$@"
+}
+
 # Wraps a URL in an OSC 8 terminal hyperlink when stdout is a TTY, so the
 # rendered text is clickable (iTerm2, Kitty, gnome-terminal, VS Code, ...).
 # Without a TTY it prints the label unchanged.

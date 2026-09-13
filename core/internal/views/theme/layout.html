@@ -1,0 +1,35 @@
+{{/*
+  Base HTML document: CSS reset, Tailwind CSS, htmx and Alpine.js.
+  Every page fills in the "content" block.
+
+  The three gosite:* slots are the contract with core. Core puts the title,
+  SEO tags, favicon, consent and analytics into them, and whatever a later core
+  version adds, so this file never has to change for a core upgrade. Call each
+  slot exactly once.
+
+  The libraries are loaded from a CDN to keep local development build-free.
+  Before going to production, vendor them into /static so the site does not
+  depend on third-party uptime and a CSP can be tightened.
+*/}}
+{{define "layout"}}<!DOCTYPE html>
+<html lang="{{htmlLang .Path .SEOData}}" class="h-full">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	{{template "gosite:head" .}}
+	{{/* Pages may add tags to the document head */}}
+	{{block "head" .}}{{end}}
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@aprinciple/modern-reset@0.1.1/reset.min.css">
+	<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>
+	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
+	<script defer src="https://unpkg.com/alpinejs@3.15.12/dist/cdn.min.js"></script>
+	<style>[x-cloak]{display:none !important}</style>
+</head>
+<body class="h-full bg-slate-50 text-slate-900 antialiased">
+	{{template "gosite:body-start" .}}
+	<div class="mx-auto max-w-3xl px-6 py-12">
+		{{template "content" .}}
+	</div>
+	{{template "gosite:body-end" .}}
+</body>
+</html>{{end}}

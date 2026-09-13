@@ -1,0 +1,38 @@
+{{/*
+  Third-party tracking, from the integrations configured in the CMS.
+
+  There is no per-provider markup here beyond GTM's noscript fallback: which
+  bundles to fetch is decided by /static/js/analytics/analytics.js, from the
+  same JSON this block emits. Adding a provider therefore touches the CMS and
+  that one file - never this template.
+
+  Nothing from the CMS is interpolated into JavaScript. The configuration is a
+  JSON data block, so a malformed value fails a JSON.parse instead of
+  executing, and no inline executable script is needed - which keeps a future
+  CSP simple.
+
+  NEVER reach for safeHTML in this file. That is the one way to lose the
+  protection html/template gives here.
+*/}}
+
+{{define "gosite:analytics-head"}}
+{{$integrations := analyticsIntegrations}}
+{{if $integrations}}
+<script type="application/json" id="analytics-config">{{jsonData $integrations}}</script>
+<script src="https://unpkg.com/analytics@0.8.19/dist/analytics.min.js"></script>
+<script src="/static/js/analytics/analytics.js"></script>
+{{end}}
+{{end}}
+
+{{define "gosite:analytics-body"}}
+{{range analyticsIntegrations}}
+  {{/* GTM is the one provider needing markup a script cannot supply: a
+       fallback for visitors without JavaScript. */}}
+  {{if eq .Provider "gtm"}}
+    {{with index .Config "containerId"}}
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id={{.}}"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+    {{end}}
+  {{end}}
+{{end}}
+{{end}}

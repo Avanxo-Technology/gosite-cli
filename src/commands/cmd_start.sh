@@ -44,7 +44,7 @@ cmd_start() {
   clear_cockpit_module_cache "${dir}"
 
   info "Starting '${GOSITE_PROJECT}' (air hot reload)"
-  compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" up -d --build
+  project_compose "${dir}" up -d --build
 
   _register_api_key "${dir}"
 
@@ -60,7 +60,7 @@ cmd_start() {
   printf "${C_DIM}Edit any .go/.html file and air rebuilds automatically. Logs: gosite start --logs${C_NC}\n"
 
   if [[ "${follow}" -eq 1 ]]; then
-    compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" logs -f --tail=50
+    project_compose "${dir}" logs -f --tail=50
   fi
 }
 

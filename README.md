@@ -322,6 +322,39 @@ by hand keeps its old hash on purpose.
 `docker-compose.prod.yml` was never gosite's to write and still is not: it
 carries your production overrides — extra services, replicas, healthchecks.
 
+### Thin sites: core as a Go module
+
+Since 0.54.0 `gosite create my-site` makes a site that contains **no core code**
+(`--legacy` keeps the previous layout, with the core copied in).
+The CMS client, page cache, SEO, analytics, consent and purge are the Go module
+`github.com/Avanxo-Technology/gosite-cli/core`, required in `go.mod`, so
+upgrading core is a version bump instead of a merge.
+
+```text
+my-site/
+├── main.go            # gosite.Run(site.New(), gosite.WithTheme(theme()))
+├── site/              # your routes and handlers (gosite.App)
+├── theme/             # layout.html (calls the gosite:* slots), pages/, components/
+├── static/
+├── gosite.yml         # project, ports, domains, storage, database, addons
+├── cockpit/config.php + config.local.php       # yours
+├── docker-compose.override.yml                 # yours
+└── docker-compose*.yml, deploy/, cockpit/config.core.php   # generated
+```
+
+```bash
+gosite create my-site             # thin by default; all the usual flags work
+gosite addons add Blog my-site    # one line in gosite.yml; nothing copied
+gosite generate my-site           # rewrite the generated files from gosite.yml
+```
+
+`gosite generate` only runs on thin sites and only overwrites files whose
+header says they are generated; your changes go in the override files next to
+them. Every addon ships inside the CMS image and `gosite.yml` decides which
+load. The module's contract — what a site may rely on across versions — is
+[`core/CORE_API.md`](core/CORE_API.md). Existing projects are unaffected: without
+`gosite.yml` every command behaves as before.
+
 ### Addons in an existing project
 
 Adding an addon to a project made months ago has its own command:

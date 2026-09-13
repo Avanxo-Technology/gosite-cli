@@ -1,0 +1,48 @@
+{{/*
+  The cookie banner.
+
+  Two blocks, and both are deliberately thin. The head block emits the copy as
+  a JSON data block and links the script and stylesheet; everything else - the
+  banner, the dialog, the cookie - is /static/js/analytics/consent.js. No
+  markup for the banner exists here, because it must not be visible to a
+  visitor who already decided, and the only way to know that before paint is to
+  read the cookie in JavaScript.
+
+  Nothing from the CMS is interpolated into JavaScript, and consent.js writes
+  every string with textContent. Two independent defences, the same pair the
+  analytics component relies on.
+
+  NEVER reach for safeHTML in this file, and never render the copy into markup
+  here. Both would give up the protection html/template provides.
+
+  The ORDER matters: this block goes before the analytics one in gosite:head.
+  consent.js reads the cookie synchronously, so a returning visitor's decision
+  is known before analytics.js asks for it and before the banner could flash.
+*/}}
+
+{{define "gosite:consent-head"}}
+{{$consent := consentSettings}}
+{{if $consent}}
+<link rel="stylesheet" href="/static/css/consent.css">
+<script type="application/json" id="consent-config">{{jsonData $consent}}</script>
+<script src="/static/js/analytics/consent.js"></script>
+{{end}}
+{{end}}
+
+{{/*
+  The reopen control.
+
+  Rendered only when consent is configured, because a link that opens nothing
+  is worse than no link. A project is free to put the data-consent-open
+  attribute on its own footer link instead and drop this block - the attribute
+  is the contract, not this markup.
+
+  Withdrawing consent has to be as easy as giving it, which is why this exists
+  as part of the component rather than as something each site remembers to add.
+*/}}
+{{define "gosite:consent-link"}}
+{{$consent := consentSettings}}
+{{if $consent}}
+<button type="button" data-consent-open class="consent-reopen">{{$consent.PrefsLabel}}</button>
+{{end}}
+{{end}}

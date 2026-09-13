@@ -37,6 +37,5 @@ cmd_logs() {
   fi
   [[ "${follow}" -eq 1 ]] && printf "${C_DIM}Ctrl-C to stop following.${C_NC}\n"
 
-  compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" \
-    --project-directory "${dir}" "${args[@]}"
+  project_compose "${dir}" "${args[@]}"
 }

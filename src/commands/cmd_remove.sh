@@ -39,7 +39,7 @@ cmd_remove() {
   confirm "Continue?" || { info "Aborted."; return 0; }
 
   info "Removing containers, volumes and images for '${GOSITE_PROJECT}'"
-  compose -p "${GOSITE_PROJECT}" -f "${dir}/docker-compose.yml" --project-directory "${dir}" \
+  project_compose "${dir}" \
     down --volumes --remove-orphans --rmi local || warn "Compose teardown reported errors; continuing."
   ok "Stack removed."
 

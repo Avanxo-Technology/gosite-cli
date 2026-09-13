@@ -22,6 +22,7 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   create <name>      Scaffold a new project in ${GOSITE_WORKSPACE}
                      flags: --here (cwd), --no-tailwind / --tailwind
                             --addons "A B" (specific), --no-addons (skip prompt)
+                            --legacy (copy core code into the project, pre-0.54 layout)
   start  [name]      Start a project stack (air hot reload + Cockpit)
   stop   [name]      Stop a project stack
   restart[name]      Recreate containers (--build to rebuild the image)
@@ -31,6 +32,8 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
   remove <name>      Delete a project entirely (--keep-source keeps the code)
   addons <cmd>       Install addons into an existing project
                      list | add <name>... | remove <name>...
+  generate [name]    Rewrite a thin site's compose, Dockerfiles and CMS config
+                     from gosite.yml (thin sites only)
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
@@ -82,6 +85,7 @@ dispatch() {
     shell-init)      load_command cd;     cmd_shell_init ;;
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     addons)          load_command addons; cmd_addons "$@" ;;
+    generate)        load_command generate; cmd_generate "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
     dns)             load_command dns; cmd_dns ;;
