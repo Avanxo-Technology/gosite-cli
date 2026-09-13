@@ -49,6 +49,9 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 		if err := h.Cache.PurgeAll(ctx, h.cacheKeyPrefix()); err != nil {
 			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 		}
+		if err := h.runAfterPurge(ctx); err != nil {
+			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
+		}
 		go h.warmHome()
 		return h.reply(c).Text(http.StatusOK, "purged")
 	}
@@ -66,6 +69,10 @@ func (h *Handlers) PurgeCache(c *echo.Context) error {
 		if err := hook(ctx, model, id); err != nil {
 			return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 		}
+	}
+
+	if err := h.runAfterPurge(ctx); err != nil {
+		return h.reply(c).Fail(http.StatusInternalServerError, "purge failed", err)
 	}
 
 	go h.warmHome()

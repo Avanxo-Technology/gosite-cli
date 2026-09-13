@@ -13,11 +13,11 @@
 
 ## 2. App extension API
 
-- [ ] 2.1 Implement `gosite.Run`, `App`, `Router` wrapper and options, moving the wiring from `internal/app/app.go` and `cmd/server/main.go`
-- [ ] 2.2 Implement optional interfaces (middleware, template data, purge hook) with startup detection and tests
-- [ ] 2.3 Core routes (health, robots, sitemap, llms, favicon, purge) self-register; site routes on the same path win; per-feature disable options
-- [ ] 2.4 Move cache keys to `<project>:cache:*`, restrict purge to that prefix, add `gosite.State()` under `<project>:app:*`; test that purge keeps state keys and TTL
-- [ ] 2.5 Confirm no direct Mongo content reader exists in the module; the cms client is the only reader
+- [x] 2.1 Implement `gosite.Run`, `App`, `Router` wrapper and options, moving the wiring from `internal/app/app.go` and `cmd/server/main.go`
+- [x] 2.2 Implement optional interfaces (middleware, template data, purge hook) with startup detection and tests (template data is detected here and reaches pages in 3.3)
+- [x] 2.3 Core routes (health, robots, sitemap, llms, favicon, purge) self-register; site routes on the same path win; per-feature disable options
+- [x] 2.4 Move cache keys to `<project>:cache:*`, restrict purge to that prefix, add `gosite.State()` under `<project>:app:*`; test that purge keeps state keys and TTL
+- [x] 2.5 Confirm no direct Mongo content reader exists in the module; the cms client is the only reader
 
 ## 3. Theme slots and view model
 

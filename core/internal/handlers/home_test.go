@@ -31,7 +31,7 @@ func newApp(t *testing.T, cms http.HandlerFunc) *echo.Echo {
 	}
 	t.Cleanup(func() { a.Close() })
 	a.Redis.FlushDB(t.Context())
-	return app.NewRouter(a)
+	return app.NewRouter(a, app.RouterOptions{})
 }
 
 func get(t *testing.T, e *echo.Echo) *httptest.ResponseRecorder {

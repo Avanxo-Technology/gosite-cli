@@ -79,7 +79,7 @@ type SEO struct {
 	log   *slog.Logger
 	sf    singleflight.Group
 
-	// keyPrefix is "<project>:seo:" (WithProject).
+	// keyPrefix is "<project>:cache:seo:" (WithProject).
 	keyPrefix string
 
 	// assetBase is config.AssetBaseURL: the public S3/MinIO endpoint, or the
@@ -99,7 +99,7 @@ type Option func(*SEO)
 // site on the host reads and overwrites the same "seo:defaults". It also puts
 // these keys under the prefix PurgeAll sweeps, so a site-wide purge clears them.
 func WithProject(project string) Option {
-	return func(s *SEO) { s.keyPrefix = project + ":seo:" }
+	return func(s *SEO) { s.keyPrefix = project + ":cache:seo:" }
 }
 
 func WithAssetBase(base string) Option {
@@ -108,7 +108,7 @@ func WithAssetBase(base string) Option {
 
 // New creates an SEO resolver.
 func New(cmsClient *cms.Client, cache *cache.Cache, log *slog.Logger, opts ...Option) *SEO {
-	s := &SEO{cms: cmsClient, cache: cache, log: log, keyPrefix: "gosite:seo:"}
+	s := &SEO{cms: cmsClient, cache: cache, log: log, keyPrefix: "gosite:cache:seo:"}
 	for _, apply := range opts {
 		apply(s)
 	}

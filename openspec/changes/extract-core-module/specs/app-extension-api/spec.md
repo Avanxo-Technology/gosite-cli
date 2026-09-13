@@ -5,7 +5,7 @@ The core SHALL provide `gosite.Run(app App) error`, which loads configuration, c
 
 #### Scenario: Minimal site
 - **WHEN** a site's `main.go` calls `gosite.Run` with an `App` whose `Routes` registers `GET /`
-- **THEN** the server answers `/`, and also `/health`, `/robots.txt`, `/sitemap.xml`, `/llms.txt` and `POST /cache/purge` without site code for them
+- **THEN** the server answers `/`, and also `/healthz`, `/robots.txt`, `/sitemap.xml`, `/llms.txt` and `POST /cache/purge` without site code for them
 
 #### Scenario: Misconfigured environment fails at boot
 - **WHEN** Redis is unreachable at startup
@@ -30,10 +30,10 @@ Each core route or feature (sitemap, robots, llms, analytics, consent) SHALL be 
 - **THEN** requests to `/robots.txt` are served by the site handler
 
 ### Requirement: App state is isolated from the cache namespace
-The core SHALL keep cache keys under `<project>:cache:` and SHALL provide `gosite.State()`, a Redis accessor scoped to `<project>:app:`, and no purge operation SHALL delete keys outside `<project>:cache:`.
+The core SHALL keep cache keys under `<project>:cache:` and SHALL provide `State()` on the `Router` handed to `Routes`, a Redis accessor scoped to `<project>:app:`, and no purge operation SHALL delete keys outside `<project>:cache:`.
 
 #### Scenario: Purge keeps app state
-- **WHEN** a site stores a key through `gosite.State()` and a site-wide purge runs
+- **WHEN** a site stores a key through `State()` and a site-wide purge runs
 - **THEN** the key still exists with its TTL unchanged
 
 ### Requirement: Cockpit client is the only content source
@@ -41,4 +41,4 @@ Core and site code SHALL read CMS content only through the core Cockpit REST cli
 
 #### Scenario: Site needs a collection
 - **WHEN** a site handler needs entries of a Cockpit collection
-- **THEN** it obtains them from the client provided by core, paginated and cached by core
+- **THEN** it obtains them from the client returned by `CMS()` on the `Router`

@@ -2,8 +2,6 @@
 package config
 
 import (
-	"fmt"
-	"net/url"
 	"os"
 	"strings"
 )
@@ -14,8 +12,6 @@ type Config struct {
 	Project        string
 	Port           string
 	RedisURL       string
-	MongoURI       string
-	MongoDB        string
 	CockpitURL     string
 	CockpitToken   string
 	Environment    string
@@ -35,8 +31,6 @@ func Load() Config {
 		Project:    project,
 		Port:       env("PORT", "8080"),
 		RedisURL:   env("REDIS_URL", "redis://gosite-redis:6379/0"),
-		MongoURI:   buildMongoURI(),
-		MongoDB:    env("MONGO_DB", project),
 		CockpitURL: env("COCKPIT_URL", "http://"+project+"-cms:80"),
 		// Trimmed: a secret pasted into a deployment UI often arrives with a
 		// trailing newline, and an untrimmed compare then fails against a CMS
@@ -50,24 +44,11 @@ func Load() Config {
 	}
 }
 
-// buildMongoURI builds the MongoDB connection URI from its parts, matching
-// cockpit/config.php: credentials are only included when both MONGO_USER and
-// MONGO_PASSWORD are set (the shared gosite-mongo runs without auth), so an
-// empty user:pass@ never reaches the driver. MONGO_URI, when set, wins.
-func buildMongoURI() string {
-	if v := os.Getenv("MONGO_URI"); v != "" {
-		return v
-	}
-	host := env("MONGO_HOST", "gosite-mongo")
-	port := env("MONGO_PORT", "27017")
-	user := os.Getenv("MONGO_USER")
-	pass := os.Getenv("MONGO_PASSWORD")
-	if user != "" && pass != "" {
-		return fmt.Sprintf("mongodb://%s:%s@%s:%s",
-			url.PathEscape(user), url.PathEscape(pass), host, port)
-	}
-	return fmt.Sprintf("mongodb://%s:%s", host, port)
-}
+// CacheKeyPrefix is the only Redis prefix a purge may sweep.
+func (c Config) CacheKeyPrefix() string { return c.Project + ":cache:" }
+
+// StateKeyPrefix holds application state. Nothing purges it.
+func (c Config) StateKeyPrefix() string { return c.Project + ":app:" }
 
 // AssetBaseURL is the base used to build browser-reachable URLs for CMS asset
 // paths. With S3 storage the assets live on a public bucket/endpoint, so the

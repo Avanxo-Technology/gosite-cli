@@ -316,7 +316,7 @@ func TestMergeCarriesType(t *testing.T) {
 // site's title - and PurgeAll, which sweeps the project prefix, never clears it.
 func TestCacheKeysArePrefixedPerProject(t *testing.T) {
 	s := New(nil, nil, nil, WithProject("demo"))
-	if s.keyPrefix != "demo:seo:" {
-		t.Fatalf("keyPrefix = %q, want \"demo:seo:\"", s.keyPrefix)
+	if s.keyPrefix != "demo:cache:seo:" {
+		t.Fatalf("keyPrefix = %q, want \"demo:cache:seo:\"", s.keyPrefix)
 	}
 }

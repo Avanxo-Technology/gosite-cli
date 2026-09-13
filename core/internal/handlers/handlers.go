@@ -19,7 +19,10 @@ import (
 // cacheKeyPrefix namespaces every cache key this project owns. Several
 // projects share one Redis, so it is also what keeps a site-wide purge from
 // becoming a flush of everybody's cache.
-func (h *Handlers) cacheKeyPrefix() string { return h.Config.Project + ":" }
+//
+// Only keys under "<project>:cache:" are ever purged; application state lives
+// under "<project>:app:" (gosite State) where no purge can reach it.
+func (h *Handlers) cacheKeyPrefix() string { return h.Config.CacheKeyPrefix() }
 
 // Deps is what the handlers need. Passing a struct rather than six positional
 // arguments means adding a dependency does not touch every call site.
@@ -39,6 +42,7 @@ type Handlers struct {
 	Deps
 
 	purgeHooks       []PurgeHook
+	afterPurge       []func(ctx context.Context) error
 	sitemapProviders []SitemapProvider
 }
 
@@ -48,6 +52,23 @@ func New(d Deps) *Handlers { return &Handlers{Deps: d} }
 // keys of its own can invalidate exactly those. Both arguments are empty when
 // the purge did not name anything - an older CMS, or the on-page button.
 type PurgeHook func(ctx context.Context, model, id string) error
+
+// AfterPurge registers a hook run once after every successful purge, narrow or
+// site-wide, once core has dropped its own keys. It is how a site's
+// gosite.Purger learns that content changed.
+func (h *Handlers) AfterPurge(hook func(ctx context.Context) error) {
+	h.afterPurge = append(h.afterPurge, hook)
+}
+
+// runAfterPurge calls every AfterPurge hook in registration order.
+func (h *Handlers) runAfterPurge(ctx context.Context) error {
+	for _, hook := range h.afterPurge {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // OnPurge registers a hook run by POST /cache/purge.
 //

@@ -20,9 +20,20 @@ import (
 // readable from this file alone.
 var mountFeatures []func(*echo.Echo, *handlers.Handlers)
 
-// NewRouter wires middleware and routes. This is the single source of truth
-// for the app's HTTP surface - nothing registers routes anywhere else.
-func NewRouter(a *App) *echo.Echo {
+// RouterOptions is what gosite.Run passes in from the site.
+type RouterOptions struct {
+	// Disabled names core routes the site switched off: "home", "robots",
+	// "favicon", "llms", "sitemap".
+	Disabled map[string]bool
+	// Middleware from the site's gosite.Middlewarer, applied after core's.
+	Middleware []echo.MiddlewareFunc
+	// Site registers the site's routes. It runs last, so a site route on a
+	// path core also serves replaces core's handler.
+	Site func(e *echo.Echo)
+}
+
+// NewRouter wires middleware and routes: core's first, then the site's.
+func NewRouter(a *App, opts RouterOptions) *echo.Echo {
 	// AutoHandleHEAD makes every GET route answer HEAD as well, with the body
 	// suppressed and the headers intact. Without it echo answers 405, and an
 	// uptime check or a link validator that pings with HEAD reports the site as
@@ -34,7 +45,10 @@ func NewRouter(a *App) *echo.Echo {
 	// in full for each HEAD - worth re-reading its caveats before adding a GET
 	// route that writes, counts, or costs real work.
 	e := echo.NewWithConfig(echo.Config{
-		Router: echo.NewRouter(echo.RouterConfig{AutoHandleHEAD: true}),
+		// AllowOverwritingRoute is what lets a site replace a core route: core
+		// registers first and the site last, and the later handler wins. Echo's
+		// default New() turns it on; a custom RouterConfig does not.
+		Router: echo.NewRouter(echo.RouterConfig{AutoHandleHEAD: true, AllowOverwritingRoute: true}),
 	})
 	e.Renderer = a.Renderer
 
@@ -42,6 +56,9 @@ func NewRouter(a *App) *echo.Echo {
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Gzip())
 	e.Use(assetCacheHeaders())
+	for _, m := range opts.Middleware {
+		e.Use(m)
+	}
 
 	e.Static("/static", "static")
 
@@ -65,13 +82,26 @@ func NewRouter(a *App) *echo.Echo {
 	h := a.Handlers
 
 	// --- routes --------------------------------------------------------------
-	e.GET("/", h.Home)                   // the page, served from cache
+	// Purge and health are not optional: purge is how the CMS reaches the
+	// site, and health is what the deploy platform polls.
 	e.POST("/cache/purge", h.PurgeCache) // htmx button + Cockpit webhook
 	e.GET("/healthz", h.Health)          // liveness, checks Redis
-	e.GET("/robots.txt", h.Robots)       // robots.txt from webapp singleton
-	e.GET("/favicon.ico", h.Favicon)     // favicon redirect to asset
-	e.GET("/llms.txt", h.LLMs)           // LLM Text from webapp singleton
-	e.GET("/sitemap.xml", h.Sitemap)     // built from seoPages + mounted features
+
+	optional := []struct {
+		name, path string
+		handler    echo.HandlerFunc
+	}{
+		{"home", "/", h.Home},                  // the demo page, served from cache
+		{"robots", "/robots.txt", h.Robots},    // robots.txt from webapp singleton
+		{"favicon", "/favicon.ico", h.Favicon}, // favicon redirect to asset
+		{"llms", "/llms.txt", h.LLMs},          // LLM Text from webapp singleton
+		{"sitemap", "/sitemap.xml", h.Sitemap}, // built from seoPages + mounted features
+	}
+	for _, route := range optional {
+		if !opts.Disabled[route.name] {
+			e.GET(route.path, route.handler)
+		}
+	}
 
 	// Optional features, mounted after the routes above so those keep
 	// precedence. The blog serves /{blog} and /{blog}/{slug}; echo resolves a
@@ -79,6 +109,10 @@ func NewRouter(a *App) *echo.Echo {
 	// order, so a page this file serves always wins over a blog slug.
 	for _, mount := range mountFeatures {
 		mount(e, h)
+	}
+
+	if opts.Site != nil {
+		opts.Site(e)
 	}
 
 	return e
