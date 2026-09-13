@@ -9,16 +9,71 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
+	"log/slog"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/deprecate"
 )
 
-// Templates are embedded so the binary is self-contained: nothing to copy into
-// the image, and no chance of the markup drifting from the code.
+// corePartials are the templates core owns: SEO, consent, analytics, and the
+// names layouts used before slots. A site never copies them.
 //
-//go:embed layout.html pages/*.html components/*.html
-var files embed.FS
+//go:embed partials/*.html
+var corePartials embed.FS
+
+// defaultTheme is used when the site supplies none: a layout, the demo home
+// page and the purge button.
+//
+//go:embed theme
+var defaultTheme embed.FS
+
+// DefaultTheme returns the theme core renders with when none is given.
+func DefaultTheme() fs.FS {
+	sub, err := fs.Sub(defaultTheme, "theme")
+	if err != nil {
+		panic(err)
+	}
+	return sub
+}
+
+// The slots are the contract between core and a theme's layout. Core decides
+// what goes into each; the layout decides only where each goes, and calls
+// every one exactly once.
+const (
+	SlotHead      = "gosite:head"
+	SlotBodyStart = "gosite:body-start"
+	SlotBodyEnd   = "gosite:body-end"
+)
+
+// Slots lists every slot a layout must call.
+var Slots = []string{SlotHead, SlotBodyStart, SlotBodyEnd}
+
+// defaultSlotPartials is what core renders into each slot, in order.
+//
+// Consent comes before analytics in the head: the gate has to read the cookie
+// before the thing it gates asks whether it may load. GTM's noscript fallback
+// is the first thing in the body, where Google documents it.
+func defaultSlotPartials() map[string][]string {
+	return map[string][]string{
+		SlotHead:      {"gosite:seo", "gosite:consent-head", "gosite:analytics-head"},
+		SlotBodyStart: {"gosite:analytics-body"},
+		SlotBodyEnd:   {"gosite:consent-link"},
+	}
+}
+
+// legacyNames maps a template name layouts called before slots to the slot
+// that now renders it.
+var legacyNames = map[string]string{
+	"consent-head":   SlotHead,
+	"analytics-head": SlotHead,
+	"analytics-body": SlotBodyStart,
+	"consent-link":   SlotBodyEnd,
+}
 
 // Integration is one third-party tracking tool the layout should load, as
 // configured in the CMS. Provider names what it is; Config is that provider's
@@ -97,6 +152,11 @@ type Renderer struct {
 type Option func(*options)
 
 type options struct {
+	theme        fs.FS
+	partials     []fs.FS
+	slotPartials map[string][]string
+	log          *slog.Logger
+
 	integrations func() []Integration
 	consent      func() *Consent
 	seoResolver  func(path string, overrides ...any) map[string]any
@@ -123,6 +183,35 @@ func WithConsent(fn func() *Consent) Option {
 	return func(o *options) { o.consent = fn }
 }
 
+// WithTheme supplies the site's templates: layout.html, pages/*.html and,
+// optionally, components/*.html. Anything the theme defines under a core
+// partial's name replaces that partial.
+func WithTheme(theme fs.FS) Option {
+	return func(o *options) { o.theme = theme }
+}
+
+// WithPartials adds templates (every *.html at the root of fsys) parsed after
+// core's and before the theme's, so a theme can still override them. Addons
+// use it together with WithSlotPartial.
+func WithPartials(fsys fs.FS) Option {
+	return func(o *options) { o.partials = append(o.partials, fsys) }
+}
+
+// WithSlotPartial appends a template to a slot, after core's own partials.
+func WithSlotPartial(slot, name string) Option {
+	return func(o *options) {
+		if o.slotPartials == nil {
+			o.slotPartials = defaultSlotPartials()
+		}
+		o.slotPartials[slot] = append(o.slotPartials[slot], name)
+	}
+}
+
+// WithLogger is where deprecation warnings go.
+func WithLogger(log *slog.Logger) Option {
+	return func(o *options) { o.log = log }
+}
+
 // WithSEO supplies the SEO resolver for rendering meta tags.
 func WithSEO(fn func(path string, overrides ...any) map[string]any) Option {
 	return func(o *options) { o.seoResolver = fn }
@@ -142,6 +231,12 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 	var o options
 	for _, apply := range opts {
 		apply(&o)
+	}
+	if o.theme == nil {
+		o.theme = DefaultTheme()
+	}
+	if o.slotPartials == nil {
+		o.slotPartials = defaultSlotPartials()
 	}
 	integrations := o.integrations
 	consent := o.consent
@@ -238,6 +333,22 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 				"tags":  renderSEOTags(data),
 			}
 		},
+		// htmlLang is the document language from the resolved SEO data, "en"
+		// when none is set: <html lang="{{htmlLang .Path .SEOData}}">.
+		"htmlLang": func(pathArg any, overrides ...any) string {
+			if o.seoResolver == nil {
+				return "en"
+			}
+			path, _ := pathArg.(string)
+			var dataOverrides []any
+			if len(overrides) > 0 && overrides[0] != nil {
+				dataOverrides = append(dataOverrides, overrides[0])
+			}
+			if lang, _ := o.seoResolver(path, dataOverrides...)["lang"].(string); lang != "" {
+				return lang
+			}
+			return "en"
+		},
 		// faviconUrl returns the favicon URL from the webapp singleton.
 		"faviconUrl": func() string {
 			if o.favicon == nil {
@@ -254,23 +365,33 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		},
 	}
 
-	// Every page is parsed as layout + that page + all components, so a page
-	// can use any component without declaring anything.
+	slots := slotTemplates(o.slotPartials)
+	warnLegacyNames(o.theme, o.log)
+
+	// Every page is parsed as core partials, then addon partials, then the
+	// theme's layout, components and that page. Later definitions replace
+	// earlier ones with the same name, which is how a theme overrides a core
+	// partial. A page can use any component without declaring anything.
 	page := func(name string) *template.Template {
-		return template.Must(template.New(name).Funcs(funcs).ParseFS(files,
-			"layout.html",
-			"pages/"+name+".html",
-			"components/*.html",
-		))
+		t := template.New(name).Funcs(funcs)
+		template.Must(t.ParseFS(corePartials, "partials/*.html"))
+		template.Must(t.Parse(slots))
+		for _, fsys := range o.partials {
+			parseGlob(t, fsys, "*.html")
+		}
+		parseGlob(t, o.theme, "layout.html")
+		parseGlob(t, o.theme, "components/*.html")
+		parseGlob(t, o.theme, "pages/"+name+".html")
+		return t
 	}
 
 	// Every file under pages/ becomes a page, named after the file. Adding a
 	// page is dropping a file in - nothing to register here, and a feature that
 	// brings its own pages (the blog) does not have to edit this file to
 	// install or to be removed again.
-	entries, err := files.ReadDir("pages")
+	entries, err := fs.ReadDir(o.theme, "pages")
 	if err != nil {
-		panic("views: cannot read embedded pages: " + err.Error())
+		panic("views: the theme has no pages directory: " + err.Error())
 	}
 
 	pages := map[string]*template.Template{}
@@ -295,6 +416,7 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		// SEO keys
 		"Path":    "",
 		"SEOData": map[string]any{},
+		"Data":    map[string]any{},
 		// Blog pages, present whether or not the blog is installed.
 		"Blog":    map[string]any{},
 		"Post":    map[string]any{},
@@ -315,6 +437,68 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 	}
 
 	return &Renderer{pages: pages}
+}
+
+// slotTemplates defines each slot as the ordered calls of its partials.
+func slotTemplates(partials map[string][]string) string {
+	var b strings.Builder
+	for _, slot := range Slots {
+		fmt.Fprintf(&b, "{{define %q}}", slot)
+		for _, name := range partials[slot] {
+			fmt.Fprintf(&b, "{{template %q .}}", name)
+		}
+		b.WriteString("{{end}}")
+	}
+	return b.String()
+}
+
+// parseGlob parses the files matching pattern, if any. A theme without
+// components is valid, and template.ParseFS fails on a pattern with no match.
+func parseGlob(t *template.Template, fsys fs.FS, pattern string) {
+	matches, err := fs.Glob(fsys, pattern)
+	if err != nil {
+		panic(fmt.Sprintf("views: bad pattern %q: %v", pattern, err))
+	}
+	for _, m := range matches {
+		data, err := fs.ReadFile(fsys, m)
+		if err != nil {
+			panic(fmt.Sprintf("views: cannot read %s: %v", m, err))
+		}
+		if _, err := t.New(path.Base(m)).Parse(string(data)); err != nil {
+			panic(fmt.Sprintf("views: %s: %v", m, err))
+		}
+	}
+}
+
+// templateCall matches {{template "name"}} and {{- template "name" -}}.
+var templateCall = regexp.MustCompile(`\{\{-?\s*template\s+"([^"]+)"`)
+
+// TemplateCalls counts, per name, the {{template}} calls in a theme file.
+func TemplateCalls(src string) map[string]int {
+	calls := map[string]int{}
+	for _, m := range templateCall.FindAllStringSubmatch(src, -1) {
+		calls[m[1]]++
+	}
+	return calls
+}
+
+// warnLegacyNames logs, once each, the pre-slot names a theme still calls.
+func warnLegacyNames(theme fs.FS, log *slog.Logger) {
+	_ = fs.WalkDir(theme, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".html") {
+			return nil
+		}
+		data, err := fs.ReadFile(theme, p)
+		if err != nil {
+			return nil
+		}
+		for name := range TemplateCalls(string(data)) {
+			if slot, ok := legacyNames[name]; ok {
+				deprecate.Warn(log, "template "+name, slot)
+			}
+		}
+		return nil
+	})
 }
 
 // Render satisfies echo.Renderer, so handlers can use c.Render directly.

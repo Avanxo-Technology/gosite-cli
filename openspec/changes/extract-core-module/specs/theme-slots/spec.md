@@ -11,11 +11,11 @@ The core SHALL define the template slots `gosite:head`, `gosite:body-start` and 
 A template defined in the site's `theme/` with the same name as a core partial SHALL replace the core partial for every render, and core partials not overridden SHALL remain in effect.
 
 #### Scenario: Override consent link
-- **WHEN** `theme/partials/consent.html` defines `gosite:consent-link`
+- **WHEN** `theme/components/consent.html` defines `gosite:consent-link`
 - **THEN** pages render the theme's link and all other core partials unchanged
 
 ### Requirement: Stable page view model
-Every page template SHALL receive a documented `gosite.Page` value whose fields include `.Site`, `.SEO`, `.Content`, `.Consent` and `.Data`, where `.Content` SHALL always be a `map[string]any` and `.Data` holds values returned by the site's template-data extension.
+Every page a site renders through `Router.Render` SHALL receive a documented `gosite.Page` value with the fields `.Title`, `.Path`, `.Content`, `.SEOData`, `.Data` and `.IsDev` (the names core's partials and existing templates already read), where `.Content` SHALL always be a `map[string]any` and `.Data` holds the values returned by the site's template-data extension merged under the handler's own.
 
 #### Scenario: Content helper on CMS content
 - **WHEN** a template passes `.Content` to a core helper that expects a map

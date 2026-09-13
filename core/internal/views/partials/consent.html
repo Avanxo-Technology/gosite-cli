@@ -15,12 +15,12 @@
   NEVER reach for safeHTML in this file, and never render the copy into markup
   here. Both would give up the protection html/template provides.
 
-  The ORDER matters: this block goes before the analytics one in the layout.
+  The ORDER matters: this block goes before the analytics one in gosite:head.
   consent.js reads the cookie synchronously, so a returning visitor's decision
   is known before analytics.js asks for it and before the banner could flash.
 */}}
 
-{{define "consent-head"}}
+{{define "gosite:consent-head"}}
 {{$consent := consentSettings}}
 {{if $consent}}
 <link rel="stylesheet" href="/static/css/consent.css">
@@ -40,7 +40,7 @@
   Withdrawing consent has to be as easy as giving it, which is why this exists
   as part of the component rather than as something each site remembers to add.
 */}}
-{{define "consent-link"}}
+{{define "gosite:consent-link"}}
 {{$consent := consentSettings}}
 {{if $consent}}
 <button type="button" data-consent-open class="consent-reopen">{{$consent.PrefsLabel}}</button>

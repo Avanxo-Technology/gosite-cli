@@ -21,11 +21,11 @@
 
 ## 3. Theme slots and view model
 
-- [ ] 3.1 Embed default partials in the module; implement slots `gosite:head`, `gosite:body-start`, `gosite:body-end` as ordered partial lists
-- [ ] 3.2 Parse order core-then-theme so theme definitions override by name; fixture test per slot partial
-- [ ] 3.3 Define `gosite.Page` (`.Site`, `.SEO`, `.Content` as map, `.Consent`, `.Data`) and switch helpers to it
-- [ ] 3.4 Add `gositetest.CheckTheme` (missing slot, duplicate slot, page execution failure)
-- [ ] 3.5 Deprecation helper: log-once warning naming the replacement; unit test
+- [x] 3.1 Embed default partials in the module; implement slots `gosite:head`, `gosite:body-start`, `gosite:body-end` as ordered partial lists
+- [x] 3.2 Parse order core-then-theme so theme definitions override by name; fixture test per slot partial
+- [x] 3.3 Define `gosite.Page` (`.Title`, `.Path`, `.Content` as map, `.SEOData`, `.Data`, `.IsDev`) and `Router.Render`, merging `TemplateData` into `.Data`
+- [x] 3.4 Add `gositetest.CheckTheme` (missing slot, duplicate slot, page execution failure)
+- [x] 3.5 Deprecation helper: log-once warning naming the replacement; unit test
 
 ## 4. Addons as module packages
 

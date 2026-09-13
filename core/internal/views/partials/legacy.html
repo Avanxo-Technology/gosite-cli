@@ -1,0 +1,9 @@
+{{/*
+  Names layouts used before template slots. Each still renders what it did,
+  and the renderer logs a deprecation warning once when a theme calls one.
+  Replace them with gosite:head, gosite:body-start and gosite:body-end.
+*/}}
+{{define "consent-head"}}{{template "gosite:consent-head" .}}{{end}}
+{{define "analytics-head"}}{{template "gosite:analytics-head" .}}{{end}}
+{{define "analytics-body"}}{{template "gosite:analytics-body" .}}{{end}}
+{{define "consent-link"}}{{template "gosite:consent-link" .}}{{end}}

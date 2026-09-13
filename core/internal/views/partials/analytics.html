@@ -15,7 +15,7 @@
   protection html/template gives here.
 */}}
 
-{{define "analytics-head"}}
+{{define "gosite:analytics-head"}}
 {{$integrations := analyticsIntegrations}}
 {{if $integrations}}
 <script type="application/json" id="analytics-config">{{jsonData $integrations}}</script>
@@ -24,7 +24,7 @@
 {{end}}
 {{end}}
 
-{{define "analytics-body"}}
+{{define "gosite:analytics-body"}}
 {{range analyticsIntegrations}}
   {{/* GTM is the one provider needing markup a script cannot supply: a
        fallback for visitors without JavaScript. */}}

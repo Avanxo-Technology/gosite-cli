@@ -28,7 +28,9 @@ type App struct {
 
 // NewApp wires everything and verifies Redis up front, so a misconfigured
 // environment fails at boot instead of on the first request.
-func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
+//
+// views are extra renderer options from the site: its theme, addon partials.
+func NewApp(cfg config.Config, log *slog.Logger, viewOpts ...views.Option) (*App, error) {
 
 	// A deployment error, not a caller error: without a shared token the purge
 	// endpoint refuses to operate in non-development environments (503), so
@@ -62,7 +64,8 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 	// banner that gates them.
 	analyticsReader := analytics.New(cmsClient, cfg, log)
 
-	renderer := views.NewRenderer(cfg.AssetBaseURL(),
+	renderer := views.NewRenderer(cfg.AssetBaseURL(), append([]views.Option{
+		views.WithLogger(log),
 		views.WithIntegrations(analyticsReader.Integrations),
 		views.WithConsent(analyticsReader.Consent),
 		// The adapter keeps views decoupled from the seo package: templates pass
@@ -83,6 +86,7 @@ func NewApp(cfg config.Config, log *slog.Logger) (*App, error) {
 		views.WithRobotsTxt(func() string {
 			return seoResolver.GetWebappConfig().RobotsTxt
 		}),
+	}, viewOpts...)...,
 	)
 
 	h := handlers.New(handlers.Deps{

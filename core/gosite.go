@@ -16,6 +16,7 @@ package gosite
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/app"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/config"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/views"
 )
 
 // Context, HandlerFunc and Middleware are the HTTP types site handlers use.
@@ -80,11 +82,19 @@ type Option func(*options)
 type options struct {
 	log      *slog.Logger
 	disabled map[string]bool
+	theme    fs.FS
 }
 
 // WithLogger replaces the default text logger on stdout.
 func WithLogger(log *slog.Logger) Option {
 	return func(o *options) { o.log = log }
+}
+
+// WithTheme is the site's templates: layout.html, pages/*.html and optionally
+// components/*.html. Sites embed their theme directory so the binary carries
+// it. Without this option core renders its default demo theme.
+func WithTheme(theme fs.FS) Option {
+	return func(o *options) { o.theme = theme }
 }
 
 // WithoutRoutes switches off core routes by name (RouteHome, RouteRobots, ...).
@@ -123,7 +133,11 @@ func New(site App, opts ...Option) (*Server, error) {
 	}
 
 	cfg := config.Load()
-	core, err := app.NewApp(cfg, o.log)
+	var viewOpts []views.Option
+	if o.theme != nil {
+		viewOpts = append(viewOpts, views.WithTheme(o.theme))
+	}
+	core, err := app.NewApp(cfg, o.log, viewOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +155,7 @@ func New(site App, opts ...Option) (*Server, error) {
 		s.templateData = d
 	}
 
-	r := &router{state: newState(core.Redis, cfg.StateKeyPrefix()), cms: core.Handlers.CMS}
+	r := &router{state: newState(core.Redis, cfg.StateKeyPrefix()), cms: core.Handlers.CMS, server: s}
 	routerOpts.Site = func(e *echo.Echo) {
 		r.target = e
 		site.Routes(r)

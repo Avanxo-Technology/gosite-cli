@@ -1,0 +1,15 @@
+{{/*
+  The document's <title>, SEO meta tags and favicon, part of gosite:head.
+
+  SEO is resolved from webapp defaults, then the seoPages entry for .Path,
+  then .SEOData from the handler. The resolved title wins over .Title.
+*/}}
+{{define "gosite:seo"}}
+{{$seo := seoData .Path .SEOData}}
+<title>{{or $seo.title .Title}}</title>
+{{$seo.tags}}
+{{with faviconUrl}}<link rel="icon" href="{{.}}">{{end}}
+{{end}}
+
+{{/* DEPRECATED: blog pages once called "seo" themselves; it renders nothing. */}}
+{{define "seo"}}{{end}}

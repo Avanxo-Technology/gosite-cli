@@ -8,9 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+
+	"github.com/Avanxo-Technology/gosite-cli/core/cms"
 )
 
 // testSite is an App whose optional interfaces are switched on per test.
@@ -199,5 +202,44 @@ func TestUnreachableRedisFailsAtStartup(t *testing.T) {
 	t.Setenv("REDIS_URL", "redis://127.0.0.1:1/0")
 	if _, err := New(&testSite{}, WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))); err == nil {
 		t.Fatal("New succeeded with Redis unreachable")
+	}
+}
+
+type dataSite struct{ *testSite }
+
+func (dataSite) TemplateData(c *Context, page string) map[string]any {
+	return map[string]any{"Brand": "Acme", "Page": page}
+}
+
+// A site renders its own theme with Page, gets .Data from TemplateData, and a
+// cms.Content-shaped map reaches helpers as a plain map.
+func TestRenderPageWithThemeAndTemplateData(t *testing.T) {
+	theme := fstest.MapFS{
+		"layout.html": {Data: []byte(`{{define "layout"}}<html lang="{{htmlLang .Path .SEOData}}"><head>{{template "gosite:head" .}}</head>` +
+			`<body>{{template "gosite:body-start" .}}{{template "content" .}}{{template "gosite:body-end" .}}</body></html>{{end}}`)},
+		"pages/about.html": {Data: []byte(`{{define "content"}}{{.Data.Brand}}|{{.Data.Page}}|{{.Data.Extra}}|{{index .Content "headline"}}|{{.Path}}{{end}}`)},
+	}
+	base := &testSite{}
+	base.routes = func(r Router) {
+		r.GET("/about", func(c *Context) error {
+			return r.Render(c, http.StatusOK, "about", Page{
+				Title:   "About",
+				Content: cms.Content{"headline": "Hello"},
+				Data:    map[string]any{"Extra": "x"},
+			})
+		})
+	}
+	s, _ := newTestServer(t, dataSite{base}, WithTheme(theme))
+
+	rec := do(t, s, http.MethodGet, "/about", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Acme|about|x|Hello|/about") {
+		t.Errorf("page data not rendered as expected: %s", body)
+	}
+	if !strings.Contains(body, "<title>About</title>") {
+		t.Errorf("gosite:head did not render the title: %s", body)
 	}
 }

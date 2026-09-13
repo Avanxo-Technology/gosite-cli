@@ -25,6 +25,9 @@ type Router interface {
 	// known good values. Its keys live under "<project>:app:", which no purge
 	// touches.
 	State() *State
+
+	// Render renders a page of the site's theme with p and writes it as HTML.
+	Render(c *Context, status int, page string, p Page) error
 }
 
 // routes is the registration surface shared by *echo.Echo and *echo.Group.
@@ -41,6 +44,7 @@ type router struct {
 	target routes
 	state  *State
 	cms    *cms.Client
+	server *Server
 }
 
 func (r *router) GET(p string, h HandlerFunc, m ...Middleware)    { r.target.GET(p, h, m...) }
@@ -50,8 +54,12 @@ func (r *router) PATCH(p string, h HandlerFunc, m ...Middleware)  { r.target.PAT
 func (r *router) DELETE(p string, h HandlerFunc, m ...Middleware) { r.target.DELETE(p, h, m...) }
 
 func (r *router) Group(prefix string, m ...Middleware) Router {
-	return &router{target: r.target.Group(prefix, m...), state: r.state, cms: r.cms}
+	return &router{target: r.target.Group(prefix, m...), state: r.state, cms: r.cms, server: r.server}
 }
 
 func (r *router) CMS() *cms.Client { return r.cms }
 func (r *router) State() *State    { return r.state }
+
+func (r *router) Render(c *Context, status int, page string, p Page) error {
+	return r.server.render(c, status, page, p)
+}
