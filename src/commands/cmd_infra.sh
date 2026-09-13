@@ -116,9 +116,9 @@ services:
   minio:
     # coollabsio/minio, not minio/minio: the official image stopped being
     # pullable from Docker Hub ("pull access denied", September 2026), which left
-    # `gosite infra up` failing on any machine without a cached copy. This build
+    # gosite infra up failing on any machine without a cached copy. This build
     # has the same entrypoint, command and root user, so the certificate mounts
-    # below are unchanged, and it ships `mc` as well.
+    # below are unchanged, and it ships mc as well.
     image: coollabsio/minio:latest
     container_name: ${GOSITE_MINIO_HOST}
     restart: unless-stopped
@@ -170,7 +170,7 @@ services:
       # its own environment instead of writing them into the probe.
       # --insecure because the probe talks to MinIO's own mkcert certificate.
       # Both schemes, each attempt bounded: MinIO serves plain HTTP on a machine
-      # without mkcert (CI, a fresh laptop before `gosite setup`), and this file
+      # without mkcert (CI, a fresh laptop before gosite setup), and this file
       # is written before the certificate is issued, so the scheme cannot be
       # decided here. An unbounded mc against the wrong scheme retries instead
       # of failing.
