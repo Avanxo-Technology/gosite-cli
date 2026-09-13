@@ -114,7 +114,12 @@ services:
     networks: [gosite]
 
   minio:
-    image: minio/minio:latest
+    # coollabsio/minio, not minio/minio: the official image stopped being
+    # pullable from Docker Hub ("pull access denied", September 2026), which left
+    # `gosite infra up` failing on any machine without a cached copy. This build
+    # has the same entrypoint, command and root user, so the certificate mounts
+    # below are unchanged, and it ships `mc` as well.
+    image: coollabsio/minio:latest
     container_name: ${GOSITE_MINIO_HOST}
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -157,8 +162,14 @@ services:
       - traefik.http.routers.gosite-minio-console.tls=true
       - traefik.http.routers.gosite-minio-console.service=gosite-minio-console
     healthcheck:
-      # -k because the probe talks to MinIO's own mkcert certificate.
-      test: ["CMD", "curl", "-fk", "https://127.0.0.1:9000/minio/health/live"]
+      # mc, not curl: coollabsio/minio ships no curl, wget or nc, and a probe
+      # that cannot run marks the container unhealthy forever - which Traefik
+      # reads as "do not route here". mc ready asks the server itself.
+      # The escaped dollars survive this heredoc as $$, which compose turns into
+      # a literal $ for the container's shell, reading the root credentials from
+      # its own environment instead of writing them into the probe.
+      # --insecure because the probe talks to MinIO's own mkcert certificate.
+      test: ["CMD-SHELL", "MC_HOST_local=https://\$\$MINIO_ROOT_USER:\$\$MINIO_ROOT_PASSWORD@127.0.0.1:9000 mc ready local --insecure"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -305,12 +316,16 @@ cmd_infra() {
       rm -f "${GOSITE_DYNAMIC_DIR}/minio-console.yml"
 
       # Create the default bucket in MinIO so projects can use it immediately.
-      # -k/--insecure because MinIO serves its mkcert certificate.
+      # --insecure because MinIO serves its mkcert certificate, whose CA the
+      # container does not trust - and on EVERY mc command: current mc no longer
+      # carries it over from `alias set`, so without it `mb` fails on the
+      # certificate. The output is discarded, so that failure used to be silent
+      # and the bucket simply never existed.
       docker run --rm --network ${GOSITE_NETWORK} \
-        --entrypoint sh minio/mc:latest \
+        --entrypoint sh coollabsio/minio:latest \
         -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --insecure \
-            && mc mb -p local/assets \
-            && mc anonymous set download local/assets" \
+            && mc mb -p local/assets --insecure \
+            && mc anonymous set download local/assets --insecure" \
         >/dev/null 2>&1 || true
 
       ok "Proxy     -> https://proxy.${GOSITE_TLD} (Traefik dashboard)"
@@ -407,10 +422,10 @@ cmd_infra() {
 
       # Ensure the assets bucket exists and has a public-read policy.
       docker run --rm --network ${GOSITE_NETWORK} \
-        --entrypoint sh minio/mc:latest \
+        --entrypoint sh coollabsio/minio:latest \
         -c "mc alias set local https://${GOSITE_MINIO_HOST}:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} --insecure \
-            && mc mb -p local/assets \
-            && mc anonymous set download local/assets" \
+            && mc mb -p local/assets --insecure \
+            && mc anonymous set download local/assets --insecure" \
         >/dev/null 2>&1 || true
 
       ok "Infrastructure configs repaired and services recreated."

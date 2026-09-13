@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.53.1
+
+### Coolify domains stop resolving with 0.51.0's compose
+
+0.51.0 changed the Traefik rules in the production and QA composes to
+`${SERVICE_FQDN_APP:?set SERVICE_FQDN_APP ...}`, meant to fail a deploy with an
+unset domain instead of 502ing silently, and listed `SERVICE_FQDN_APP` under
+the app's `environment:`. Neither works on Coolify. Coolify recognises its
+magic variables by the bare `${SERVICE_FQDN_APP}` form, and every project
+deployed from that template had to have both removed by hand before its domain
+resolved.
+
+The templates are back to the bare form, with a comment saying why, and the
+variable is no longer listed under `environment:`. The trade-off returns with
+it: an unset domain renders an empty `Host()` rule again. Coolify generates the
+variable, so on Coolify that is not a state a stack reaches.
+
+### MinIO: the official image is gone from Docker Hub
+
+`minio/minio` and `minio/mc` can no longer be pulled ("pull access denied"), so
+`gosite infra up` failed on any machine without a cached copy, and so did the CI
+smoke job. The shared infra now uses `coollabsio/minio:latest`, which has the
+same entrypoint, command and root user - the certificate mounts are unchanged -
+and ships `mc` too, so the bucket setup uses the same image.
+
+Two things the swap would otherwise have broken, both silently:
+
+- **The healthcheck.** It ran `curl` inside the container, and this image has no
+  curl, wget or nc. MinIO would have been unhealthy forever, and Traefik does
+  not route to unhealthy containers. It now asks the server with `mc ready`.
+- **Bucket creation.** Current `mc` no longer carries `--insecure` over from
+  `alias set`, so `mc mb` failed on the mkcert certificate. The output is
+  discarded, so the assets bucket would simply never have been created. Every
+  mc command now passes `--insecure`.
+
+Existing installations keep their data: the volume and the credentials are
+the same. `gosite infra up` recreates the container on the new image.
+
+### QA's REDIS_URL example pointed at database 1
+
+The QA compose suggested `redis://...:6379/1` for the page cache.
+`cockpit/config.php` pins Cockpit's memory to database 1, keyed by `MONGO_DB` -
+production's API key registry lives there as `<project>:app.api.keys`. A QA
+purge of `<project>:*` on that database would delete it. The example is now
+`/2`, with the reason written next to it.
+
 ## 0.53.0
 
 ### Cookie consent, and nothing loads without it

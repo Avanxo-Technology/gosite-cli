@@ -477,6 +477,25 @@ instead, with the network panel open on a fresh profile:
 A script tag being present proves nothing here, exactly as it proved nothing in
 0.46.0.
 
+## → 0.53.1 — Coolify domains, the MinIO image, QA's Redis database
+
+**Production and QA composes.** If a project took the 0.51.0 compose, check
+both Traefik rules and the app's environment:
+
+```bash
+grep -nE 'SERVICE_FQDN_(APP|CMS):\?|^\s+- SERVICE_FQDN_' <project>/docker-compose.prod.yml <project>/docker-compose.qa.yml
+```
+
+Any match has to go: make the rule a bare `Host(`${SERVICE_FQDN_APP}`)` and
+delete the `- SERVICE_FQDN_APP` line. Coolify only recognises its magic
+variables in that exact form, so the domain does not resolve otherwise.
+
+**QA.** `REDIS_URL` must not use database 1. See "QA's REDIS_URL must never use
+database 1" above.
+
+**Local infra.** Nothing to do in projects. Run `gosite infra up` once; it
+recreates MinIO on `coollabsio/minio` with the same volume and credentials.
+
 ---
 
 ### Verify before you call it done
