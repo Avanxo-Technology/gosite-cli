@@ -365,6 +365,19 @@ gosite addons add Blog my-site    # install: CMS half + application pages
 gosite addons remove Blog my-site # uninstall (content in the database is kept)
 ```
 
+### Commerce (a store per site)
+
+`gosite addons add Commerce my-site` and `gosite generate` add the site's own
+**Medusa v2** store to its compose files: Medusa, its Postgres and its Redis,
+with a seed that creates a region, sales channel, shipping option, publishable
+key and a demo product, so the store works with no credentials. Set
+`commerce_region: co|us` in `gosite.yml`. The catalog, prices, stock and orders
+are managed in Medusa's Admin on `shop.<site>`; the Go addon serves the product
+listing, product page, cart and guest checkout. The customer data, cart and
+orders stay in Medusa and are never copied into Cockpit. Payments stay manual
+until the client's Stripe (US) or Wompi (Colombia) keys are set as env vars of
+the deployment.
+
 Installing only ever **adds** files. An addon that ships application pages
 wires itself from a file of its own, so your `router.go` is never rewritten,
 and a page template you have edited is preserved and reported rather than
@@ -373,7 +386,6 @@ overwritten (`--force` takes the template version).
 Addons are baked into the CMS image, and an addon with application pages is
 compiled into the app binary, so both have to be rebuilt — restarting shows
 neither:
-
 ```bash
 gosite restart my-site --build
 ```

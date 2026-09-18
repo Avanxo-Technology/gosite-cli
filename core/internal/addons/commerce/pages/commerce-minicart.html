@@ -1,0 +1,12 @@
+{{/*
+  Mini-cart fragment. Returned alongside a mutation as an out-of-band swap, so
+  the header count updates in the same response. The element carries
+  hx-swap-oob so htmx replaces the header's copy wherever it is.
+*/}}
+{{define "content"}}
+<div id="commerce-minicart" hx-swap-oob="true" class="commerce-minicart">
+	<a href="{{.URL}}" class="text-sm text-slate-700 hover:underline">
+		{{if .Empty}}Cart{{else}}{{.Count}} item{{if ne .Count 1}}s{{end}} — {{.Total}}{{end}}
+	</a>
+</div>
+{{end}}

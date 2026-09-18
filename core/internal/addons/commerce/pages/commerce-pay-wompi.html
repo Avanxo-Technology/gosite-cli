@@ -1,0 +1,10 @@
+{{/*
+  Redirect payment fragment (Wompi): a button to the Web Checkout URL carried in
+  the payment session's data.
+*/}}
+{{define "content"}}
+<a href="{{.Provider.CheckoutURL}}"
+	class="commerce-pay-wompi block rounded-md bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white hover:bg-slate-700">
+	Pay with Wompi
+</a>
+{{end}}

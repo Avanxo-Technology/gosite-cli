@@ -1,0 +1,17 @@
+{{/* Checkout step 1: email. */}}
+{{define "content"}}
+<form method="post" action="/_commerce/checkout/email"
+	hx-post="/_commerce/checkout/email" hx-target="#commerce-checkout" hx-swap="innerHTML"
+	class="space-y-4">
+	{{with .Error}}<p class="text-sm text-red-600">{{.}}</p>{{end}}
+	<label class="block">
+		<span class="text-sm font-medium text-slate-700">Email</span>
+		<input type="email" name="email" required autocomplete="email"
+			class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+	</label>
+	<button type="submit" hx-disabled-elt="this"
+		class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+		Continue
+	</button>
+</form>
+{{end}}

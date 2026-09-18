@@ -14,12 +14,14 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/handlers"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/siteconfig"
 )
 
 // Library is every addon gosite ships, whether or not it has a Go half.
 // Analytics' application half is core itself; Forms, Replica and Webapp are
-// Cockpit-only.
-var Library = []string{"Analytics", "Blog", "Forms", "Replica", "Webapp"}
+// Cockpit-only; Commerce brings its own services (see the commerce-service
+// capability) and its Go half lands in the storefront change.
+var Library = []string{"Analytics", "Blog", "Commerce", "Forms", "Replica", "Webapp"}
 
 // Addon is the Go half of one addon.
 type Addon struct {
@@ -28,6 +30,11 @@ type Addon struct {
 	// Mount registers the addon's routes and purge hooks. It runs after core's
 	// routes and before the site's, so a site route still wins.
 	Mount func(e *echo.Echo, h *handlers.Handlers)
+
+	// Configure validates and applies the addon's gosite.yml keys. It runs once
+	// at startup, before Mount. A non-nil error stops the site from starting,
+	// so a bad key is a startup failure and not a feature that silently misses.
+	Configure func(siteconfig.Config) error
 
 	// Pages are the addon's default page templates (pages/*.html). A theme
 	// page with the same file name replaces one.

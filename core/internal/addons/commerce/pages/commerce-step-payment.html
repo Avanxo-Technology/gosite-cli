@@ -1,0 +1,44 @@
+{{/*
+  Checkout step 4: payment. Only providers the site can render are listed
+  (design D8). Manual completes directly; embedded (Stripe) shows its form;
+  redirect (Wompi) sends the buyer to the Web Checkout URL.
+*/}}
+{{define "content"}}
+<form method="post" action="/_commerce/checkout/complete"
+	hx-post="/_commerce/checkout/complete" hx-target="#commerce-checkout" hx-swap="innerHTML"
+	class="space-y-4">
+	{{with .Error}}<p class="text-sm text-red-600">{{.}}</p>{{end}}
+
+	{{if .Providers}}
+	<div class="space-y-3">
+		{{range .Providers}}
+		{{if eq .Kind "manual"}}
+		<label class="flex items-center gap-3 rounded-md border border-slate-300 px-3 py-2">
+			<input type="radio" name="provider_id" value="{{.ID}}" checked>
+			<span>Pay on delivery / manual</span>
+		</label>
+		{{else if eq .Kind "embedded"}}
+		<div class="commerce-pay-stripe rounded-md border border-slate-300 p-3"
+			data-provider="{{.ID}}" data-client-secret="{{.ClientSecret}}" data-publishable-key="{{.PublishableKey}}">
+			<p class="text-sm text-slate-600">Card payment (Stripe).</p>
+			{{/* Stripe.js is loaded only on this step; the card never touches the site. */}}
+			<div id="commerce-stripe-form"></div>
+		</div>
+		{{else}}
+		<a href="{{.CheckoutURL}}" class="commerce-pay-wompi block rounded-md bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white hover:bg-slate-700">
+			Pay with Wompi
+		</a>
+		{{end}}
+		{{end}}
+	</div>
+	<button type="submit" hx-disabled-elt="this"
+		class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+		Place order
+	</button>
+	{{else}}
+	<p class="rounded-md border border-slate-200 bg-white p-4 text-slate-600">
+		No payment method is available right now.
+	</p>
+	{{end}}
+</form>
+{{end}}

@@ -13,6 +13,8 @@
 !/MEMORY.md
 !/src/
 !/core/
+# gosite's own service images (gosite-medusa), not a generated project.
+!/services/
 !/docs/
 !/.github/
 !/.shellcheckrc

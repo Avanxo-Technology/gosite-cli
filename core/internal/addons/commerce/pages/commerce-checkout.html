@@ -1,0 +1,13 @@
+{{/*
+  Checkout shell. The current step's fragment is rendered server-side and
+  embedded as .Body; htmx replaces it as the visitor advances.
+*/}}
+{{define "content"}}
+<header class="mb-8">
+	<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
+</header>
+
+<div id="commerce-checkout" class="max-w-xl">
+	{{with .Body}}{{.}}{{end}}
+</div>
+{{end}}

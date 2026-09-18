@@ -1,0 +1,19 @@
+{{/*
+  Cart page: the visitor's cart. Never cached (it is per visitor). The lines
+  are pre-rendered by the same fragment the htmx mutations return, so there is
+  one implementation of the line markup.
+*/}}
+{{define "content"}}
+<header class="mb-8">
+	<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
+</header>
+
+<div id="commerce-cart-lines">{{.Lines}}</div>
+
+{{with .View}}{{if not .Empty}}
+<div class="mt-8 max-w-sm border-t border-slate-200 pt-4 text-sm">
+	<div class="flex justify-between py-1"><span class="text-slate-600">Subtotal</span><span>{{.ItemTotal}}</span></div>
+	<div class="flex justify-between py-1 text-base font-semibold"><span>Total</span><span>{{.Total}}</span></div>
+</div>
+{{end}}{{end}}
+{{end}}

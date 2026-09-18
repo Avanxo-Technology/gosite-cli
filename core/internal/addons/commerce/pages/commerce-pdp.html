@@ -1,0 +1,45 @@
+{{/*
+  Product detail: title, image, description and the live buy island. The page
+  is cached; the island (/_commerce/buy/<handle>) is not, so price and stock
+  stay current. Alpine only picks a variant and asks htmx to reload the island.
+
+  Fields are read through nested `with` so the page also renders when a value
+  is absent (the startup probe renders every page with empty data).
+*/}}
+{{define "content"}}
+<article class="grid grid-cols-1 gap-10 lg:grid-cols-2">
+	<div>
+		{{with .Product}}{{with .Thumbnail}}
+		<img src="{{.}}" alt="{{$.Title}}" class="aspect-square w-full rounded-lg object-cover">
+		{{end}}{{end}}
+	</div>
+
+	<div>
+		<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
+
+		{{with .Product}}
+		<div class="mt-6" x-data="{ v: '' }"
+			x-init="$watch('v', () => { const el = document.getElementById('commerce-buy'); el.setAttribute('hx-get', '/_commerce/buy/{{.Handle}}?v=' + v); htmx.process(el); htmx.trigger(el, 'load'); })">
+			<div id="commerce-buy" hx-get="/_commerce/buy/{{.Handle}}" hx-trigger="load">
+				<p class="text-slate-500">Loading price…</p>
+			</div>
+
+			{{with $.View}}{{if gt (len .Variants) 1}}
+			<div class="mt-4 flex flex-wrap gap-2">
+				{{range .Variants}}
+				<button type="button" @click="v = '{{.ID}}'"
+					class="rounded-md border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:border-slate-500">
+					{{.Title}}
+				</button>
+				{{end}}
+			</div>
+			{{end}}{{end}}
+		</div>
+		{{end}}
+
+		{{with .Product}}{{with .Description}}
+		<div class="prose mt-8 max-w-none text-slate-700">{{.}}</div>
+		{{end}}{{end}}
+	</div>
+</article>
+{{end}}

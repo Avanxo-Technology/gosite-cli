@@ -16,6 +16,7 @@ package gosite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -34,6 +35,7 @@ import (
 
 	// Every addon with a Go half registers itself; gosite.yml decides which run.
 	_ "github.com/Avanxo-Technology/gosite-cli/core/internal/addons/blog"
+	_ "github.com/Avanxo-Technology/gosite-cli/core/internal/addons/commerce"
 )
 
 // Context, HandlerFunc and Middleware are the HTTP types site handlers use.
@@ -150,20 +152,30 @@ func New(site App, opts ...Option) (*Server, error) {
 	// Addons come from gosite.yml in the working directory (GOSITE_CONFIG
 	// names another file). A name gosite does not ship stops startup: a typo
 	// would otherwise be a feature silently missing in production.
+	path := os.Getenv("GOSITE_CONFIG")
+	if path == "" {
+		path = siteconfig.File
+	}
+	sc, err := siteconfig.Load(path)
+	if err != nil {
+		return nil, err
+	}
 	if !o.setAdd {
-		path := os.Getenv("GOSITE_CONFIG")
-		if path == "" {
-			path = siteconfig.File
-		}
-		sc, err := siteconfig.Load(path)
-		if err != nil {
-			return nil, err
-		}
 		o.addons = sc.Addons()
 	}
 	enabled, err := addon.Resolve(o.addons)
 	if err != nil {
 		return nil, err
+	}
+	// Configure runs before any route is mounted: a rejected key must stop the
+	// site, not surface as a half-configured feature.
+	for _, a := range enabled {
+		if a.Configure == nil {
+			continue
+		}
+		if err := a.Configure(sc); err != nil {
+			return nil, fmt.Errorf("addon %s: %w", a.Name, err)
+		}
 	}
 
 	var viewOpts []views.Option

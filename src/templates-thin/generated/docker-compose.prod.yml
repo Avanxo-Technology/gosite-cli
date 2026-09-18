@@ -58,6 +58,13 @@ services:
       - REDIS_URL=${REDIS_URL}
       - COCKPIT_URL=http://__PROJECT__-prod-cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+      # gosite:addon Commerce
+      - COMMERCE_URL=http://__PROJECT__-prod-medusa:9000
+      # gosite:end
+    # gosite:addon Commerce
+    volumes:
+      - __PROJECT__-prod-commerce-key:/run/gosite-commerce:ro
+    # gosite:end
     labels:
       # Tells Coolify this service is built from the repository Dockerfile.
       - coolify.managed=true
@@ -152,5 +159,58 @@ services:
       - traefik.http.routers.__PROJECT__-cms.tls.certresolver=letsencrypt
       - traefik.http.services.__PROJECT__-cms.loadbalancer.server.port=80
 
+  # gosite:addon Commerce
+  # Production's own store (design D1/D7): its own Medusa, database and
+  # volumes, named for the environment so it never collides with QA on the
+  # shared network. An order placed in QA does not exist here.
+  __PROJECT__-prod-medusa:
+    image: ghcr.io/avanxo-technology/gosite-medusa:__CORE_VERSION__
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgres://medusa:${MEDUSA_DB_PASSWORD}@__PROJECT__-prod-medusa-db:5432/medusa?sslmode=disable
+      - REDIS_URL=redis://__PROJECT__-prod-medusa-redis:6379/0
+      - JWT_SECRET=${JWT_SECRET}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      - COMMERCE_REGION=__COMMERCE_REGION__
+      - COMMERCE_ADMIN_EMAIL=${COMMERCE_ADMIN_EMAIL:-admin@gosite.local}
+      - GOSITE_PURGE_URL=http://__PROJECT__-prod-app:8080/cache/purge
+      - GOSITE_PURGE_TOKEN=${COCKPIT_API_TOKEN}
+      # Production uses the client's live keys.
+      - STRIPE_API_KEY=${STRIPE_API_KEY:-}
+      - WOMPI_PUBLIC_KEY=${WOMPI_PUBLIC_KEY:-}
+      - WOMPI_PRIVATE_KEY=${WOMPI_PRIVATE_KEY:-}
+      - WOMPI_INTEGRITY_SECRET=${WOMPI_INTEGRITY_SECRET:-}
+      - WOMPI_EVENTS_SECRET=${WOMPI_EVENTS_SECRET:-}
+      - WOMPI_CHECKOUT_URL=${WOMPI_CHECKOUT_URL:-}
+      - WOMPI_API_URL=${WOMPI_API_URL:-}
+    volumes:
+      - __PROJECT__-prod-commerce-key:/run/gosite-commerce
+    depends_on:
+      - __PROJECT__-prod-medusa-db
+      - __PROJECT__-prod-medusa-redis
+
+  __PROJECT__-prod-medusa-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=medusa
+      - POSTGRES_PASSWORD=${MEDUSA_DB_PASSWORD}
+      - POSTGRES_DB=medusa
+    volumes:
+      - __PROJECT__-prod-medusa-db:/var/lib/postgresql/data
+
+  __PROJECT__-prod-medusa-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - __PROJECT__-prod-medusa-redis:/data
+  # gosite:end
+
 volumes:
   cockpit-storage:
+  # gosite:addon Commerce
+  __PROJECT__-prod-commerce-key:
+  __PROJECT__-prod-medusa-db:
+  __PROJECT__-prod-medusa-redis:
+  # gosite:end

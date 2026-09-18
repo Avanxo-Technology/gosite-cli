@@ -54,5 +54,12 @@ cmd_generate() {
   done < <(cd "$(thin_template_root)/generated" && find . -type f -print0)
 
   [[ "${skipped}" -eq 0 ]] || return 1
+
+  # Name the services an addon brought, so enabling Commerce is visible in the
+  # command's own output and not only by reading the generated files.
+  if siteyml_list "${dir}/gosite.yml" addons | grep -qix "Commerce"; then
+    ok "Enabled Commerce: medusa, medusa-db, medusa-redis (region $(siteyml_get "${dir}/gosite.yml" commerce_region))"
+  fi
+
   printf '  Rebuild for the changes to take effect: gosite restart %s --build\n' "$(basename "${dir}")"
 }
