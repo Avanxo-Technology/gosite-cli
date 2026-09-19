@@ -12,11 +12,11 @@
 ## 2. Seed
 
 - [x] 2.1 Region table (`co`, `us`) and fail-fast on unknown `COMMERCE_REGION`
-- [x] 2.2 Create-if-missing by `metadata.gosite_seed`: region, sales channel, stock location, shipping option, manual provider on the region, publishable key
+- [x] 2.2 Create-if-missing by recorded id in `gosite_seed_state.ids` (design D5): region, sales channel, stock location, shipping option, manual provider on the region, publishable key
 - [x] 2.3 Demo product (one variant, price in the region currency, stock) created once, tracked in store metadata so a deleted demo product is not recreated
 - [x] 2.4 Admin user from `COMMERCE_ADMIN_EMAIL`, password printed once on creation
 - [x] 2.5 Write the publishable key to `/run/gosite-commerce/publishable_key`
-- [x] 2.6 Tests: empty DB, restart, renamed product, deleted product, unknown region
+- [ ] 2.6 Tests: empty DB, restart, renamed product, deleted product, unknown region (pure helpers are unit-tested; the scenarios were run by hand against a real Medusa on 2026-09-19 - fresh start, renamed region, manual provider removed, revoked key, deleted demo product - and still need a versioned integration test)
 
 ## 3. Cart cleanup
 

@@ -93,9 +93,9 @@ export default defineConfig({
       jwtSecret: process.env.JWT_SECRET,
       cookieSecret: process.env.COOKIE_SECRET,
       // The Store API is reachable only from the site container over the
-      // project network, so store CORS is irrelevant; the Admin is served on
-      // the shop.<site> subdomain and the payments webhook posts back to it.
-      storeCors: process.env.STORE_CORS || "*",
+      // project network: no browser origin needs it, so none is allowed. The
+      // Admin is served on the shop.<site> subdomain.
+      storeCors: "",
       adminCors: process.env.ADMIN_CORS || "",
       authCors: process.env.AUTH_CORS || process.env.ADMIN_CORS || "",
     },

@@ -8,6 +8,19 @@
 # a restart is cheap and never rewrites the store owner's edits.
 set -euo pipefail
 
+# Medusa falls back to the secret "supersecret" when these are unset, which
+# would let anyone forge admin tokens. Checked here and not in medusa-config,
+# because the build loads the config without any secret.
+missing=()
+for var in JWT_SECRET COOKIE_SECRET DATABASE_URL; do
+  value="${!var:-}"
+  [[ -n "${value// /}" ]] || missing+=("${var}")
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "gosite-medusa: ${missing[*]} must be set; refusing to start" >&2
+  exit 1
+fi
+
 cd /app
 
 echo "gosite-medusa: applying database migrations"

@@ -1,6 +1,8 @@
 import type { MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 
+import { deleteAbandonedCarts } from "../lib/cleanup"
+
 // Daily cleanup of abandoned carts (design D8). The storefront creates carts
 // lazily, so this only ever removes carts a visitor never completed.
 export const config = {
@@ -22,25 +24,10 @@ export default async function cleanupAbandonedCarts(container: MedusaContainer) 
 
   const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000)
 
-  // completed_at stays null until the cart becomes an order: orders and
-  // completed carts are never selected, so they are never deleted.
-  const [carts, count] = await cartModuleService.listAndCountCarts(
-    {
-      completed_at: { $eq: null },
-      updated_at: { $lt: cutoff },
-    } as never,
-    { select: ["id"] }
-  )
-
-  if (!count) {
-    logger.info(
-      `cleanup-abandoned-carts: no abandoned carts older than ${ttlDays}d`
-    )
-    return
-  }
-
-  await cartModuleService.deleteCarts(carts.map((cart) => cart.id))
+  const deleted = await deleteAbandonedCarts(cartModuleService as never, cutoff)
   logger.info(
-    `cleanup-abandoned-carts: deleted ${count} cart(s) older than ${ttlDays}d`
+    deleted
+      ? `cleanup-abandoned-carts: deleted ${deleted} cart(s) older than ${ttlDays}d`
+      : `cleanup-abandoned-carts: no abandoned carts older than ${ttlDays}d`
   )
 }

@@ -21,16 +21,17 @@ import {
   createStockLocationsWorkflow,
   linkSalesChannelsToApiKeyWorkflow,
   linkSalesChannelsToStockLocationWorkflow,
-  updateRegionsWorkflow,
   updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows"
 
 import { resolveRegion, type RegionDef } from "../lib/regions"
+import { pickSeeded, usableKeys } from "../lib/seeded"
 
-// Stable names the seed looks up on every start (design D5): each created
-// record is findable by one of these, so the seed never duplicates and never
-// updates what the store owner changed. A deleted demo product stays deleted,
-// tracked in the store's gosite_seed_state instead of by re-checking.
+// What the seed created is recorded by id in the store's gosite_seed_state
+// (design D5). On every start a recorded record is found by that id, so an owner
+// who renames the region or the sales channel does not get a second one. The
+// names below only adopt records from a deployment that predates the ids. The
+// seed never updates what exists, and a deleted demo product stays deleted.
 const SALES_CHANNEL_NAME = "gosite"
 const STOCK_LOCATION_NAME = "gosite"
 const FULFILLMENT_SET_NAME = "gosite"
@@ -44,6 +45,7 @@ const DEFAULT_KEY_DIR = "/run/gosite-commerce"
 
 type SeedState = {
   demo_product_created?: boolean
+  ids?: Record<string, string>
 }
 
 type Logger = { info: (m: string) => void; warn: (m: string) => void }
@@ -60,11 +62,13 @@ export default async function seed({ container }: ExecArgs) {
   if (!store) {
     throw new Error("commerce seed: no store exists; run the migrations first")
   }
-  const state: SeedState = (store.metadata?.gosite_seed_state as SeedState) ?? {}
+  const state: SeedState = { ...((store.metadata?.gosite_seed_state as SeedState) ?? {}) }
+  state.ids = { ...(state.ids ?? {}) }
+  const ids = state.ids
 
-  const salesChannel = await ensureSalesChannel(container, logger)
-  await ensureRegion(container, region, logger)
-  const stockLocation = await ensureStockLocation(container, logger)
+  const salesChannel = await ensureSalesChannel(container, ids, logger)
+  await ensureRegion(container, region, ids, logger)
+  const stockLocation = await ensureStockLocation(container, ids, logger)
 
   await linkSalesChannelsToStockLocationWorkflow(container).run({
     input: { id: stockLocation.id, add: [salesChannel.id] },
@@ -74,6 +78,7 @@ export default async function seed({ container }: ExecArgs) {
   const serviceZone = await ensureServiceZone(container, stockLocation.id, region, logger)
   await ensureShippingOption(
     container,
+    ids,
     shippingProfile.id,
     serviceZone.id,
     stockLocation.id,
@@ -81,7 +86,7 @@ export default async function seed({ container }: ExecArgs) {
     logger
   )
 
-  const { token } = await ensurePublishableKey(container, salesChannel.id, logger)
+  const { token } = await ensurePublishableKey(container, salesChannel.id, ids, logger)
   await writePublishableKey(token, logger)
 
   await ensureDemoProduct(
@@ -108,30 +113,41 @@ export default async function seed({ container }: ExecArgs) {
   )
 }
 
-async function ensureSalesChannel(container: MedusaContainer, logger: Logger) {
+async function ensureSalesChannel(
+  container: MedusaContainer,
+  ids: Record<string, string>,
+  logger: Logger
+) {
   const service: any = container.resolve(Modules.SALES_CHANNEL)
-  const existing = await service.listSalesChannels({ name: SALES_CHANNEL_NAME })
-  if (existing.length) {
-    return existing[0]
+  const existing = await findSeeded(ids, "sales_channel", (filter) =>
+    service.listSalesChannels(filter ?? { name: SALES_CHANNEL_NAME })
+  )
+  if (existing) {
+    return existing
   }
   const { result } = await createSalesChannelsWorkflow(container).run({
     input: { salesChannelsData: [{ name: SALES_CHANNEL_NAME }] },
   })
   logger.info(`commerce seed: created sales channel ${SALES_CHANNEL_NAME}`)
+  ids.sales_channel = result[0].id
   return result[0]
 }
 
-async function ensureRegion(container: MedusaContainer, region: RegionDef, logger: Logger) {
+async function ensureRegion(
+  container: MedusaContainer,
+  region: RegionDef,
+  ids: Record<string, string>,
+  logger: Logger
+) {
   const service: any = container.resolve(Modules.REGION)
-  const existing = await service.listRegions({ name: region.name })
-  if (existing.length) {
-    // Keep the manual provider enabled without dropping any the owner added.
-    const current = (existing[0].payment_providers ?? []).map((p: any) => p.id)
-    const providers = Array.from(new Set([...current, "pp_system_default"]))
-    await updateRegionsWorkflow(container).run({
-      input: { selector: { id: existing[0].id }, update: { payment_providers: providers } },
-    })
-    return existing[0]
+  const existing = await findSeeded(ids, "region", (filter) =>
+    service.listRegions(filter ?? { name: region.name })
+  )
+  if (existing) {
+    // Never touched once it exists: an owner who removed the manual provider
+    // (to take only card payments) must not see it come back on a restart,
+    // or buyers could place orders without paying.
+    return existing
   }
   const { result } = await createRegionsWorkflow(container).run({
     input: {
@@ -146,19 +162,27 @@ async function ensureRegion(container: MedusaContainer, region: RegionDef, logge
     },
   })
   logger.info(`commerce seed: created region ${region.name} (${region.currency})`)
+  ids.region = result[0].id
   return result[0]
 }
 
-async function ensureStockLocation(container: MedusaContainer, logger: Logger) {
+async function ensureStockLocation(
+  container: MedusaContainer,
+  ids: Record<string, string>,
+  logger: Logger
+) {
   const service: any = container.resolve(Modules.STOCK_LOCATION)
-  const existing = await service.listStockLocations({ name: STOCK_LOCATION_NAME })
-  if (existing.length) {
-    return existing[0]
+  const existing = await findSeeded(ids, "stock_location", (filter) =>
+    service.listStockLocations(filter ?? { name: STOCK_LOCATION_NAME })
+  )
+  if (existing) {
+    return existing
   }
   const { result } = await createStockLocationsWorkflow(container).run({
     input: { locations: [{ name: STOCK_LOCATION_NAME }] },
   })
   logger.info(`commerce seed: created stock location ${STOCK_LOCATION_NAME}`)
+  ids.stock_location = result[0].id
   return result[0]
 }
 
@@ -214,6 +238,7 @@ async function ensureServiceZone(
 
 async function ensureShippingOption(
   container: MedusaContainer,
+  ids: Record<string, string>,
   shippingProfileId: string,
   serviceZoneId: string,
   stockLocationId: string,
@@ -221,9 +246,11 @@ async function ensureShippingOption(
   logger: Logger
 ) {
   const service: any = container.resolve(Modules.FULFILLMENT)
-  const existing = await service.listShippingOptions({ name: SHIPPING_OPTION_NAME })
-  if (existing.length) {
-    return existing[0]
+  const existing = await findSeeded(ids, "shipping_option", (filter) =>
+    service.listShippingOptions(filter ?? { name: SHIPPING_OPTION_NAME })
+  )
+  if (existing) {
+    return existing
   }
   const providers = await service.listFulfillmentProviders({})
   const manual = providers.find((p: any) => /manual/i.test(p.id)) ?? providers[0]
@@ -249,6 +276,7 @@ async function ensureShippingOption(
     ],
   })
   logger.info(`commerce seed: created shipping option ${SHIPPING_OPTION_NAME}`)
+  ids.shipping_option = result[0].id
   return result[0]
 }
 
@@ -282,14 +310,15 @@ async function ensureFulfillmentProvider(
 async function ensurePublishableKey(
   container: MedusaContainer,
   salesChannelId: string,
+  ids: Record<string, string>,
   logger: Logger
 ) {
   const service: any = container.resolve(Modules.API_KEY)
-  const existing = await service.listApiKeys({
-    title: PUBLISHABLE_KEY_TITLE,
-    type: "publishable",
-  })
-  let key = existing[0]
+  // A revoked key is never reused: writing it out would leave the site unable
+  // to call the Store API. Revoking it in the Admin is how an owner rotates it.
+  let key = await findSeeded(ids, "publishable_key", async (filter) =>
+    usableKeys(await service.listApiKeys(filter ?? { title: PUBLISHABLE_KEY_TITLE, type: "publishable" }))
+  )
   if (!key) {
     const { result } = await createApiKeysWorkflow(container).run({
       input: {
@@ -299,6 +328,7 @@ async function ensurePublishableKey(
       },
     })
     key = result[0]
+    ids.publishable_key = key.id
     logger.info("commerce seed: created publishable API key")
   }
   await linkSalesChannelsToApiKeyWorkflow(container).run({
@@ -410,13 +440,17 @@ async function ensureAdminUser(container: MedusaContainer, logger: Logger) {
     return
   }
 
-  const password = process.env.COMMERCE_ADMIN_PASSWORD || randomBytes(12).toString("base64url")
+  const given = process.env.COMMERCE_ADMIN_PASSWORD
+  const password = given || randomBytes(12).toString("base64url")
   const user = await userModuleService.createUsers({ email })
 
   const { success, authIdentity, error } = await authModuleService.register("emailpass", {
     body: { email, password },
   })
   if (!success || !authIdentity) {
+    // Without this the next start would find the user, skip it, and leave an
+    // admin nobody can log in as.
+    await userModuleService.deleteUsers([user.id])
     throw new Error(`commerce seed: could not create the admin login: ${JSON.stringify(error)}`)
   }
   await authModuleService.updateAuthIdentities({
@@ -424,8 +458,28 @@ async function ensureAdminUser(container: MedusaContainer, logger: Logger) {
     app_metadata: { user_id: user.id },
   })
 
-  // Printed once, on creation only. The README tells owners to rotate it.
+  if (given) {
+    logger.info(`commerce seed: admin ${email} created with the password from COMMERCE_ADMIN_PASSWORD`)
+    return
+  }
+  // Printed once, on creation, and only when the seed generated it.
   logger.info(
     `commerce seed: admin ${email} created; password: ${password} (change it after the first login)`
   )
+}
+
+// findSeeded returns the record the seed created earlier, by its recorded id,
+// or adopts one found by the default lookup (list called with no filter) and
+// records its id. undefined means "create it".
+async function findSeeded(
+  ids: Record<string, string>,
+  kind: string,
+  list: (filter?: Record<string, unknown>) => Promise<any[]>
+): Promise<any | undefined> {
+  const recorded = ids[kind]
+  const record = await pickSeeded(recorded, recorded ? await list({ id: recorded }) : [], () => list())
+  if (record) {
+    ids[kind] = record.id
+  }
+  return record
 }

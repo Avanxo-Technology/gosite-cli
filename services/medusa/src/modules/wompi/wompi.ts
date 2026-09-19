@@ -133,6 +133,32 @@ export function verifyEventChecksum(event: EventPayload, eventsSecret: string): 
   return timingSafeEqual(expected, checksum)
 }
 
+// WebhookResult is what a verified Wompi event means for Medusa. amount is in
+// the currency's major unit, as Medusa stores it: Wompi reports cents, and
+// passing those through would record a payment 100 times the cart total.
+export type WebhookResult =
+  | { valid: false }
+  | {
+      valid: true
+      status: "authorized" | "pending" | "error"
+      sessionID: string
+      amount: string
+    }
+
+export function parseWebhookEvent(event: EventPayload, eventsSecret: string): WebhookResult {
+  if (!verifyEventChecksum(event, eventsSecret)) {
+    return { valid: false }
+  }
+  const transaction = (event.data?.transaction ?? {}) as Record<string, unknown>
+  const cents = Number(transaction.amount_in_cents ?? 0)
+  return {
+    valid: true,
+    status: mapStatus(String(transaction.status ?? "")),
+    sessionID: String(transaction.reference ?? ""),
+    amount: Number.isInteger(cents) ? fromCents(cents) : "0",
+  }
+}
+
 // readPath reads a dotted path ("transaction.status") out of a value.
 function readPath(base: unknown, path: string): unknown {
   const parts = path.split(".")

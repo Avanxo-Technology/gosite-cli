@@ -7,17 +7,21 @@
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json* yarn.lock* ./
-RUN npm install --include=dev
+# npm ci installs exactly the committed lockfile: two builds of one version
+# get the same dependencies.
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
 COPY . .
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
+# The medusa CLI lives in node_modules/.bin; the entrypoint calls it by name.
+ENV NODE_ENV=production \
+    PATH=/app/node_modules/.bin:$PATH
 # Install runtime dependencies from the compiled server's package.json.
-COPY --from=builder /app/.medusa/server/package.json ./
-RUN npm install --omit=dev && npm cache clean --force
+COPY --from=builder /app/.medusa/server/package.json /app/.medusa/server/package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 # Then the compiled server itself, including medusa-config.js.
 COPY --from=builder /app/.medusa/server/ ./
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

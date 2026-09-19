@@ -25,7 +25,7 @@ import type {
   WebhookActionResult,
 } from "@medusajs/framework/types"
 
-import { buildCheckoutURL, mapStatus, verifyEventChecksum, type EventPayload } from "./wompi"
+import { buildCheckoutURL, mapStatus, parseWebhookEvent, toCents, type EventPayload } from "./wompi"
 
 export type WompiOptions = {
   publicKey: string
@@ -98,8 +98,12 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     if (!reference) {
       return { status: "error", data: input.data }
     }
-    const status = await this.fetchStatus(String(reference))
-    return { status, data: { ...input.data, status: status.toUpperCase() } }
+    const tx = await this.fetchTransaction(String(reference))
+    // The transaction id is kept on the session: refunds need it.
+    return {
+      status: tx.status,
+      data: { ...input.data, status: tx.status.toUpperCase(), transaction_id: tx.id },
+    }
   }
 
   async getPaymentStatus(input: GetPaymentStatusInput): Promise<GetPaymentStatusOutput> {
@@ -107,7 +111,7 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     if (!reference) {
       return { status: "error", data: input.data }
     }
-    return { status: await this.fetchStatus(String(reference)), data: input.data }
+    return { status: (await this.fetchTransaction(String(reference))).status, data: input.data }
   }
 
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
@@ -115,14 +119,23 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     return { data: input.data }
   }
 
-  // refundPayment calls Wompi's refund API.
+  // refundPayment calls Wompi's refund API for the amount Medusa asks to refund
+  // (a partial refund refunds only that part). A refund that cannot reach Wompi
+  // throws: returning quietly would show the order as refunded in Medusa Admin
+  // while the buyer's money stays charged.
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
-    const transactionID = input.data?.transaction_id
-    const amount = input.data?.amount_in_cents
-    if (!transactionID) {
-      return { data: input.data }
+    let transactionID = input.data?.transaction_id as string | undefined
+    if (!transactionID && input.data?.reference) {
+      transactionID = (await this.fetchTransaction(String(input.data.reference))).id
     }
-    const response = await fetch(`${this.baseURL()}/transactions/${transactionID}/refunds`, {
+    if (!transactionID) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        "Wompi refund: the payment has no Wompi transaction to refund"
+      )
+    }
+    const amount = toCents(String(input.amount))
+    const response = await fetch(`${this.baseURL()}/transactions/${encodeURIComponent(transactionID)}/refunds`, {
       method: "POST",
       headers: this.apiHeaders(),
       body: JSON.stringify({ amount_in_cents: amount }),
@@ -164,15 +177,15 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
   async getWebhookActionAndData(
     payload: ProviderWebhookPayload["payload"]
   ): Promise<WebhookActionResult> {
-    const event = payload.data as unknown as EventPayload
-    if (!verifyEventChecksum(event, this.options_.eventsSecret)) {
+    const result = parseWebhookEvent(
+      payload.data as unknown as EventPayload,
+      this.options_.eventsSecret
+    )
+    if (!result.valid) {
       this.logger.warn("wompi: rejected a webhook with an invalid checksum")
       return { action: PaymentActions.NOT_SUPPORTED, data: { session_id: "", amount: 0 } }
     }
-    const transaction = (event.data?.transaction ?? {}) as SessionData
-    const sessionID = String(transaction.reference ?? "")
-    const amount = Number(transaction.amount_in_cents ?? 0)
-    const status = mapStatus(String(transaction.status ?? ""))
+    const { sessionID, amount, status } = result
 
     const action =
       status === "authorized"
@@ -195,17 +208,21 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     }
   }
 
-  // fetchStatus looks a transaction up by reference.
-  private async fetchStatus(reference: string): Promise<"authorized" | "pending" | "error"> {
+  // fetchTransaction looks a transaction up by reference. A missing one or an
+  // API failure is status "error" with no id.
+  private async fetchTransaction(
+    reference: string
+  ): Promise<{ id?: string; status: "authorized" | "pending" | "error" }> {
     const response = await fetch(
       `${this.baseURL()}/transactions?reference=${encodeURIComponent(reference)}`,
       { headers: this.apiHeaders() }
     )
     if (!response.ok) {
-      return "error"
+      return { status: "error" }
     }
-    const body = (await response.json()) as { data?: Array<{ status?: string }> }
-    return mapStatus(String(body.data?.[0]?.status ?? "ERROR"))
+    const body = (await response.json()) as { data?: Array<{ id?: string; status?: string }> }
+    const tx = body.data?.[0]
+    return { id: tx?.id, status: mapStatus(String(tx?.status ?? "ERROR")) }
   }
 }
 
