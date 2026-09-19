@@ -84,10 +84,10 @@ thin_load_render_vars() {
   CMS_DOMAIN="$(siteyml_get "${file}" cms_domain)"
   STORAGE_ADAPTER="$(siteyml_get "${file}" storage)"
   DATABASE="$(siteyml_get "${file}" database)"
-  # Flat commerce keys (design D4). commerce_region defaults to co so a site
-  # that lists Commerce but has not set it still renders.
+  # Flat commerce keys (design D4). No default region: a store rendered in the
+  # wrong currency cannot be fixed later, because the seed never edits an
+  # existing region. thin_check_commerce stops generate when it is missing.
   COMMERCE_REGION="$(siteyml_get "${file}" commerce_region)"
-  COMMERCE_REGION="${COMMERCE_REGION:-co}"
   THIN_CORE_VERSION="$(siteyml_get "${file}" core)"
   TAILWIND=0
   [[ "$(siteyml_get "${file}" flavor)" == "tailwind" ]] && TAILWIND=1
@@ -114,9 +114,13 @@ _thin_filter_addon_blocks() {
   local enabled
   enabled=" $(printf '%s ' "$*" | tr '[:upper:]' '[:lower:]')"
   local tmp; tmp="$(mktemp)"
-  THIN_ADDON_ENABLED="${enabled}" awk '
+  # A block left open would silently drop the rest of the file (a compose
+  # without its volumes or networks), so an unclosed, nested or stray marker
+  # fails the render instead.
+  if ! THIN_ADDON_ENABLED="${enabled}" awk '
     BEGIN { enabled = ENVIRON["THIN_ADDON_ENABLED"] }
     /^[[:space:]]*# gosite:addon[[:space:]]/ {
+      if (inblock) { err = "nested block for " name " at line " NR; exit 1 }
       name = $0
       sub(/^[[:space:]]*# gosite:addon[[:space:]]*/, "", name)
       sub(/[[:space:]]+$/, "", name)
@@ -124,9 +128,19 @@ _thin_filter_addon_blocks() {
       inblock = 1
       next
     }
-    /^[[:space:]]*# gosite:end[[:space:]]*$/ { inblock = 0; keep = 1; next }
+    /^[[:space:]]*# gosite:end[[:space:]]*$/ {
+      if (!inblock) { err = "gosite:end without a block at line " NR; exit 1 }
+      inblock = 0; keep = 1; next
+    }
     { if (inblock && !keep) next; print }
-  ' "${file}" > "${tmp}"
+    END {
+      if (err == "" && inblock) { err = "block for " name " is never closed" }
+      if (err != "") { print err > "/dev/stderr"; exit 1 }
+    }
+  ' "${file}" > "${tmp}"; then
+    rm -f "${tmp}"
+    fatal "${file}: bad gosite:addon markers (see above)."
+  fi
   mv "${tmp}" "${file}"
 }
 
@@ -172,12 +186,39 @@ thin_scaffold() {
 # rewritten, so regenerating never rotates a live database password (design D9).
 thin_ensure_commerce_secrets() {
   local dir="$1" envfile="$1/.env"
-  siteyml_list "${dir}/gosite.yml" addons | grep -qix "Commerce" || return 0
-  [[ -f "${envfile}" ]] || return 0
+  thin_commerce_enabled "${dir}" || return 0
+  # A project without .env gets one: returning quietly would render a compose
+  # whose store secrets are all blank.
+  if [[ ! -f "${envfile}" ]]; then
+    (umask 077 && : > "${envfile}")
+  fi
 
   _commerce_env_default "${envfile}" JWT_SECRET "$(random_secret 32)"
   _commerce_env_default "${envfile}" COOKIE_SECRET "$(random_secret 32)"
   _commerce_env_default "${envfile}" MEDUSA_DB_PASSWORD "$(random_secret 24)"
+  _commerce_env_default "${envfile}" MEDUSA_REDIS_PASSWORD "$(random_secret 24)"
+}
+
+# thin_commerce_enabled <dir> -> whether gosite.yml lists Commerce. The list is
+# read into a variable first: "siteyml_list | grep -q" can fail under pipefail
+# when grep exits before the writer finishes.
+thin_commerce_enabled() {
+  local addons
+  addons="$(siteyml_list "$1/gosite.yml" addons)"
+  grep -qix "Commerce" <<<"${addons}"
+}
+
+# thin_check_commerce <dir> -> stops when Commerce is enabled without a valid
+# commerce_region. Keep the codes in step with services/medusa/src/lib/regions.ts.
+thin_check_commerce() {
+  local dir="$1" region
+  thin_commerce_enabled "${dir}" || return 0
+  region="$(siteyml_get "${dir}/gosite.yml" commerce_region)"
+  case "${region}" in
+    co|us) ;;
+    "") fatal "Commerce is enabled but gosite.yml has no commerce_region. Add 'commerce_region: co' or 'commerce_region: us'." ;;
+    *) fatal "commerce_region '${region}' is not supported; use co or us." ;;
+  esac
 }
 
 # _commerce_env_default <envfile> <key> <value> -> appends KEY=VALUE when the
@@ -208,6 +249,7 @@ thin_generate() {
   local dir="$1" root f rel tmpdir
   root="$(thin_template_root)"
   thin_is_project "${dir}" || fatal "$(basename "${dir}") has no gosite.yml: 'gosite generate' only manages thin sites. Upgrade other projects with MIGRATIONS.md."
+  thin_check_commerce "${dir}"
   thin_load_render_vars "${dir}"
   thin_ensure_commerce_secrets "${dir}"
 

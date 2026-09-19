@@ -42,7 +42,7 @@ render_placeholders() {
     -e "s|__ADDONS__|${INSTALL_ADDONS}|g" \
     -e "s|__TLD__|${GOSITE_TLD}|g" \
     -e "s|__DATABASE__|${DATABASE:-mongodb}|g" \
-    -e "s|__COMMERCE_REGION__|${COMMERCE_REGION:-co}|g" \
+    -e "s|__COMMERCE_REGION__|${COMMERCE_REGION:-}|g" \
     -e "s|__STORAGE_ADAPTER__|${STORAGE_ADAPTER:-s3}|g" \
     -e "s|__S3_KEY__|${S3_KEY}|g" \
     -e "s|__S3_SECRET__|${S3_SECRET}|g" \

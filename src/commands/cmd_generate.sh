@@ -57,7 +57,7 @@ cmd_generate() {
 
   # Name the services an addon brought, so enabling Commerce is visible in the
   # command's own output and not only by reading the generated files.
-  if siteyml_list "${dir}/gosite.yml" addons | grep -qix "Commerce"; then
+  if thin_commerce_enabled "${dir}"; then
     ok "Enabled Commerce: medusa, medusa-db, medusa-redis (region $(siteyml_get "${dir}/gosite.yml" commerce_region))"
   fi
 

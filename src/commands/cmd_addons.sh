@@ -316,6 +316,13 @@ _addons_thin_update() {
 
   while IFS= read -r name; do current+=("${name}"); done < <(siteyml_list "${file}" addons)
 
+  # A store's region fixes its currency for good (the seed never edits an
+  # existing region), so it is asked for up front instead of defaulted.
+  if [[ "${mode}" == "add" ]] && grep -qix "Commerce" <<<"$(printf '%s\n' "$@")" \
+     && [[ -z "$(siteyml_get "${file}" commerce_region)" ]]; then
+    fatal "Commerce needs the country the store sells in. Add 'commerce_region: co' (Colombia, COP) or 'commerce_region: us' (USA, USD) to ${file}, then run this again."
+  fi
+
   if [[ "${mode}" == "add" ]]; then
     next=("${current[@]+"${current[@]}"}")
     for one in "$@"; do

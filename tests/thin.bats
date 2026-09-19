@@ -113,3 +113,88 @@ EOF
   thin_ensure_commerce_secrets "${dir}"
   diff -u "${dir}/.env.before" "${dir}/.env"
 }
+
+@test "commerce secrets include the Redis password" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_project_yml "${dir}"
+  thin_ensure_commerce_secrets "${dir}"
+  grep -q '^MEDUSA_REDIS_PASSWORD=..' "${dir}/.env"
+}
+
+@test "a Commerce project without .env gets one with its secrets" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_project_yml "${dir}"
+  rm "${dir}/.env"
+  thin_ensure_commerce_secrets "${dir}"
+  grep -q '^JWT_SECRET=..' "${dir}/.env"
+  [ "$(stat -f '%Lp' "${dir}/.env" 2>/dev/null || stat -c '%a' "${dir}/.env")" = "600" ]
+}
+
+@test "Commerce without commerce_region stops generate" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_project_yml "${dir}"
+  run thin_check_commerce "${dir}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no commerce_region"* ]]
+}
+
+@test "an unsupported commerce_region stops generate" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_project_yml "${dir}"
+  printf 'commerce_region: mx\n' >> "${dir}/gosite.yml"
+  run thin_check_commerce "${dir}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"'mx' is not supported"* ]]
+}
+
+@test "a supported commerce_region passes" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_project_yml "${dir}"
+  printf 'commerce_region: us\n' >> "${dir}/gosite.yml"
+  run thin_check_commerce "${dir}"
+  [ "$status" -eq 0 ]
+}
+
+@test "filter fails on a block that is never closed" {
+  printf 'a\n# gosite:addon Blog\nlost\n' > "${F}"
+  run _thin_filter_addon_blocks "${F}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"never closed"* ]]
+}
+
+@test "filter fails on a nested block" {
+  printf '# gosite:addon Blog\n# gosite:addon Commerce\n# gosite:end\n' > "${F}"
+  run _thin_filter_addon_blocks "${F}" Blog Commerce
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"nested block"* ]]
+}
+
+@test "filter fails on a stray end marker" {
+  printf 'a\n# gosite:end\n' > "${F}"
+  run _thin_filter_addon_blocks "${F}"
+  [ "$status" -ne 0 ]
+}
+
+# The real templates, rendered without addons, must be byte-identical to the
+# compose files of the release before Commerce: the six live sites regenerate
+# with no diff. The fixtures are those files from commit 3d5e7da.
+@test "templates without addons are byte-identical to the pre-Commerce release" {
+  local f
+  for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
+    _thin_filter_addon_blocks "${F}"
+    diff -u "${BATS_TEST_DIRNAME}/fixtures/compose-without-addons/${f}" "${F}"
+  done
+}
+
+@test "templates with Commerce keep no markers and isolate the store's data" {
+  local f
+  for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    ! grep -q 'gosite:addon\|gosite:end' "${F}"
+    grep -q 'internal: true' "${F}"
+    grep -q -- '--requirepass' "${F}"
+    grep -q 'condition: service_healthy' "${F}"
+  done
+}
