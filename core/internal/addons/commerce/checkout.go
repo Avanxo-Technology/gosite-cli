@@ -101,7 +101,7 @@ func (s *Commerce) CheckoutEmail(c *echo.Context) error {
 		if email == "" {
 			return cart, errInvalidStep
 		}
-		return s.client.UpdateCart(ctx, cart.ID, map[string]any{"email": email})
+		return s.client.UpdateCart(ctx, cart.ID, CartUpdate{Email: email})
 	})
 }
 
@@ -111,24 +111,21 @@ func (s *Commerce) CheckoutEmail(c *echo.Context) error {
 func (s *Commerce) CheckoutAddress(c *echo.Context) error {
 	return s.step(c, func(ctx context.Context, cart *Cart) (*Cart, error) {
 		def, _ := regionDefForCurrent()
-		address := map[string]any{
-			"first_name":   c.FormValue("first_name"),
-			"last_name":    c.FormValue("last_name"),
-			"address_1":    c.FormValue("address_1"),
-			"address_2":    c.FormValue("address_2"),
-			"city":         c.FormValue("city"),
-			"province":     c.FormValue("province"),
-			"postal_code":  c.FormValue("postal_code"),
-			"phone":        c.FormValue("phone"),
-			"country_code": def.country,
+		address := &Address{
+			FirstName:   strings.TrimSpace(c.FormValue("first_name")),
+			LastName:    strings.TrimSpace(c.FormValue("last_name")),
+			Address1:    strings.TrimSpace(c.FormValue("address_1")),
+			Address2:    strings.TrimSpace(c.FormValue("address_2")),
+			City:        strings.TrimSpace(c.FormValue("city")),
+			Province:    strings.TrimSpace(c.FormValue("province")),
+			PostalCode:  strings.TrimSpace(c.FormValue("postal_code")),
+			Phone:       strings.TrimSpace(c.FormValue("phone")),
+			CountryCode: def.country, // the region's country, never the form's
 		}
-		if address["address_1"] == "" {
+		if address.Address1 == "" {
 			return cart, errInvalidStep
 		}
-		return s.client.UpdateCart(ctx, cart.ID, map[string]any{
-			"shipping_address": address,
-			"billing_address":  address,
-		})
+		return s.client.UpdateCart(ctx, cart.ID, CartUpdate{ShippingAddress: address, BillingAddress: address})
 	})
 }
 

@@ -153,9 +153,13 @@ func (s *Commerce) setRegionID(id string) {
 }
 
 // cacheKey namespaces commerce pages under the region, so the existing purge
-// reaches them and a region change cannot serve another region's prices.
-func (s *Commerce) cacheKey(requestURI string) string {
-	return s.Config.CacheKeyPrefix() + "page:commerce:" + currentRegion() + ":" + requestURI
+// reaches them and a region change cannot serve another region's prices. The
+// key is built only from what the page depends on, never from the raw URL:
+// otherwise every "?x=N" a client invents would render, call Medusa and store
+// a new entry. Unknown categories, handles and pages are 404s, never cached,
+// so the set of keys is bounded by the catalogue.
+func (s *Commerce) cacheKey(parts ...string) string {
+	return s.Config.CacheKeyPrefix() + "page:commerce:" + currentRegion() + ":" + strings.Join(parts, ":")
 }
 
 // PLP serves the product listing, cached per region, category and page.
@@ -179,7 +183,7 @@ func (s *Commerce) PLP(c *echo.Context) error {
 	}
 	category := c.QueryParam("category")
 
-	html, cached, err := s.h.Cache.HTML(ctx, s.cacheKey(c.Request().URL.RequestURI()), func() ([]byte, error) {
+	html, cached, err := s.h.Cache.HTML(ctx, s.cacheKey("plp", category, strconv.Itoa(page)), func() ([]byte, error) {
 		return s.renderPLP(ctx, regionID, category, page)
 	})
 	if err != nil {
@@ -203,7 +207,7 @@ func (s *Commerce) PDP(c *echo.Context) error {
 	}
 
 	handle := c.Param("handle")
-	html, cached, err := s.h.Cache.HTML(ctx, s.cacheKey(c.Request().URL.RequestURI()), func() ([]byte, error) {
+	html, cached, err := s.h.Cache.HTML(ctx, s.cacheKey("pdp", handle), func() ([]byte, error) {
 		return s.renderPDP(ctx, regionID, handle)
 	})
 	if err != nil {

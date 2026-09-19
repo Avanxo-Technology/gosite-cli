@@ -18,9 +18,11 @@
 		<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
 
 		{{with .Product}}
+		{{/* The island URL is read from the element, never written into the JS:
+		     a handle with a quote cannot break out of the expression. */}}
 		<div class="mt-6" x-data="{ v: '' }"
-			x-init="$watch('v', () => { const el = document.getElementById('commerce-buy'); el.setAttribute('hx-get', '/_commerce/buy/{{.Handle}}?v=' + v); htmx.process(el); htmx.trigger(el, 'load'); })">
-			<div id="commerce-buy" hx-get="/_commerce/buy/{{.Handle}}" hx-trigger="load">
+			x-init="$watch('v', () => { const el = document.getElementById('commerce-buy'); el.setAttribute('hx-get', el.dataset.src + '?v=' + encodeURIComponent(v)); htmx.process(el); htmx.trigger(el, 'load'); })">
+			<div id="commerce-buy" data-src="/_commerce/buy/{{.Handle}}" hx-get="/_commerce/buy/{{.Handle}}" hx-trigger="load">
 				<p class="text-slate-500">Loading price…</p>
 			</div>
 

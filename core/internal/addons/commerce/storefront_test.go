@@ -252,3 +252,21 @@ func TestStoreRoutesAnswer503UntilKeyIsWritten(t *testing.T) {
 		}
 	}
 }
+
+// A query string the page does not use must not create a new cache entry:
+// otherwise anyone can flood Redis and Medusa with /tienda?x=1, ?x=2, ...
+func TestPLPIgnoresUnusedQueryInCacheKey(t *testing.T) {
+	e := newStorefront(t, true)
+	if rec := get(t, e, "/tienda?x=1"); rec.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("first PLP X-Cache = %q", rec.Header().Get("X-Cache"))
+	}
+	if rec := get(t, e, "/tienda?x=2&utm_source=y"); rec.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("PLP with another unused query X-Cache = %q, want HIT", rec.Header().Get("X-Cache"))
+	}
+	if rec := get(t, e, "/producto/tee?x=1"); rec.Code != 200 {
+		t.Fatalf("PDP status = %d", rec.Code)
+	}
+	if rec := get(t, e, "/producto/tee?x=2"); rec.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("PDP with another unused query X-Cache = %q, want HIT", rec.Header().Get("X-Cache"))
+	}
+}

@@ -3,6 +3,7 @@ package commerce
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 // Package state, set once by Configure before Mount and read by every handler.
 // A process is one site (design D1), so package state is per-site state.
 var (
-	cfgRegion       = "co"
+	cfgRegion       = ""
 	cfgPLPPath      = DefaultPLPPath
 	cfgPDPPath      = DefaultPDPPath
 	cfgCheckoutPath = DefaultCheckoutPath
@@ -30,11 +31,27 @@ const (
 // SupportedRegions are the seed's regions; Configure rejects anything else.
 var SupportedRegions = []string{"co", "us"}
 
+// validPath is a store path: lowercase segments, no trailing slash, and none
+// of Echo's ":param" or "*" syntax, which would turn it into a pattern.
+var validPath = regexp.MustCompile(`^/[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$`)
+
+// reservedPaths are served by the core or by this addon; a store path equal to
+// one of them, or under one, would shadow it.
+var reservedPaths = []string{
+	"/_commerce", cartPath, "/cache", "/healthz", "/static",
+	"/robots.txt", "/sitemap.xml", "/llms.txt", "/favicon.ico",
+}
+
 // Configure validates the commerce_* keys and applies them. It runs before any
 // route is mounted, so a rejected value stops startup with the key named
 // (addon-config spec). Only keys prefixed commerce_ are read.
 func Configure(sc siteconfig.Config) error {
-	region := strings.ToLower(strings.TrimSpace(valueOr(sc, "commerce_region", cfgRegion)))
+	// No default: a store started in the wrong currency cannot be fixed later,
+	// because the seed never edits a region that exists.
+	region := strings.ToLower(strings.TrimSpace(sc.Values["commerce_region"]))
+	if region == "" {
+		return fmt.Errorf("commerce_region is required; accepted values: %s", strings.Join(SupportedRegions, ", "))
+	}
 	if !slices.Contains(SupportedRegions, region) {
 		return fmt.Errorf("commerce_region %q is not supported; accepted values: %s", region, strings.Join(SupportedRegions, ", "))
 	}
@@ -49,8 +66,13 @@ func Configure(sc siteconfig.Config) error {
 	}
 	seen := map[string]string{}
 	for _, p := range paths {
-		if !strings.HasPrefix(p.value, "/") {
-			return fmt.Errorf("%s must start with /, got %q", p.key, p.value)
+		if !validPath.MatchString(p.value) {
+			return fmt.Errorf("%s must be a path like /tienda (lowercase letters, digits and -, no trailing /), got %q", p.key, p.value)
+		}
+		for _, reserved := range reservedPaths {
+			if p.value == reserved || strings.HasPrefix(p.value, reserved+"/") {
+				return fmt.Errorf("%s %q would shadow %s, which gosite already serves", p.key, p.value, reserved)
+			}
 		}
 		if other, ok := seen[p.value]; ok {
 			return fmt.Errorf("%s and %s have the same value %q", other, p.key, p.value)

@@ -65,8 +65,12 @@ func newClient(baseURL string, keyFn func() string, timeout time.Duration) *Clie
 	}
 }
 
+// maxResponseBytes caps how much of a Medusa response the client reads.
+const maxResponseBytes = 4 << 20
+
 // APIError is a non-2xx Store API response. It keeps the status and the body so
 // a caller can tell "not found" from "Medusa is down", and log the latter.
+// Body is Medusa's raw answer: for the log only, never for the visitor.
 type APIError struct {
 	Method string
 	Path   string
@@ -116,7 +120,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	defer resp.Body.Close()
 
-	payload, err := io.ReadAll(resp.Body)
+	// Medusa is internal, but a bounded read keeps a misbehaving response from
+	// taking the site's memory with it.
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("commerce: read %s %s: %w", method, path, err)
 	}
@@ -383,9 +389,18 @@ func (c *Client) GetCart(ctx context.Context, cartID string) (*Cart, error) {
 	return out.Cart, nil
 }
 
+// CartUpdate is everything the storefront may change on a cart. It is a closed
+// struct on purpose: a handler cannot forward other fields (region, sales
+// channel, customer, promotions, metadata) even by mistake.
+type CartUpdate struct {
+	Email           string   `json:"email,omitempty"`
+	ShippingAddress *Address `json:"shipping_address,omitempty"`
+	BillingAddress  *Address `json:"billing_address,omitempty"`
+}
+
 // UpdateCart patches the cart, for the email and the addresses the checkout
-// steps set. fields is the partial cart body Medusa expects.
-func (c *Client) UpdateCart(ctx context.Context, cartID string, fields map[string]any) (*Cart, error) {
+// steps set.
+func (c *Client) UpdateCart(ctx context.Context, cartID string, fields CartUpdate) (*Cart, error) {
 	var out struct {
 		Cart *Cart `json:"cart"`
 	}
