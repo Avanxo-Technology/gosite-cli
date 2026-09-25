@@ -417,27 +417,29 @@ class Client extends \Lime\Helper {
     }
 
     /**
-     * Fetches the original file bytes of every asset and attaches them as
-     * base64 fileData. Metadata that already exists locally still gets its
-     * file, because the merge decision happens at apply time.
+     * Fetches one asset's original file bytes (decoded), or null when the
+     * remote does not answer with them. Files get their own, longer timeout:
+     * a large video can take longer than the target's API timeout, and one
+     * slow file must not be mistaken for a missing one.
      */
-    public function attachRemoteFiles(array $assets): array {
+    public function fetchRemoteFile(string $id): ?string {
 
-        foreach ($assets as &$asset) {
+        $timeout  = max($this->target?->timeout ?? Target::DEFAULT_TIMEOUT, Target::FILE_TIMEOUT);
+        $response = $this->request('GET', "/api/replica/assets/file/{$id}", [], $timeout);
 
-            $id = $asset['_id'] ?? null;
-
-            if (!$id) continue;
-
-            $response = $this->request('GET', "/api/replica/assets/file/{$id}");
-
-            $fileData = $response['body']['asset']['fileData'] ?? $response['body']['fileData'] ?? null;
-            if ($response['status'] === 200 && $fileData !== null) {
-                $asset['fileData'] = $fileData;
-            }
+        if ($response['status'] !== 200) {
+            return null;
         }
 
-        return $assets;
+        $fileData = $response['body']['asset']['fileData'] ?? $response['body']['fileData'] ?? null;
+
+        if (!is_string($fileData) || $fileData === '') {
+            return null;
+        }
+
+        $bytes = base64_decode($fileData, true);
+
+        return $bytes === false ? null : $bytes;
     }
 
     /**
@@ -537,7 +539,7 @@ class Client extends \Lime\Helper {
     /**
      * @return array{status:int, body:mixed, error:?string}
      */
-    public function request(string $method, string $path, array $payload = []): array {
+    public function request(string $method, string $path, array $payload = [], ?int $timeout = null): array {
 
         $url = $this->baseUrl().$path;
 
@@ -555,7 +557,7 @@ class Client extends \Lime\Helper {
 
         $options = [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => $this->target?->timeout ?? Target::DEFAULT_TIMEOUT,
+            CURLOPT_TIMEOUT        => $timeout ?? $this->target?->timeout ?? Target::DEFAULT_TIMEOUT,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_CUSTOMREQUEST  => $method,
