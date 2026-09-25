@@ -237,6 +237,16 @@ How it works:
 
 - files travel as base64 `fileData` inside the asset payload, so metadata and
   bytes move in one request per asset;
+- a pull downloads and writes one asset at a time, so memory stays bounded by
+  the largest file and a run cut short keeps what it already wrote; an asset
+  whose file is already here with the same `_hash` is skipped, not downloaded
+  again;
+- each file transfer gets `Target::FILE_TIMEOUT` (300 s), or the target's
+  timeout if that is longer, so a large video is not dropped by the 30 s API
+  timeout;
+- an asset whose file cannot be transferred is counted as an error with its
+  path, and its metadata is not saved: metadata without a file is an asset
+  that 404s everywhere it is used;
 - `_id`, `path`, `_created` and `_modified` are preserved, so references inside
   the replicated entries resolve to real local files;
 - `_modified` on the metadata obeys the same mirror/merge rules as entries: in

@@ -14,6 +14,9 @@ final class Target implements \JsonSerializable {
 
     const DEFAULT_TIMEOUT = 30;
 
+    /** Seconds allowed for a single asset file transfer. */
+    const FILE_TIMEOUT = 300;
+
     public readonly ?string $id;
     public readonly string $name;
     public readonly string $baseUrl;

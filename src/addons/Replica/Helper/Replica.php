@@ -560,6 +560,12 @@ class Replica extends \Lime\Helper {
 
                     if ($path && $data !== null && $data !== '') {
                         $this->app->fileStorage->write("uploads://{$path}", base64_decode((string)$data));
+                    } elseif ($path && !$this->assetFileExists($asset)) {
+                        // Metadata without its file is an asset that 404s
+                        // everywhere it is used: report it, do not save it.
+                        $result['errors']++;
+                        $result['messages'][] = "error asset {$id}: no file data for {$path}";
+                        continue;
                     }
 
                     $this->saveAsset($asset, (bool)$existing);
@@ -573,6 +579,80 @@ class Replica extends \Lime\Helper {
 
             $result[$existing ? 'updated' : 'created']++;
             $result['messages'][] = ($dryRun ? 'would ' : '').($existing ? 'update asset ' : 'create asset ').$id;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Pulls remote assets one at a time: download a file, write it, save its
+     * metadata, move on. Memory stays bounded by the largest file, a run cut
+     * short keeps everything written so far, and an asset whose file is
+     * already here with the same hash is not downloaded again.
+     */
+    public function pullAssets(Client $client, array $assets, array $folders, string $mode): array {
+
+        $result  = $this->applyAssets([], $folders, $mode);
+        $current = $this->localAssetsById();
+
+        foreach ($assets as $asset) {
+
+            $id   = $asset['_id'] ?? null;
+            $path = trim((string)($asset['path'] ?? ''), '/');
+
+            if (!$id) {
+                $result['errors']++;
+                $result['messages'][] = 'error: incoming asset without _id';
+                continue;
+            }
+
+            $existing = $current[$id] ?? null;
+
+            if ($existing && $mode === self::MODE_MERGE
+                && (int)($existing['_modified'] ?? 0) > (int)($asset['_modified'] ?? 0)) {
+                $result['skipped']++;
+                $result['messages'][] = "skip asset {$id}: destination is newer";
+                continue;
+            }
+
+            $hash = (string)($asset['_hash'] ?? '');
+
+            if ($existing && $hash !== '' && $hash === (string)($existing['_hash'] ?? '')
+                && ($existing['path'] ?? null) === ($asset['path'] ?? null)
+                && $this->assetFileExists($asset)) {
+                $result['skipped']++;
+                continue;
+            }
+
+            if ($path) {
+
+                $bytes = $client->fetchRemoteFile($id);
+
+                if ($bytes === null) {
+                    $result['errors']++;
+                    $result['messages'][] = "error asset {$id}: could not download {$path}";
+                    continue;
+                }
+
+                try {
+                    $this->app->fileStorage->write("uploads://{$path}", $bytes);
+                } catch (\Throwable $e) {
+                    $result['errors']++;
+                    $result['messages'][] = "error asset {$id}: ".$e->getMessage();
+                    continue;
+                }
+
+                unset($bytes);
+            }
+
+            // The file is in place, so applyAssets only writes the metadata.
+            $outcome = $this->applyAssets([$asset], [], $mode);
+
+            foreach (['created', 'updated', 'skipped', 'errors'] as $key) {
+                $result[$key] += $outcome[$key];
+            }
+
+            $result['messages'] = array_merge($result['messages'], $outcome['messages']);
         }
 
         return $result;
@@ -902,12 +982,7 @@ class Replica extends \Lime\Helper {
 
                     } else {
 
-                        $outcome = $this->applyAssets(
-                            $client->attachRemoteFiles($assets),
-                            $folders,
-                            $mode,
-                            false
-                        );
+                        $outcome = $this->pullAssets($client, $assets, $folders, $mode);
 
                         $result['assets'] = $outcome;
                         $result['messages'][] = 'assets: '.json_encode($outcome);

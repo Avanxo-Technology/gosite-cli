@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.54.1
+
+### Replica: an asset pull finishes, and says when a file did not arrive
+
+Pulling assets downloaded every file into memory first and wrote them only at
+the end, all inside the admin's single HTTP request. On soyarnold that was 137
+files and 101 MB, about 200 s, so the run looked hung and a request cut short
+wrote nothing. Every file also used the target's 30 s API timeout, and the
+largest video took 28 to 30 s, so it was dropped now and then.
+
+A dropped file was the worse half. `applyAssets` saved the metadata anyway and
+counted the asset as created, so Cockpit listed it and the site got a 404 from
+S3 with no error anywhere.
+
+Now:
+
+- a pull downloads, writes and records **one asset at a time**, so a run cut
+  short keeps what it wrote (peak memory for that pull: 95 MB);
+- an asset whose file is already here with the same `_hash` is skipped: the
+  second pull of the same 137 assets took 1 s instead of 200 s;
+- file transfers get `Target::FILE_TIMEOUT` (300 s), separate from the API
+  timeout;
+- a file that does not arrive is an error naming its path, and its metadata
+  is not saved, on pull and on the push endpoint alike;
+- the admin run ignores a closed tab (`ignore_user_abort`), so it finishes
+  instead of stopping halfway.
+
+Only the pulling side changes. The remote's `/api/replica/assets/file/{id}`
+is the same, so a new instance can pull from one still on the old version.
+An existing project gets it by copying `src/addons/Replica` into
+`cockpit/addons/Replica` and rebuilding the CMS image
+(`gosite restart <name> --build`), because addons are baked into the image.
+
 ## 0.53.1
 
 ### Coolify domains stop resolving with 0.51.0's compose

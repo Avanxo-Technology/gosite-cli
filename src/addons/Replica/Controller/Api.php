@@ -106,6 +106,11 @@ class Api extends \App\Controller\Base {
             'model'   => $this->param('model', null) ?: null,
         ];
 
+        // A run with assets can outlast the browser's patience. Finish it
+        // anyway: stopping halfway leaves the destination half-copied.
+        ignore_user_abort(true);
+        @set_time_limit(0);
+
         $result = $direction === 'pull'
             ? $replica->pull($target, $options)
             : $replica->push($target, $options);
