@@ -127,7 +127,11 @@ EOF
   rm "${dir}/.env"
   thin_ensure_commerce_secrets "${dir}"
   grep -q '^JWT_SECRET=..' "${dir}/.env"
-  [ "$(stat -f '%Lp' "${dir}/.env" 2>/dev/null || stat -c '%a' "${dir}/.env")" = "600" ]
+  # GNU first, in separate assignments: GNU `stat -f` means --file-system (see
+  # _mtime in helpers.sh), so a combined `||` concatenates on Linux.
+  local mode
+  mode="$(stat -c '%a' "${dir}/.env" 2>/dev/null)" || mode="$(stat -f '%Lp' "${dir}/.env")"
+  [ "${mode}" = "600" ]
 }
 
 @test "Commerce without commerce_region stops generate" {
