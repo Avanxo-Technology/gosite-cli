@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.55.0
+
+### Commerce: a store per site (preview)
+
+A new optional addon for thin sites. `gosite addons add Commerce <site>` and
+`gosite generate` give the site its own Medusa v2 engine and a server-rendered
+storefront; Medusa Admin is the back office, on `shop.<domain>`.
+
+- **One Medusa per site and per environment.** Its Postgres and Redis live on
+  a per-project internal network, not on the shared gosite network, and Redis
+  requires `MEDUSA_REDIS_PASSWORD`. The image refuses to start without
+  `JWT_SECRET`, `COOKIE_SECRET` or `DATABASE_URL`.
+- **`commerce_region: co|us`** in `gosite.yml` is required; `addons add` and
+  `generate` stop and ask for it.
+- **Storefront in core:** product listing and detail pages, a server-side
+  cart behind an httpOnly cookie, and guest checkout with per-region address
+  forms. Cache keys use only category and page, or the handle.
+- **Payments:** Wompi (CO) and manual. Amounts reach Medusa in the major unit,
+  and refunds are sent to Wompi or fail loudly.
+- **Idempotent seed:** region, sales channel, shipping, publishable key, demo
+  product and admin user are created once and never modified afterwards.
+
+Without Commerce the generated compose files are unchanged apart from the SMTP
+variables below.
+
+Still open, and why this is a preview: building on Coolify (the internal
+network and `additional_contexts` from git) is unverified, Traefik labels for
+`shop.<domain>` are not generated yet, the Wompi refund endpoint has not been
+tested against the sandbox, and Stripe is not implemented.
+
+### Cockpit sends e-mail over SMTP
+
+Cockpit had no mailer configuration, so it used PHP `mail()`, which the CMS
+image cannot deliver: Forms notifications were logged as `mail failed` and
+never arrived. The submission itself was always stored.
+
+`SMTP_HOST` now switches the mailer to SMTP, configured by `SMTP_PORT` (587),
+`SMTP_ENCRYPTION` (`tls`, `ssl` for port 465, or `none`), `SMTP_USER`,
+`SMTP_PASSWORD`, `SMTP_FROM` and `SMTP_FROM_NAME`. Without `SMTP_FROM` the
+sender is `SMTP_USER` when that is an address. The dev, QA and prod composes
+pass the variables to the CMS, empty by default. Without `SMTP_HOST` nothing
+changes.
+
 ## 0.54.1
 
 ### Replica: an asset pull finishes, and says when a file did not arrive

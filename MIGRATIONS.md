@@ -496,6 +496,22 @@ database 1" above.
 **Local infra.** Nothing to do in projects. Run `gosite infra up` once; it
 recreates MinIO on `coollabsio/minio` with the same volume and credentials.
 
+## → 0.55.0 — SMTP for the CMS, Commerce (preview)
+
+Nothing is required. Both changes are opt-in.
+
+**SMTP (for any site using Forms `notify`).** Without it, form e-mails never
+arrive. Thin sites get the configuration on the next `gosite generate`
+(`cockpit/config.core.php` and the three composes). Legacy sites merge it by
+hand: the `mailer` block in `cockpit/config.php` and the `SMTP_*` lines on the
+CMS service of each compose. Then set at least `SMTP_HOST`, `SMTP_USER`,
+`SMTP_PASSWORD` and `SMTP_FROM` in `.env` and in Coolify, and submit a form to
+check that the e-mail arrives. A QA stack that uses production's credentials
+sends real e-mail.
+
+**Commerce.** Thin sites only, through `gosite addons add Commerce <site>`. See
+the README before using it in production.
+
 ---
 
 ### Verify before you call it done
