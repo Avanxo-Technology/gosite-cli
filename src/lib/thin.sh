@@ -84,6 +84,10 @@ thin_load_render_vars() {
   CMS_DOMAIN="$(siteyml_get "${file}" cms_domain)"
   STORAGE_ADAPTER="$(siteyml_get "${file}" storage)"
   DATABASE="$(siteyml_get "${file}" database)"
+  # Flat commerce keys (design D4). No default region: a store rendered in the
+  # wrong currency cannot be fixed later, because the seed never edits an
+  # existing region. thin_check_commerce stops generate when it is missing.
+  COMMERCE_REGION="$(siteyml_get "${file}" commerce_region)"
   THIN_CORE_VERSION="$(siteyml_get "${file}" core)"
   TAILWIND=0
   [[ "$(siteyml_get "${file}" flavor)" == "tailwind" ]] && TAILWIND=1
@@ -95,7 +99,49 @@ thin_load_render_vars() {
   CMS_TOKEN="${CMS_TOKEN:-__CMS_TOKEN__}"
   COCKPIT_SEC_KEY="${COCKPIT_SEC_KEY:-__COCKPIT_SEC_KEY__}"
   export PROJECT_NAME PROJECT_MODULE APP_PORT CMS_PORT APP_DOMAIN CMS_DOMAIN \
-         STORAGE_ADAPTER DATABASE TAILWIND INSTALL_ADDONS CMS_TOKEN COCKPIT_SEC_KEY
+         STORAGE_ADAPTER DATABASE TAILWIND INSTALL_ADDONS CMS_TOKEN COCKPIT_SEC_KEY \
+         COMMERCE_REGION
+}
+
+# _thin_filter_addon_blocks <file> <addons...> -> keeps the body of every
+# `# gosite:addon <Name>` ... `# gosite:end` block whose addon is listed and
+# drops the rest, removing the marker lines either way. Blocks are never
+# nested (design D3); matching is case-insensitive. This is how an addon can
+# bring compose services: the block lives in the template, gosite.yml decides
+# whether it survives rendering.
+_thin_filter_addon_blocks() {
+  local file="$1"; shift
+  local enabled
+  enabled=" $(printf '%s ' "$*" | tr '[:upper:]' '[:lower:]')"
+  local tmp; tmp="$(mktemp)"
+  # A block left open would silently drop the rest of the file (a compose
+  # without its volumes or networks), so an unclosed, nested or stray marker
+  # fails the render instead.
+  if ! THIN_ADDON_ENABLED="${enabled}" awk '
+    BEGIN { enabled = ENVIRON["THIN_ADDON_ENABLED"] }
+    /^[[:space:]]*# gosite:addon[[:space:]]/ {
+      if (inblock) { err = "nested block for " name " at line " NR; exit 1 }
+      name = $0
+      sub(/^[[:space:]]*# gosite:addon[[:space:]]*/, "", name)
+      sub(/[[:space:]]+$/, "", name)
+      keep = (index(enabled, " " tolower(name) " ") > 0)
+      inblock = 1
+      next
+    }
+    /^[[:space:]]*# gosite:end[[:space:]]*$/ {
+      if (!inblock) { err = "gosite:end without a block at line " NR; exit 1 }
+      inblock = 0; keep = 1; next
+    }
+    { if (inblock && !keep) next; print }
+    END {
+      if (err == "" && inblock) { err = "block for " name " is never closed" }
+      if (err != "") { print err > "/dev/stderr"; exit 1 }
+    }
+  ' "${file}" > "${tmp}"; then
+    rm -f "${tmp}"
+    fatal "${file}: bad gosite:addon markers (see above)."
+  fi
+  mv "${tmp}" "${file}"
 }
 
 # _thin_render <file> <dir> -> thin-only placeholders, then the shared ones.
@@ -111,6 +157,9 @@ _thin_render() {
     -e "s|__DISABLED_ADDONS__|$(thin_disabled_addons "${addons[@]+"${addons[@]}"}")|g" \
     "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
+  # Drop addon blocks before the shared placeholders run, so a dropped block's
+  # placeholders never reach assert_no_placeholders.
+  _thin_filter_addon_blocks "${file}" "${addons[@]+"${addons[@]}"}"
   render_placeholders "${file}"
 }
 
@@ -132,6 +181,67 @@ thin_scaffold() {
   done < <(cd "${root}/flavors/${flavor}" && find . -type f -print0)
 }
 
+# thin_ensure_commerce_secrets <dir> -> when Commerce is enabled, make sure the
+# store's secrets exist in the project's .env. Values already present are never
+# rewritten, so regenerating never rotates a live database password (design D9).
+thin_ensure_commerce_secrets() {
+  local dir="$1" envfile="$1/.env"
+  thin_commerce_enabled "${dir}" || return 0
+  # A project without .env gets one: returning quietly would render a compose
+  # whose store secrets are all blank.
+  if [[ ! -f "${envfile}" ]]; then
+    (umask 077 && : > "${envfile}")
+  fi
+
+  _commerce_env_default "${envfile}" JWT_SECRET "$(random_secret 32)"
+  _commerce_env_default "${envfile}" COOKIE_SECRET "$(random_secret 32)"
+  _commerce_env_default "${envfile}" MEDUSA_DB_PASSWORD "$(random_secret 24)"
+  _commerce_env_default "${envfile}" MEDUSA_REDIS_PASSWORD "$(random_secret 24)"
+}
+
+# thin_commerce_enabled <dir> -> whether gosite.yml lists Commerce. The list is
+# read into a variable first: "siteyml_list | grep -q" can fail under pipefail
+# when grep exits before the writer finishes.
+thin_commerce_enabled() {
+  local addons
+  addons="$(siteyml_list "$1/gosite.yml" addons)"
+  grep -qix "Commerce" <<<"${addons}"
+}
+
+# thin_check_commerce <dir> -> stops when Commerce is enabled without a valid
+# commerce_region. Keep the codes in step with services/medusa/src/lib/regions.ts.
+thin_check_commerce() {
+  local dir="$1" region
+  thin_commerce_enabled "${dir}" || return 0
+  region="$(siteyml_get "${dir}/gosite.yml" commerce_region)"
+  case "${region}" in
+    co|us) ;;
+    "") fatal "Commerce is enabled but gosite.yml has no commerce_region. Add 'commerce_region: co' or 'commerce_region: us'." ;;
+    *) fatal "commerce_region '${region}' is not supported; use co or us." ;;
+  esac
+}
+
+# _commerce_env_default <envfile> <key> <value> -> appends KEY=VALUE when the
+# key is absent. An empty assignment counts as absent, so a blank value left by
+# hand is filled in rather than kept.
+_commerce_env_default() {
+  local envfile="$1" key="$2" value="$3"
+  local current
+  current="$(_env_value "$(dirname "${envfile}")" "${key}")"
+  [[ -n "${current}" ]] && return 0
+  # Drop a blank line for the key so the appended value wins on dotenv reads.
+  grep -qE "^${key}=$" "${envfile}" && { _delete_env_key "${envfile}" "${key}"; }
+  printf '%s=%s\n' "${key}" "${value}" >> "${envfile}"
+}
+
+# _delete_env_key <envfile> <key> -> removes every line assigning that key.
+_delete_env_key() {
+  local envfile="$1" key="$2" tmp
+  tmp="$(mktemp)"
+  grep -vE "^${key}=" "${envfile}" > "${tmp}" || true
+  mv "${tmp}" "${envfile}"
+}
+
 # thin_generate <dir> -> rewrites every generated file. Prints what it wrote,
 # and names (without touching) any generated file that lost its mark; their
 # count is left in THIN_SKIPPED.
@@ -139,7 +249,9 @@ thin_generate() {
   local dir="$1" root f rel tmpdir
   root="$(thin_template_root)"
   thin_is_project "${dir}" || fatal "$(basename "${dir}") has no gosite.yml: 'gosite generate' only manages thin sites. Upgrade other projects with MIGRATIONS.md."
+  thin_check_commerce "${dir}"
   thin_load_render_vars "${dir}"
+  thin_ensure_commerce_secrets "${dir}"
 
   THIN_SKIPPED=0
   tmpdir="$(mktemp -d)"

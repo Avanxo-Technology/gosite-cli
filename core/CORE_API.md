@@ -138,7 +138,51 @@ file.
 ```go
 gositetest.CheckTheme(t, theme)      // slots present once, every page renders
 gositetest.ThemeProblems(theme)      // the same, as a list
+gositetest.CheckCommercePages(t, theme) // the Commerce addon's pages render
 ```
+
+## Commerce addon contract
+
+Enabled by listing `Commerce` in `gosite.yml`. A theme overrides any page by
+shipping `pages/<name>.html` (`commerce-plp.html`, `commerce-pdp.html`,
+`commerce-buy.html`, `commerce-cart.html`, `commerce-cart-lines.html`,
+`commerce-minicart.html`, `commerce-checkout.html`, `commerce-confirmation.html`,
+`commerce-step-email.html`, `commerce-step-shipping.html`,
+`commerce-step-payment.html`, `commerce-address.html`, `commerce-address-co.html`,
+`commerce-address-us.html`).
+
+Routes: the listing at `commerce_plp_path` (`/tienda`), the product at
+`commerce_pdp_path/:handle` (`/producto`), the cart at `/carrito` and the
+checkout at `commerce_checkout_path` (`/checkout`). The Store API is called only
+by the Go site; the browser never sees the publishable key.
+
+The cart is a Medusa cart referenced by the `gosite_cart` cookie
+(`<cart_id>.<region>`, httpOnly, SameSite=Lax, 30 days). A cookie whose cart is
+missing, completed or of another region is discarded.
+
+htmx mutations (each also works as a plain form POST, which redirects):
+
+| Endpoint | Fields | Returns |
+|---|---|---|
+| `POST /_commerce/add` | `variant_id`, `handle`, `quantity` | the buy island (`#commerce-buy`) |
+| `POST /_commerce/cart/update` | `line_id`, `quantity` | cart lines into `#commerce-cart-lines` |
+| `POST /_commerce/cart/remove` | `line_id` | cart lines into `#commerce-cart-lines` |
+| `POST /_commerce/checkout/email` | `email` | the next step |
+| `POST /_commerce/checkout/address` | `first_name`, `last_name`, `address_1`, `address_2`, `city`, `province`, `postal_code`, `phone` | the next step |
+| `POST /_commerce/checkout/shipping` | `option_id` | the payment step |
+| `POST /_commerce/checkout/complete` | `provider_id` | a redirect to the thanks page |
+
+Fragments and IDs a theme must keep:
+
+- `#commerce-minicart` — the mini-cart. Mutations return it with
+  `hx-swap-oob="true"`, so the header count updates in the same response. The
+  addon returns it but does not place it in the layout (that needs a
+  slot-contribution API core does not have yet).
+- `#commerce-cart-lines` — the cart lines container.
+- `#commerce-checkout` — the checkout step container.
+- `.commerce-buy` — the PDP buy island (price, stock, add form), fetched from
+  `/_commerce/buy/:handle` and reloaded by the Alpine variant selector.
+
 
 ## Environment
 

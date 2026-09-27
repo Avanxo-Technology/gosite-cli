@@ -1,0 +1,37 @@
+{
+  "name": "gosite-medusa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "gosite commerce engine: a pinned Medusa v2 with the gosite seed and cart cleanup.",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "build": "medusa build",
+    "start": "medusa start",
+    "dev": "medusa develop",
+    "migrate": "medusa db:migrate",
+    "seed": "medusa exec ./src/scripts/seed.ts",
+    "test:unit": "node --test 'tests/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@medusajs/admin-sdk": "2.21.0",
+    "@medusajs/cli": "2.21.0",
+    "@medusajs/framework": "2.21.0",
+    "@medusajs/medusa": "2.21.0",
+    "@mikro-orm/core": "6.6.14",
+    "@mikro-orm/knex": "6.6.14",
+    "@mikro-orm/migrations": "6.6.14",
+    "@mikro-orm/postgresql": "6.6.14",
+    "awilix": "^8.0.1",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.7.28",
+    "@swc/jest": "^0.2.36",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.6.2",
+    "vite": "^5.2.11"
+  }
+}

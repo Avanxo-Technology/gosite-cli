@@ -1,0 +1,5 @@
+node_modules
+.medusa
+tests
+*.log
+.env

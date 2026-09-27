@@ -1,0 +1,37 @@
+{{/*
+  Cart lines fragment. Returned by the add/update/remove mutations and swapped
+  into #commerce-cart-lines. Every form is a real POST, so it also works
+  without JavaScript.
+*/}}
+{{define "content"}}
+{{if .Empty}}
+<p class="rounded-lg border border-slate-200 bg-white p-6 text-slate-600 shadow-sm">
+	Your cart is empty.
+</p>
+{{else}}
+<ul class="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
+	{{range .Lines}}
+	<li class="flex items-center gap-4 p-4">
+		{{with .Thumbnail}}<img src="{{.}}" alt="" class="h-16 w-16 rounded-md object-cover">{{end}}
+		<div class="min-w-0 flex-1">
+			<p class="truncate font-medium">{{.Title}}</p>
+			<p class="text-sm text-slate-500">{{.UnitPrice}}</p>
+		</div>
+		<form method="post" action="/_commerce/cart/update" class="flex items-center gap-2"
+			hx-post="/_commerce/cart/update" hx-target="#commerce-cart-lines" hx-swap="innerHTML">
+			<input type="hidden" name="line_id" value="{{.ID}}">
+			<input type="number" name="quantity" value="{{.Quantity}}" min="1"
+				class="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm">
+			<button type="submit" class="text-sm text-slate-600 hover:underline">Update</button>
+		</form>
+		<form method="post" action="/_commerce/cart/remove"
+			hx-post="/_commerce/cart/remove" hx-target="#commerce-cart-lines" hx-swap="innerHTML">
+			<input type="hidden" name="line_id" value="{{.ID}}">
+			<button type="submit" class="text-sm text-red-600 hover:underline">Remove</button>
+		</form>
+		<span class="w-24 text-right font-medium">{{.Total}}</span>
+	</li>
+	{{end}}
+</ul>
+{{end}}
+{{end}}

@@ -478,6 +478,11 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         <h3>Replica <span class="tag opt">optional</span></h3>
         <p>Content replication between Cockpit instances: push/pull, multiple targets, mirror/merge conflict handling, dry runs, a CLI and an activity log — no commercial addon required.</p>
       </article>
+      <article class="card rv">
+        <div class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18l-1.5 11H4.5z"/><path d="M8 10h8M8 13h8"/></svg></div>
+        <h3>Commerce <span class="tag opt">optional</span></h3>
+        <p>A store per site, without leaving gosite. Listing <code>Commerce</code> in <code>gosite.yml</code> adds the site's own <strong>Medusa v2</strong> engine, Postgres and Redis to the generated compose files; the catalog, prices, stock and orders live in Medusa's own Admin on the <code>shop.&lt;site&gt;</code> subdomain. The Go addon serves the listing, product, cart and checkout over cached pages with live price/stock islands, keeps the cart server-side behind an httpOnly cookie, and purges its cache when the catalog changes. Set <code>commerce_region</code> (<code>co</code> or <code>us</code>) and the seed creates a region, sales channel, shipping option, publishable key and a demo product so the store works with no credentials. Payments (Stripe, Wompi) are enabled by setting the client's keys.</p>
+      </article>
     </div>
   </div>
 </section>

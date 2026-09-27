@@ -1,0 +1,29 @@
+{{/* Checkout step 3: shipping method. */}}
+{{define "content"}}
+<form method="post" action="/_commerce/checkout/shipping"
+	hx-post="/_commerce/checkout/shipping" hx-target="#commerce-checkout" hx-swap="innerHTML"
+	class="space-y-4">
+	{{with .Error}}<p class="text-sm text-red-600">{{.}}</p>{{end}}
+	{{if .Options}}
+	<div class="space-y-2">
+		{{range .Options}}
+		<label class="flex items-center justify-between rounded-md border border-slate-300 px-3 py-2">
+			<span class="flex items-center gap-3">
+				<input type="radio" name="option_id" value="{{.ID}}" required>
+				<span>{{.Name}}</span>
+			</span>
+			<span class="text-slate-600">{{.Price}}</span>
+		</label>
+		{{end}}
+	</div>
+	<button type="submit" hx-disabled-elt="this"
+		class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+		Continue to payment
+	</button>
+	{{else}}
+	<p class="rounded-md border border-slate-200 bg-white p-4 text-slate-600">
+		No shipping options are available for this address.
+	</p>
+	{{end}}
+</form>
+{{end}}

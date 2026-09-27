@@ -20,6 +20,11 @@ services:
       REDIS_URL: "redis://__REDIS_HOST__:__REDIS_PORT__/0"
       COCKPIT_URL: "http://__PROJECT__-cms:80"
       GOSITE_PROJECT: "__PROJECT__"
+      # gosite:addon Commerce
+      # The site's Go addon reads its store over the project network; the
+      # publishable key comes from the shared volume mounted below.
+      COMMERCE_URL: "http://__PROJECT__-medusa:9000"
+      # gosite:end
     # Host ports stay mapped as a fallback; the domain below is the main entry.
     ports:
       - "__APP_PORT__:8080"
@@ -36,6 +41,10 @@ services:
       # Named volumes keep the module cache and build artifacts off the host FS.
       - __PROJECT__-gomod:/go/pkg/mod
       - __PROJECT__-tmp:/app/tmp
+      # gosite:addon Commerce
+      # Read-only: the seed writes the publishable key, the site only reads it.
+      - __PROJECT__-commerce-key:/run/gosite-commerce:ro
+      # gosite:end
     depends_on:
       - cms
     networks:
@@ -95,12 +104,102 @@ services:
       - ./cockpit-storage:/var/www/html/storage
     networks:
       - gosite
+  # gosite:addon Commerce
+
+  # The store's own engine and data (design D1): one Medusa per site and
+  # environment, never shared. Managed through Medusa's Admin.
+  medusa:
+    image: ghcr.io/avanxo-technology/gosite-medusa:__CORE_VERSION__
+    container_name: __PROJECT__-medusa
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgres://medusa:${MEDUSA_DB_PASSWORD}@__PROJECT__-medusa-db:5432/medusa?sslmode=disable"
+      REDIS_URL: "redis://:${MEDUSA_REDIS_PASSWORD}@__PROJECT__-medusa-redis:6379/0"
+      JWT_SECRET: "${JWT_SECRET}"
+      COOKIE_SECRET: "${COOKIE_SECRET}"
+      COMMERCE_REGION: "__COMMERCE_REGION__"
+      COMMERCE_ADMIN_EMAIL: "${COMMERCE_ADMIN_EMAIL:-admin@gosite.local}"
+      # The seed writes the key; a catalogue change asks the site to drop its
+      # cached pages through the same token the CMS uses.
+      GOSITE_PURGE_URL: "http://__PROJECT__-app:8080/cache/purge"
+      GOSITE_PURGE_TOKEN: "${COCKPIT_API_TOKEN}"
+      # Payment credentials gate provider registration. Empty by default: only
+      # the manual provider is registered until a client's keys are set.
+      STRIPE_API_KEY: "${STRIPE_API_KEY:-}"
+      WOMPI_PUBLIC_KEY: "${WOMPI_PUBLIC_KEY:-}"
+      WOMPI_PRIVATE_KEY: "${WOMPI_PRIVATE_KEY:-}"
+      WOMPI_INTEGRITY_SECRET: "${WOMPI_INTEGRITY_SECRET:-}"
+      WOMPI_EVENTS_SECRET: "${WOMPI_EVENTS_SECRET:-}"
+      WOMPI_CHECKOUT_URL: "${WOMPI_CHECKOUT_URL:-}"
+      WOMPI_API_URL: "${WOMPI_API_URL:-}"
+      ADMIN_CORS: "https://shop.__DOMAIN__"
+      AUTH_CORS: "https://shop.__DOMAIN__"
+    volumes:
+      # The seed writes the publishable key here; the app mounts it read-only.
+      - __PROJECT__-commerce-key:/run/gosite-commerce
+    depends_on:
+      medusa-db:
+        condition: service_healthy
+      medusa-redis:
+        condition: service_healthy
+    networks:
+      - gosite
+      - commerce
+
+  medusa-db:
+    image: postgres:16-alpine
+    container_name: __PROJECT__-medusa-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medusa
+      POSTGRES_PASSWORD: "${MEDUSA_DB_PASSWORD}"
+      POSTGRES_DB: medusa
+    volumes:
+      - __PROJECT__-medusa-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Only on the store's internal network: no other site or stack on the
+    # host can reach the database.
+    networks:
+      - commerce
+
+  medusa-redis:
+    image: redis:7-alpine
+    container_name: __PROJECT__-medusa-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${MEDUSA_REDIS_PASSWORD}"]
+    volumes:
+      - __PROJECT__-medusa-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    environment:
+      REDIS_PASSWORD: "${MEDUSA_REDIS_PASSWORD}"
+    networks:
+      - commerce
+  # gosite:end
 
 volumes:
   __PROJECT__-gomod:
   __PROJECT__-tmp:
+  # gosite:addon Commerce
+  __PROJECT__-commerce-key:
+  __PROJECT__-medusa-db:
+  __PROJECT__-medusa-redis:
+  # gosite:end
 
 networks:
   gosite:
     external: true
     name: __NETWORK__
+  # gosite:addon Commerce
+  # The store's private network (internal: no route out, no other stack).
+  commerce:
+    name: __PROJECT__-commerce
+    internal: true
+  # gosite:end

@@ -1,0 +1,32 @@
+{{/* Checkout step 2 for the United States: state and ZIP. */}}
+{{define "content"}}
+<form method="post" action="/_commerce/checkout/address"
+	hx-post="/_commerce/checkout/address" hx-target="#commerce-checkout" hx-swap="innerHTML"
+	class="space-y-4">
+	{{with .Error}}<p class="text-sm text-red-600">{{.}}</p>{{end}}
+	<div class="grid grid-cols-2 gap-4">
+		<label class="block"><span class="text-sm font-medium text-slate-700">First name</span>
+			<input name="first_name" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+		<label class="block"><span class="text-sm font-medium text-slate-700">Last name</span>
+			<input name="last_name" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+	</div>
+	<label class="block"><span class="text-sm font-medium text-slate-700">Address</span>
+		<input name="address_1" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+	<label class="block"><span class="text-sm font-medium text-slate-700">Address 2 (optional)</span>
+		<input name="address_2" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+	<div class="grid grid-cols-3 gap-4">
+		<label class="block col-span-1"><span class="text-sm font-medium text-slate-700">City</span>
+			<input name="city" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+		<label class="block"><span class="text-sm font-medium text-slate-700">State</span>
+			<input name="province" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+		<label class="block"><span class="text-sm font-medium text-slate-700">ZIP</span>
+			<input name="postal_code" required class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+	</div>
+	<label class="block"><span class="text-sm font-medium text-slate-700">Phone</span>
+		<input name="phone" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"></label>
+	<button type="submit" hx-disabled-elt="this"
+		class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+		Continue to shipping
+	</button>
+</form>
+{{end}}

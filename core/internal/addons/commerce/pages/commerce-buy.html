@@ -1,0 +1,33 @@
+{{/*
+  The buy island: price, stock and the add form for one variant. Served live by
+  /_commerce/buy/<handle> and swapped into the PDP with htmx, so a price change
+  does not wait for the cached page. Also re-served on a failed add.
+
+  The add form is a real form (method=post), so it works without JavaScript: the
+  handler redirects back when the request is not from htmx.
+*/}}
+{{define "content"}}
+<div class="commerce-buy" data-variant="{{.VariantID}}">
+	{{with .Error}}<p class="commerce-error mb-2 text-sm text-red-600">{{.}}</p>{{end}}
+
+	{{if .Price}}<p class="commerce-price text-2xl font-semibold">{{.Price}}</p>{{end}}
+
+	{{if and .StockKnown (not .InStock)}}
+	<p class="commerce-stock text-sm text-red-600">Out of stock</p>
+	{{else if .StockKnown}}
+	<p class="commerce-stock text-sm text-slate-500">{{.Stock}} in stock</p>
+	{{end}}
+
+	{{if .InStock}}
+	<form method="post" action="/_commerce/add" class="mt-4 flex items-center gap-3"
+		hx-post="/_commerce/add" hx-target="closest .commerce-buy" hx-swap="outerHTML">
+		<input type="hidden" name="variant_id" value="{{.VariantID}}">
+		<input type="hidden" name="handle" value="{{.Handle}}">
+		<input type="hidden" name="quantity" value="1">
+		<button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+			Add to cart
+		</button>
+	</form>
+	{{end}}
+</div>
+{{end}}
