@@ -97,6 +97,44 @@ $config = [
     ],
 ];
 
+// Outgoing e-mail: Forms notifications and Cockpit's password resets. With no
+// `mailer` key Cockpit falls back to PHP mail(), which the image cannot deliver
+// (there is no sendmail in it): the Forms addon logs "mail failed" and the
+// message is lost. Enabled per environment by setting SMTP_HOST.
+//   SMTP_PORT        default 587
+//   SMTP_ENCRYPTION  tls (STARTTLS, default), ssl (implicit TLS, port 465 -
+//                    the default when SMTP_PORT=465) or none
+//   SMTP_USER/SMTP_PASSWORD  SMTP auth is on only when SMTP_USER is set
+//   SMTP_FROM        sender address (default: SMTP_USER when it is one); most
+//                    providers reject a sender they have not verified
+//   SMTP_FROM_NAME   optional display name
+if (getenv('SMTP_HOST')) {
+    $smtpPort       = (int)(getenv('SMTP_PORT') ?: 587);
+    $smtpEncryption = getenv('SMTP_ENCRYPTION') ?: ($smtpPort === 465 ? 'ssl' : 'tls');
+
+    $config['mailer'] = [
+        'transport'  => 'smtp',
+        'host'       => getenv('SMTP_HOST'),
+        'port'       => $smtpPort,
+        'auth'       => (string)getenv('SMTP_USER') !== '',
+        'user'       => (string)getenv('SMTP_USER'),
+        'password'   => (string)getenv('SMTP_PASSWORD'),
+        'encryption' => $smtpEncryption === 'none' ? '' : $smtpEncryption,
+    ];
+
+    // Without a sender PHPMailer sends `MAIL FROM:<>`, which providers reject,
+    // so fall back to SMTP_USER when it is an address (Gmail, Microsoft 365).
+    // Set only when known: Cockpit passes `from` straight to
+    // PHPMailer::setFrom(), which throws on an empty address.
+    $smtpFrom = getenv('SMTP_FROM')
+        ?: (filter_var(getenv('SMTP_USER'), FILTER_VALIDATE_EMAIL) ?: '');
+
+    if ($smtpFrom !== '') {
+        $config['mailer']['from']      = $smtpFrom;
+        $config['mailer']['from_name'] = (string)getenv('SMTP_FROM_NAME');
+    }
+}
+
 // S3-compatible asset storage (MinIO in dev, AWS/Backblaze/R2 in prod).
 // Enabled per environment with STORAGE_ADAPTER=s3; the CloudStorage addon
 // reads this config and wires uploads to the Flysystem S3 adapter the core

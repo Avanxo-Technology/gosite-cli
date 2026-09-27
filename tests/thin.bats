@@ -177,7 +177,8 @@ EOF
 
 # The real templates, rendered without addons, must be byte-identical to the
 # compose files of the release before Commerce: the six live sites regenerate
-# with no diff. The fixtures are those files from commit 3d5e7da.
+# with no diff. The fixtures are those files from commit 3d5e7da plus the
+# optional SMTP_* variables on the CMS (0.55.0), which every site gets.
 @test "templates without addons are byte-identical to the pre-Commerce release" {
   local f
   for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do

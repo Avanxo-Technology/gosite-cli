@@ -30,3 +30,15 @@ S3_VERIFY=false
 # browser load assets CDN-style instead of through the /storage/uploads proxy.
 # In production point this at a CDN or bucket endpoint.
 S3_PUBLIC_URL=https://minio.__TLD__/assets
+
+# Outgoing e-mail from the CMS (Forms notifications, password resets). Optional:
+# leave SMTP_HOST empty and no e-mail is sent. SMTP_ENCRYPTION is tls
+# (STARTTLS, port 587), ssl (port 465) or none. SMTP_FROM must be a sender your
+# provider has verified.
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_ENCRYPTION=tls
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+SMTP_FROM_NAME=

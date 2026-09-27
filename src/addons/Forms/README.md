@@ -193,8 +193,13 @@ Create one item in **Content → Form settings** per form:
 | `throttle` | seconds between submissions per IP (`0` disables) |
 | `dailyLimit` | max per IP per day (`0` disables) |
 
-E-mail goes through `$app->mailer` (your configured SMTP transport). Webhook
-payload:
+E-mail goes through `$app->mailer`. Sites scaffolded by gosite 0.55.0 or later
+configure it from the CMS environment: set `SMTP_HOST` (plus `SMTP_PORT`,
+`SMTP_ENCRYPTION`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_FROM_NAME`)
+in `.env` or in Coolify. Without `SMTP_HOST` Cockpit falls back to PHP `mail()`,
+which the CMS image cannot deliver, so `notify` only logs `mail failed`.
+
+Webhook payload:
 
 ```json
 {

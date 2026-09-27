@@ -27,6 +27,12 @@
 #
 # Optional: MONGO_DB (defaults to __PROJECT__-qa), MONGO_PORT (27017).
 #
+# Optional, outgoing e-mail (Forms notifications, password resets): SMTP_HOST
+# turns it on; with SMTP_PORT (587), SMTP_ENCRYPTION (tls|ssl|none), SMTP_USER,
+# SMTP_PASSWORD, SMTP_FROM (a sender the provider has verified) and
+# SMTP_FROM_NAME. Without SMTP_HOST the CMS sends no e-mail. A QA copy that
+# shares production's SMTP credentials sends real mail - point it elsewhere.
+#
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
 # key prefix for Cockpit's app memory in Redis, and that memory holds the API
 # key registry the /api/* gate reads. Giving QA and production the same MONGO_DB
@@ -127,6 +133,14 @@ services:
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
       - S3_ACL=${S3_ACL:-}
       - S3_VERIFY=${S3_VERIFY:-true}
+      # Outgoing e-mail (optional - see cockpit/config.php). Unset = no SMTP.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_ENCRYPTION=${SMTP_ENCRYPTION:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
       # Every service in this file is named for the project AND the
