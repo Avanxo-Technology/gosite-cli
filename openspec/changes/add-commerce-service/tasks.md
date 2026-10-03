@@ -7,7 +7,7 @@
 
 - [x] 1.1 Create `services/medusa/` (Medusa v2, TypeScript) with `medusa-config.ts` reading `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `COOKIE_SECRET`, `COMMERCE_REGION`, admin CORS from env
 - [x] 1.2 Dockerfile + entrypoint: `db:migrate`, seed, `medusa start`; local build runs against Postgres and Redis
-- [ ] 1.3 Release workflow builds and pushes `gosite-medusa:<version>` with the same tag as the CLI and core
+- [x] 1.3 Release workflow builds and pushes `gosite-medusa:<version>` with the same tag as the CLI and core
 
 ## 2. Seed
 
