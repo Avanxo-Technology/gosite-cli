@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -249,5 +250,31 @@ func TestAPIErrorKeepsStatusAndBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v, want status and body", err)
+	}
+}
+
+// The fixture is a real /store/products response from Medusa 2.21 (the seed's
+// demo product). Hand-written fixtures missed that variant options are a list,
+// and every page that listed a product answered 502.
+func TestListProductsDecodesRealMedusaResponse(t *testing.T) {
+	body, err := os.ReadFile("testdata/store-products-medusa-2.21.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeStore(t, http.StatusOK, string(body))
+
+	list, err := f.client().ListProducts(context.Background(), ProductListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Products) != 1 || len(list.Products[0].Variants) != 1 {
+		t.Fatalf("list = %+v", list)
+	}
+	v := list.Products[0].Variants[0]
+	if len(v.Options) != 1 || v.Options[0].Value != "Default" || v.Options[0].Option == nil || v.Options[0].Option.Title != "Default" {
+		t.Fatalf("variant options = %+v", v.Options)
+	}
+	if got := v.CalculatedPrice.CalculatedAmount.String(); got != "59900" {
+		t.Fatalf("amount = %q, want 59900", got)
 	}
 }

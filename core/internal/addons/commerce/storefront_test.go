@@ -99,6 +99,11 @@ func productJSON(id, title, handle, categoryID, price string, stock int) map[str
 		"variants": []map[string]any{
 			{
 				"id": id + "_v1", "title": "Default",
+				// The shape Medusa v2 sends: a list of option values, not a map.
+				"options": []map[string]any{{
+					"id": id + "_ov1", "value": "Default", "option_id": id + "_o1",
+					"option": map[string]any{"id": id + "_o1", "title": "Default"},
+				}},
 				"calculated_price":   map[string]any{"calculated_amount": json.Number(price), "currency_code": "cop"},
 				"inventory_quantity": stock,
 			},
