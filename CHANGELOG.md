@@ -11,6 +11,9 @@
   fact. The Medusa inside is recorded as the image label
   `dev.avanxo.medusa.version`. Dependabot proposes `@medusajs/*` upgrades
   weekly as one PR.
+- **Medusa 2.21.0 → 2.21.2** in `gosite-medusa:0.55.1`. Checked on a fresh
+  store, a restart and a 2.21.0 store upgraded in place (its migration
+  `create-super-admin-role` runs; the seed reuses every record).
 
 ## 0.55.0
 
