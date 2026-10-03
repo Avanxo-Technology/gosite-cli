@@ -1,0 +1,142 @@
+name: Release Medusa image
+
+# Builds services/medusa/ and pushes ghcr.io/avanxo-technology/gosite-medusa
+# with the version of the release (design D2 of add-commerce-service): a site
+# on `core: X.Y.Z` pulls gosite-medusa:X.Y.Z, so the image ships with the same
+# tag as the CLI and core.
+#
+# A pushed vX.Y.Z tag publishes it. workflow_dispatch publishes an existing
+# tag after the fact (0.55.0 was released before this workflow existed).
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build, e.g. v0.55.0"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/avanxo-technology/gosite-medusa
+  # Read through the environment, never interpolated into a script.
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+concurrency:
+  group: release-medusa-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # Each platform builds on a native runner: the Medusa admin build under
+  # QEMU emulation is slow enough to time out. The merge job then joins the
+  # two digests into one multi-arch tag (arm64 for Apple Silicon dev machines,
+  # amd64 for the servers).
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      # The image tag is the release version, and it must match src/VERSION at
+      # that commit, or a site pinned to that core would pull the wrong engine.
+      - name: Resolve version
+        id: version
+        run: |
+          version="${TAG#v}"
+          file_version="$(head -1 src/VERSION)"
+          if [[ "${version}" != "${file_version}" ]]; then
+            echo "::error::tag ${TAG} does not match src/VERSION ${file_version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          # The Medusa the lockfile pins, so `docker inspect` answers which
+          # Medusa a gosite-medusa tag carries without opening the repo.
+          medusa="$(jq -r '.packages["node_modules/@medusajs/medusa"].version' services/medusa/package-lock.json)"
+          if [[ -z "${medusa}" || "${medusa}" == "null" ]]; then
+            echo "::error::@medusajs/medusa not found in services/medusa/package-lock.json"
+            exit 1
+          fi
+          echo "medusa=${medusa}" >> "${GITHUB_OUTPUT}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: services/medusa
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.description=gosite store engine (Medusa ${{ steps.version.outputs.medusa }})
+            dev.avanxo.medusa.version=${{ steps.version.outputs.medusa }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=medusa-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=medusa-${{ matrix.platform }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.runner }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Publish multi-arch tag
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          version="${TAG#v}"
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t "${IMAGE}:${version}" \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Inspect
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${TAG#v}"
