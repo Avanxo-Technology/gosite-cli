@@ -1,0 +1,22 @@
+version: 2
+
+updates:
+  # Watches Medusa releases for the store engine (services/medusa/). Only the
+  # @medusajs packages, all in one PR: they release in lockstep and the
+  # framework, CLI and admin SDK must stay on the same version. The PR body
+  # carries Medusa's release notes; the medusa workflow builds and tests it.
+  # Merging it does not publish anything: the new Medusa ships in the next
+  # gosite release (see release-medusa.yml).
+  - package-ecosystem: npm
+    directory: /services/medusa
+    schedule:
+      interval: weekly
+      day: monday
+    allow:
+      - dependency-name: "@medusajs/*"
+    groups:
+      medusa:
+        patterns: ["@medusajs/*"]
+    commit-message:
+      prefix: "deps(medusa)"
+    open-pull-requests-limit: 2

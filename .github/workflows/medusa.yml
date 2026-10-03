@@ -1,0 +1,59 @@
+name: Medusa
+
+# Checks the store engine whenever services/medusa/ changes, including the
+# Dependabot PRs that bump @medusajs/*: unit tests, the Medusa build, and the
+# Docker image the release workflow would publish (built, never pushed).
+
+on:
+  pull_request:
+    paths:
+      - "services/medusa/**"
+      - ".github/workflows/medusa.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/medusa/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/medusa
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same major as the image (node:22-bookworm-slim).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/medusa/package-lock.json
+
+      - run: npm ci --include=dev
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Medusa build
+        run: npm run build
+
+  image:
+    name: Docker image (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/medusa
+          push: false
+          cache-from: type=gha,scope=medusa-linux/amd64

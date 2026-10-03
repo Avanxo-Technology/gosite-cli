@@ -64,6 +64,14 @@ jobs:
             exit 1
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          # The Medusa the lockfile pins, so `docker inspect` answers which
+          # Medusa a gosite-medusa tag carries without opening the repo.
+          medusa="$(jq -r '.packages["node_modules/@medusajs/medusa"].version' services/medusa/package-lock.json)"
+          if [[ -z "${medusa}" || "${medusa}" == "null" ]]; then
+            echo "::error::@medusajs/medusa not found in services/medusa/package-lock.json"
+            exit 1
+          fi
+          echo "medusa=${medusa}" >> "${GITHUB_OUTPUT}"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -82,7 +90,8 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.description=gosite store engine (Medusa v2)
+            org.opencontainers.image.description=gosite store engine (Medusa ${{ steps.version.outputs.medusa }})
+            dev.avanxo.medusa.version=${{ steps.version.outputs.medusa }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=medusa-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=medusa-${{ matrix.platform }}
