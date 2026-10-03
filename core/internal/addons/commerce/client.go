@@ -198,12 +198,22 @@ type ProductOptionValue struct {
 }
 
 type ProductVariant struct {
-	ID                string            `json:"id"`
-	Title             string            `json:"title"`
-	SKU               string            `json:"sku"`
-	Options           map[string]string `json:"options"`
-	CalculatedPrice   *CalculatedPrice  `json:"calculated_price"`
-	InventoryQuantity *int              `json:"inventory_quantity"`
+	ID                string           `json:"id"`
+	Title             string           `json:"title"`
+	SKU               string           `json:"sku"`
+	Options           []VariantOption  `json:"options"`
+	CalculatedPrice   *CalculatedPrice `json:"calculated_price"`
+	InventoryQuantity *int             `json:"inventory_quantity"`
+}
+
+// VariantOption is one option value of a variant ("M" of "Talla"). Medusa v2
+// sends a list of option values, each with its option; it is not a
+// title->value map.
+type VariantOption struct {
+	ID       string         `json:"id"`
+	Value    string         `json:"value"`
+	OptionID string         `json:"option_id"`
+	Option   *ProductOption `json:"option"`
 }
 
 type CalculatedPrice struct {
