@@ -16,6 +16,7 @@ repository. Its contract is `CORE_API.md` in that module.
 | change a Cockpit setting | `cockpit/config.local.php` |
 | change the dev stack | `docker-compose.override.yml` |
 | change ports, domains, storage | `gosite.yml`, then `gosite generate` |
+| load products into the store (Commerce) | Medusa's Admin API: `src/knowledge/medusa-admin-api.md` in the gosite installation (usually `~/.local/share/gosite/`) |
 
 ## Rules
 

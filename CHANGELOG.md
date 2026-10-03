@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.55.2
+
+- **Fix: the store pages answered 502 on every real store.** Medusa v2 sends a
+  variant's options as a list of option values; core decoded them as a map, so
+  `/tienda`, `/producto/:handle` and the buy island failed as soon as Medusa
+  returned a product (the seed's demo product included). Sites get the fix by
+  moving `core:` and `go.mod` to 0.55.2. The test fixture is now a real Medusa
+  2.21 response.
+- **Knowledge: `src/knowledge/medusa-admin-api.md`.** How to load a catalogue
+  through Medusa's Admin API (by script or AI): the Secret API Key and its
+  Basic-auth form, the `gosite` sales channel, variants, prices in the major
+  unit, stock levels, idempotent updates by handle. New sites' `MEMORY.md`
+  points to it.
+- **Known issue:** images uploaded to Medusa (Admin UI or `/admin/uploads`)
+  are stored inside the container and get a `localhost:9000` URL, so they are
+  lost on redeploy. Use image URLs from the site's own storage until uploads
+  go to MinIO.
+
 ## 0.55.1
 
 - **`gosite list` shows the store.** A site with the Commerce addon gets a
