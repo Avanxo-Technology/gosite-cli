@@ -32,6 +32,16 @@
 # SMTP_PASSWORD, SMTP_FROM (a sender the provider has verified) and
 # SMTP_FROM_NAME. Without SMTP_HOST the CMS sends no e-mail. A QA copy that
 # shares production's SMTP credentials sends real mail - point it elsewhere.
+# gosite:addon Commerce
+#
+# With Commerce, also:
+#   SERVICE_FQDN_SHOP       e.g. shop.qa.__PROJECT__.example.com - the store's Admin
+#                           at /app. Same bare-form rule as SERVICE_FQDN_APP.
+#                           Only /app, /admin, /auth and /hooks (payment
+#                           webhooks) are routed; the Store API stays internal.
+#   Medusa's uploads (product images) use the S3_* variables above, in a
+#   medusa/ folder under S3_PREFIX (qa/medusa/ by default).
+# gosite:end
 #
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
 # key prefix for Cockpit's app memory in Redis, and that memory holds the API
@@ -208,6 +218,28 @@ services:
       - WOMPI_EVENTS_SECRET=${WOMPI_EVENTS_SECRET:-}
       - WOMPI_CHECKOUT_URL=${WOMPI_CHECKOUT_URL:-}
       - WOMPI_API_URL=${WOMPI_API_URL:-}
+      # Product images go to the site's bucket (medusa/ under S3_PREFIX), never
+      # to the container's disk.
+      - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
+      - S3_URL=${S3_URL}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - S3_KEY=${S3_KEY}
+      - S3_SECRET=${S3_SECRET}
+      - S3_PREFIX=${S3_PREFIX:-qa}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+      - S3_ACL=${S3_ACL:-}
+    labels:
+      - traefik.enable=true
+      # The Admin and what it calls, plus payment webhooks. /store is not
+      # routed: only the site reads it, over the project network. A bare
+      # ${SERVICE_FQDN_SHOP}, like the app's rule. The router name differs
+      # from the service name and from the other environment's (see the app).
+      - traefik.http.routers.__PROJECT__-qa-shop.rule=Host(`${SERVICE_FQDN_SHOP}`) && (PathPrefix(`/app`) || PathPrefix(`/admin`) || PathPrefix(`/auth`) || PathPrefix(`/hooks`))
+      - traefik.http.routers.__PROJECT__-qa-shop.entrypoints=https
+      - traefik.http.routers.__PROJECT__-qa-shop.tls=true
+      - traefik.http.routers.__PROJECT__-qa-shop.tls.certresolver=letsencrypt
+      - traefik.http.services.__PROJECT__-qa-shop.loadbalancer.server.port=9000
     volumes:
       - __PROJECT__-qa-commerce-key:/run/gosite-commerce
     depends_on:

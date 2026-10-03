@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from "@medusajs/framework/utils"
 
+import { s3FileModule } from "./src/lib/file-storage"
+
 loadEnv(process.env.NODE_ENV || "development", process.cwd())
 
 const REDIS_URL = process.env.REDIS_URL
@@ -77,6 +79,12 @@ const modules: Record<string, unknown>[] = [
     },
   },
 ]
+
+// Uploads (product images from the Admin or the API) go to the site's bucket.
+const fileModule = s3FileModule(process.env)
+if (fileModule) {
+  modules.push(fileModule)
+}
 
 if (paymentProviders.length) {
   modules.push({

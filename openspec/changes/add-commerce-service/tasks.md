@@ -28,7 +28,7 @@
 - [x] 4.1 Add `Commerce` to `Library` in `core/internal/addon/addon.go` and to the CLI addon library
 - [x] 4.2 `_thin_render`: keep or drop `# gosite:addon <Name>` / `# gosite:end` blocks by the addons list; test that no marker survives
 - [x] 4.3 Commerce blocks in the three generated compose files: `medusa`, `medusa-db`, `medusa-redis`, volumes, shared key volume mounted read-only in the app, `COMMERCE_REGION` from `commerce_region`
-- [ ] 4.4 Traefik labels on `shop.<site domain>` per environment for `/app`, `/admin`, `/auth`, `/hooks` only, router names per the QA/prod rule
+- [ ] 4.4 Traefik labels on `shop.<site domain>` per environment for `/app`, `/admin`, `/auth`, `/hooks` only, router names per the QA/prod rule (QA and prod done in 0.56.0 on `SERVICE_FQDN_SHOP`; dev still relies on the site override; Coolify deploy unverified)
 - [x] 4.5 Per-project secrets (`JWT_SECRET`, `COOKIE_SECRET`, DB password) generated into `.env` on generate when missing
 - [x] 4.6 Test: a site without `Commerce` regenerates byte-identical compose files; `generate` output names the commerce services when enabled
 

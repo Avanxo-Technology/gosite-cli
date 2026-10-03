@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.56.0
+
+### Commerce: images in the bucket, the Admin in QA and production
+
+- **Product images are stored in the site's bucket.** Medusa reads the same
+  `S3_*` variables as the CMS and uploads to `medusa/` under `S3_PREFIX` (QA:
+  `qa/medusa/` by default), in dev, QA and production. Before, an upload from
+  the Admin or `/admin/uploads` stayed inside the container (lost on every
+  deploy) with a `localhost:9000` URL. Without `STORAGE_ADAPTER=s3` Medusa
+  keeps its local provider; `S3_PUBLIC_URL` is required with S3.
+- **`shop.<domain>` in QA and production.** The Medusa service gets a Traefik
+  router on `SERVICE_FQDN_SHOP` for `/app`, `/admin`, `/auth` and `/hooks`
+  only (payment webhooks included); `/store` stays internal. Router names
+  follow the QA/production rule (`<project>-qa-shop` / `<project>-shop`).
+  Verified that the Admin signs in on its own origin without `ADMIN_CORS`.
+- Existing Commerce sites: see MIGRATIONS.md (Coolify needs
+  `SERVICE_FQDN_SHOP`; images uploaded before this release are gone).
+
 ## 0.55.2
 
 - **Fix: the store pages answered 502 on every real store.** Medusa v2 sends a

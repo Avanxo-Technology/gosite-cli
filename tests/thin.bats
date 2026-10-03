@@ -203,3 +203,27 @@ EOF
     grep -q 'condition: service_healthy' "${F}"
   done
 }
+
+@test "Commerce stores upload to S3 and QA/prod route only the Admin on shop" {
+  local f env router
+  for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    # Medusa gets the bucket in every environment (one S3_BUCKET per service).
+    [ "$(grep -c 'S3_BUCKET' "${F}")" -ge 2 ]
+  done
+  for env in qa prod; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.${env}.yml" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    router="__PROJECT__-shop"
+    [[ "${env}" == qa ]] && router="__PROJECT__-qa-shop"
+    grep -q "routers.${router}.rule=Host(\`\${SERVICE_FQDN_SHOP}\`) && (PathPrefix(\`/app\`)" "${F}"
+    # Never the service's name (Coolify) and never the store API.
+    ! grep -q "routers.__PROJECT__-${env}-medusa\." "${F}"
+    ! grep -q 'PathPrefix(`/store`)' "${F}"
+    # Coolify's magic variable only in its bare form.
+    ! grep -q 'SERVICE_FQDN_SHOP:' "${F}"
+  done
+  # QA's and production's routers must differ (one Traefik).
+  ! grep -q '__PROJECT__-shop\.' "${GOSITE_ROOT}/templates-thin/generated/docker-compose.qa.yml"
+}
