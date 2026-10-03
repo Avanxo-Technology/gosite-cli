@@ -15,10 +15,10 @@
     "test:unit": "node --test 'tests/**/*.test.ts'"
   },
   "dependencies": {
-    "@medusajs/admin-sdk": "2.21.0",
-    "@medusajs/cli": "2.21.0",
-    "@medusajs/framework": "2.21.0",
-    "@medusajs/medusa": "2.21.0",
+    "@medusajs/admin-sdk": "2.21.2",
+    "@medusajs/cli": "2.21.2",
+    "@medusajs/framework": "2.21.2",
+    "@medusajs/medusa": "2.21.2",
     "@mikro-orm/core": "6.6.14",
     "@mikro-orm/knex": "6.6.14",
     "@mikro-orm/migrations": "6.6.14",
