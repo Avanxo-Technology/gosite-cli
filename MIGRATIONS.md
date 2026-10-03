@@ -512,6 +512,27 @@ sends real e-mail.
 **Commerce.** Thin sites only, through `gosite addons add Commerce <site>`. See
 the README before using it in production.
 
+## → 0.56.0 — Commerce: product images in the bucket, the Admin on shop.<domain>
+
+Only for sites with the Commerce addon; the others regenerate byte-identical.
+
+1. Move `core:` in `gosite.yml` and the core in `go.mod` to 0.56.0,
+   `go mod tidy`, `gosite generate`, `gosite restart <site> --build`.
+2. **Images.** Medusa now reads the same `S3_*` variables as the CMS and
+   uploads to `<S3_PREFIX>/medusa/` in that bucket. Nothing to set in dev
+   (the `.env` already has them) or in Coolify (the CMS already needs them).
+   Images uploaded **before** 0.56.0 were stored inside the Medusa container
+   and are gone after the restart: upload them again from the Admin.
+3. **The Admin in QA and prod.** In each Coolify resource, give the Medusa
+   service its domain through `SERVICE_FQDN_SHOP` (e.g. `shop.<domain>`, QA
+   `shop.qa.<domain>`) and point DNS at it. Only `/app`, `/admin`, `/auth` and
+   `/hooks` are routed. Wompi's webhook URL becomes
+   `https://shop.<domain>/hooks/payment/wompi_wompi`.
+4. A site that added its own `shop.` router in `docker-compose.override.yml`
+   keeps it for dev (gosite still routes the Admin only in QA and prod).
+5. Check: upload an image in `https://shop.<domain>/app` and open its URL; it
+   must start with `S3_PUBLIC_URL`, not `localhost:9000`.
+
 ---
 
 ### Verify before you call it done

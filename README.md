@@ -378,6 +378,12 @@ orders stay in Medusa and are never copied into Cockpit. Payments stay manual
 until the client's Stripe (US) or Wompi (Colombia) keys are set as env vars of
 the deployment.
 
+In QA and production the Admin is served on the domain set as
+`SERVICE_FQDN_SHOP` in Coolify (only `/app`, `/admin`, `/auth` and the payment
+webhooks under `/hooks`; the Store API stays internal). Product images uploaded
+there go to the site's bucket, under `medusa/` in `S3_PREFIX`. To load a
+catalogue by script or AI, see `src/knowledge/medusa-admin-api.md`.
+
 Installing only ever **adds** files. An addon that ships application pages
 wires itself from a file of its own, so your `router.go` is never rewritten,
 and a page template you have edited is preserved and reported rather than

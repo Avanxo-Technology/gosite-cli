@@ -1,6 +1,6 @@
 # Medusa Admin API: loading a catalogue by script or AI
 
-Every call below was run against `gosite-medusa:0.55.1` (Medusa 2.21.2) on a
+Every call below was run against `gosite-medusa:0.55.1` (Medusa 2.21.2), uploads against 0.56.0, on a
 fresh store seeded by the image. The Admin UI at `https://shop.<domain>/app`
 does the same through the same API; use this when products are created in
 bulk, by a script, or by an AI agent.
@@ -10,7 +10,7 @@ bulk, by a script, or by an AI agent.
 | Environment | Base URL |
 | ----------- | -------- |
 | dev | `https://shop.<domain>` (only if the site routes it; aldu-dev does in its override) or `docker exec <project>-medusa` + `http://localhost:9000` |
-| QA / prod | `https://shop.<domain>` once the router exists |
+| QA / prod | `https://shop.<domain>` (`SERVICE_FQDN_SHOP` in Coolify, since 0.56.0; only `/app`, `/admin`, `/auth`, `/hooks` are routed) |
 
 Never call `/admin/*` from the Go site: it reads the Store API with the
 publishable key, nothing else.
@@ -148,17 +148,26 @@ curl "${A[@]}" -X POST "$B/admin/inventory-items/<iitem id>/location-levels/$LOC
 
 `manage_inventory: false` sells without limit (the store reports no quantity).
 
-## Images: pass URLs, do not upload to Medusa
+## Images
 
-`POST /admin/uploads` works, but the image `gosite-medusa` stores the file on
-the container's disk (`/app/static`, no volume) and returns a
-`http://localhost:9000/static/…` URL. The file is lost on the next deploy or
-update and the URL is not reachable by visitors. This also applies to images
-uploaded in the Admin UI.
+Since gosite 0.56.0 Medusa stores uploads in the site's bucket (the same
+`S3_*` variables as the CMS, folder `medusa/` under `S3_PREFIX`), so both work:
 
-Until the image stores uploads in MinIO, put the image in the site's own
-storage (Cockpit assets, see `cockpit-asset-upload.md`) and give Medusa its
-public URL in `thumbnail` and `images[].url`. Medusa accepts any URL there.
+- **Upload**, then use the returned URL:
+  ```bash
+  curl -s -u "$MEDUSA_ADMIN_API_KEY:" -X POST $B/admin/uploads -F "files=@chaqueta.jpg"
+  # {"files":[{"id":"medusa/chaqueta-01M….jpg","url":"<S3_PUBLIC_URL>/medusa/chaqueta-01M….jpg"}]}
+  ```
+- **Any public URL** in `thumbnail` and `images[].url` (Medusa does not copy it).
+
+An upload URL that starts with `http://localhost:9000/static/` means the store
+runs without S3 (`STORAGE_ADAPTER` is not `s3`, or a key is missing): the file
+is inside the container and disappears on the next deploy. Fix the
+environment before loading images.
+
+When copying a catalogue between environments, an uploaded image's URL points
+at the source environment's bucket/prefix (QA uses `qa/medusa/`); upload it
+again on the destination or keep pointing at a bucket both can read.
 
 ## Check the result as the site sees it
 
