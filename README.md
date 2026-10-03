@@ -95,7 +95,7 @@ gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
                               # -> https://my-site.test, https://cms.my-site.test
 gosite logs my-site           # follow the logs
-gosite list                   # projects, ports, container status, paths (--prune cleans the registry)
+gosite list                   # projects, URLs, container status (shop URL with Commerce; --prune cleans the registry)
 gosite open my-site           # open in Finder (macOS)
 gosite restart my-site         # recreate containers (--build to rebuild)
 gosite stop my-site

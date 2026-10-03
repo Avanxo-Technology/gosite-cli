@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.55.1
+
+- **`gosite list` shows the store.** A site with the Commerce addon gets a
+  third status dot (its Medusa container) and a `Shop:` line with the Medusa
+  Admin URL, `https://shop.<domain>/app`.
+- **`gosite-medusa` is published.** Every `vX.Y.Z` release now pushes
+  `ghcr.io/avanxo-technology/gosite-medusa:X.Y.Z` (amd64 + arm64), so sites
+  pull the store engine instead of building it; 0.55.0 was published after the
+  fact. The Medusa inside is recorded as the image label
+  `dev.avanxo.medusa.version`. Dependabot proposes `@medusajs/*` upgrades
+  weekly as one PR.
+
 ## 0.55.0
 
 ### Commerce: a store per site (preview)

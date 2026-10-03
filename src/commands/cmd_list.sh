@@ -6,6 +6,11 @@
 # GOSITE_WORKSPACE) with their ports and container status.
 #
 
+# shellcheck source=../lib/siteyml.sh
+source "${GOSITE_ROOT}/lib/siteyml.sh"
+# shellcheck source=../lib/thin.sh
+source "${GOSITE_ROOT}/lib/thin.sh"
+
 cmd_list() {
   local do_prune=0
   while [[ $# -gt 0 ]]; do
@@ -50,14 +55,25 @@ cmd_list() {
       # shellcheck source=/dev/null
       source "${dir}/${GOSITE_MARKER}"
 
-      local app_status cms_status
+      local app_status cms_status shop_status="" commerce=0
       app_status="$(_status_short "${GOSITE_PROJECT}-app")"
       cms_status="$(_status_short "${GOSITE_PROJECT}-cms")"
+      # Commerce brings a third container, Medusa, whose Admin is the shop.
+      # Only thin sites can enable it, so a legacy site never has gosite.yml.
+      if [[ -f "${dir}/gosite.yml" ]] && thin_commerce_enabled "${dir}"; then
+        commerce=1
+        shop_status=" $(_status_short "${GOSITE_PROJECT}-medusa")"
+      fi
 
-      printf "\n${C_BOLD}%s${C_NC}  %s %s\n" \
-        "${GOSITE_PROJECT}" "${app_status}" "${cms_status}"
+      printf "\n${C_BOLD}%s${C_NC}  %s %s%s\n" \
+        "${GOSITE_PROJECT}" "${app_status}" "${cms_status}" "${shop_status}"
       printf "  ${C_DIM}Site: %s${C_NC}\n" "$(hyperlink "https://${GOSITE_APP_DOMAIN}" "https://${GOSITE_APP_DOMAIN}")"
       printf "  ${C_DIM}CMS:  %s${C_NC}\n" "$(hyperlink "https://${GOSITE_CMS_DOMAIN}" "https://${GOSITE_CMS_DOMAIN}")"
+      if [[ "${commerce}" -eq 1 ]]; then
+        # Same host the generated compose allows in ADMIN_CORS; /app is the Admin.
+        local shop="https://shop.${GOSITE_APP_DOMAIN}/app"
+        printf "  ${C_DIM}Shop: %s${C_NC}\n" "$(hyperlink "${shop}" "${shop}")"
+      fi
     )
     found=$(( found + 1 ))
   done < <(registry_entries)
