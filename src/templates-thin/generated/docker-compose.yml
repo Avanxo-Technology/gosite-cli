@@ -140,6 +140,18 @@ services:
       WOMPI_EVENTS_SECRET: "${WOMPI_EVENTS_SECRET:-}"
       WOMPI_CHECKOUT_URL: "${WOMPI_CHECKOUT_URL:-}"
       WOMPI_API_URL: "${WOMPI_API_URL:-}"
+      # Product images go to the infra MinIO bucket (medusa/ under S3_PREFIX),
+      # the same storage the CMS uses, never to the container's disk.
+      STORAGE_ADAPTER: "${STORAGE_ADAPTER}"
+      S3_URL: "${S3_URL}"
+      S3_BUCKET: "${S3_BUCKET}"
+      S3_REGION: "${S3_REGION}"
+      S3_KEY: "${S3_KEY}"
+      S3_SECRET: "${S3_SECRET}"
+      S3_PREFIX: "${S3_PREFIX}"
+      S3_PUBLIC_URL: "${S3_PUBLIC_URL}"
+      S3_ACL: "${S3_ACL:-}"
+      S3_VERIFY: "${S3_VERIFY:-true}"
       ADMIN_CORS: "https://shop.__DOMAIN__"
       AUTH_CORS: "https://shop.__DOMAIN__"
     volumes:
