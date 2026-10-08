@@ -535,6 +535,34 @@ Only for sites with the Commerce addon; the others regenerate byte-identical.
 
 ---
 
+## → 0.57.0 — agent context
+
+For thin and legacy sites alike. No runtime file changes: the app code, the
+compose files and the Dockerfiles stay as they are, so rollback is reverting
+the commit.
+
+Claude Code loads `CLAUDE.md` on every turn, and through it `AGENTS.md`; OpenCode
+and omp load `AGENTS.md` on every turn. `MEMORY.md` was loaded by none of them.
+A plain rename of a long file would therefore add all of it to every turn and
+raise token use. The split below keeps `AGENTS.md` under 80 lines and leaves the
+rest in `ARCHITECTURE.md`, which the assistant reads on demand.
+
+1. **Rename.** `git mv MEMORY.md AGENTS.md`.
+2. **Split.** Keep in `AGENTS.md`: the title, what the project is, the facts
+   table, the reading order, the rules that are easy to get wrong (one line
+   each), and the pointers. Move everything else into
+   `ARCHITECTURE.md` under its own headings. A rule's detail and examples move
+   with the rule; the rule itself stays as one line. Add a pointer line for each
+   moved section to `AGENTS.md`, in the form `Details: ARCHITECTURE.md § <heading>`.
+   Create `ARCHITECTURE.md` if the site has none. Change no other file.
+   Check: `wc -l AGENTS.md` prints fewer than 80.
+3. **Claude shim.** Add `CLAUDE.md` with one line: `@AGENTS.md`.
+4. **Check.** Run `gosite docs` inside the site: it must list the topics. Then
+   run `gosite docs medusa-admin-api` and check that a note prints.
+5. **Rollback.** Revert the commit. Nothing that runs was touched.
+
+---
+
 ### Verify before you call it done
 
 Capture the site **before** touching it, then diff:

@@ -51,6 +51,7 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
 $(printf "${C_BOLD}OTHER${C_NC}")
   open   <name>         Open a project directory in Finder
   doctor             Verify dependencies + audit security defaults (--strict)
+  docs   [topic]     Print an agent note (no topic lists them)
   update             Update gosite to the latest version from GitHub
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
   help               Show this help
@@ -88,6 +89,7 @@ dispatch() {
     generate)        load_command generate; cmd_generate "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
+    docs)            load_command docs;   cmd_docs "$@" ;;
     dns)             load_command dns; cmd_dns ;;
     setup)           load_command setup; cmd_setup "$@" ;;
     version)         printf "gosite %s\n" "${GOSITE_VERSION}" ;;

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.57.0
+
+### Agent context: AGENTS.md, CLAUDE.md and `gosite docs`
+
+- **Added: `gosite docs [topic]`.** Lists the agent notes shipped with the CLI
+  (`src/knowledge/`) or prints one. Inside a site it also says on stderr when
+  the site was made by another gosite version.
+- **Added to new sites:** `AGENTS.md` and `CLAUDE.md` (imports `AGENTS.md`), for
+  thin and legacy scaffolds. The repository gets a pull request template with a
+  Proof section.
+- **Changed in this repository and both scaffolds:** `MEMORY.md` is renamed to
+  `AGENTS.md`, which Claude Code (through `CLAUDE.md`), OpenCode and omp load on
+  every turn. The legacy `AGENTS.md` is trimmed to under 80 lines; its detail
+  (the rules, common tasks and Cockpit addons) moved to `ARCHITECTURE.md`.
+- Existing sites: see MIGRATIONS.md, "0.57.0 — agent context". No runtime file
+  changes.
+
 ## 0.56.0
 
 ### Commerce: images in the bucket, the Admin in QA and production

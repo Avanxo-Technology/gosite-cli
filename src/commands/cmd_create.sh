@@ -404,7 +404,7 @@ _prompt_database() {
 # --- plain CSS flavour --------------------------------------------------------
 
 # -----------------------------------------------------------------------------
-# Context files for AI assistants. MEMORY.md is the short entry point loaded
+# Context files for AI assistants. AGENTS.md is the short entry point loaded
 # first; ARCHITECTURE.md is the reference it points at.
 
 # -----------------------------------------------------------------------------

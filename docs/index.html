@@ -424,6 +424,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
           <tr><td>gosite infra up</td><td>Shared Traefik and Redis (datastores bound to loopback). Also <code>down</code>, <code>restart</code>, <code>status</code>, <code>logs</code>.</td></tr>
           <tr><td>gosite dns</td><td>Verify that <code>*.test</code> resolves to 127.0.0.1, and print the fix if not.</td></tr>
           <tr><td>gosite doctor</td><td>Check the local toolchain and audit every project plus the shared infrastructure against the secure defaults (read-only, with the exact fix per finding). <span class="flag">--strict</span> exits non-zero on findings.</td></tr>
+          <tr><td>gosite docs [topic]</td><td>Print an agent note on Cockpit or Medusa; with no topic, list the topics. Inside a site, a line on stderr notes when the site was made by another gosite version.</td></tr>
           <tr><td>gosite update</td><td>Update gosite to the latest tagged release from GitHub, verified against the published checksum; a failed swap rolls back to the previous installation. <span class="flag">--check</span> to only compare versions, <span class="flag">--ref</span> to pin a tag (or a branch with <span class="flag">--allow-unverified</span>), <span class="flag">--repo</span> to choose the source explicitly.</td></tr>
         </tbody>
       </table>
@@ -522,7 +523,8 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
     <span class="dir">components/</span>    <span class="cm">one file per piece</span>
 <span class="dir">cockpit/</span>            <span class="cm">CMS config + addons</span>
 <span class="dir">deploy/</span>             <span class="cm">Dockerfiles</span>
-<span class="f">MEMORY.md</span>          <span class="cm">AI entry point</span>
+<span class="f">AGENTS.md</span>          <span class="cm">AI entry point</span>
+<span class="f">CLAUDE.md</span>          <span class="cm">imports AGENTS.md (Claude Code)</span>
 <span class="f">ARCHITECTURE.md</span>    <span class="cm">the reference it points at</span></pre>
 
       <ul class="list rv">
@@ -548,7 +550,7 @@ footer{border-top:1px solid var(--border);padding:2.5rem 0;margin-top:2rem}
         </li>
         <li>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
-          <span><b>Written for assistants too.</b> <code>MEMORY.md</code> and <code>ARCHITECTURE.md</code> ship with real values filled in — module path, domains, cache key.</span>
+          <span><b>Written for assistants too.</b> <code>AGENTS.md</code> and <code>ARCHITECTURE.md</code> ship with real values filled in — module path, domains, cache key. <code>CLAUDE.md</code> imports <code>AGENTS.md</code>.</span>
         </li>
       </ul>
     </div>

@@ -90,6 +90,7 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 
 ```bash
 gosite doctor                 # toolchain check + security audit of projects & infra (--strict fails on findings)
+gosite docs [topic]           # agent notes on Cockpit and Medusa (no topic lists them)
 gosite infra up               # gosite-network + Traefik and Redis
 gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
 gosite start my-site          # app (air hot reload) + Cockpit
@@ -266,14 +267,15 @@ path; `cd "$(gosite path my-site)"` always works.
 
 ### AI context files
 
-Every project ships a `MEMORY.md` and an `ARCHITECTURE.md`, written for an
-assistant reading the repo cold. `MEMORY.md` is short: what the project is, its
+Every project ships an `AGENTS.md` and an `ARCHITECTURE.md`, written for an
+assistant reading the repo cold. `AGENTS.md` is short: what the project is, its
 URLs and cache key, the reading order, and the rules that are easy to get wrong
 (Echo v5 is not v4; every route lives in `router.go`; the page is cached, so
-purge after changing it; no build step). `ARCHITECTURE.md` is the reference
-behind it — the v4-to-v5 API differences, the caching helper, the Cockpit
-endpoints and how to update content, htmx/Alpine conventions, the `gosite`
-commands, environment variables and the Coolify deploy.
+purge after changing it; no build step). `CLAUDE.md` imports it, so Claude Code
+loads it on every turn. `ARCHITECTURE.md` is the reference behind it — the v4-to-v5 API differences,
+the caching helper, the Cockpit endpoints and how to update content,
+htmx/Alpine conventions, the `gosite` commands, environment variables and the
+Coolify deploy.
 
 Both are generated with the project's real values filled in — module path,
 domains, ports, cache key — so nothing in them is a placeholder to correct.
@@ -489,8 +491,9 @@ my-site/
 ├── docker-compose.qa.yml     # COOLIFY: QA alongside prod, shared Mongo/Redis
 ├── .env / .env.example
 ├── .gosite.env               # project marker read by list/start/stop/remove
-├── MEMORY.md                 # AI entry point: facts, rules, common tasks
-├── ARCHITECTURE.md           # the reference MEMORY.md points at
+├── AGENTS.md                 # AI entry point: facts, rules, pointers
+├── CLAUDE.md                 # imports AGENTS.md for Claude Code
+├── ARCHITECTURE.md           # the reference AGENTS.md points at
 ├── Makefile, README.md, .gitignore, .dockerignore
 ```
 

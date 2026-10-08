@@ -2,7 +2,7 @@
 
 A gosite **thin site**: Go + Cockpit CMS. The core — CMS client, page cache,
 SEO, analytics, consent, purge — is the Go module in `go.mod`, not code in this
-repository. Its contract is `CORE_API.md` in that module.
+repository.
 
 ## Where things go
 
@@ -16,7 +16,7 @@ repository. Its contract is `CORE_API.md` in that module.
 | change a Cockpit setting | `cockpit/config.local.php` |
 | change the dev stack | `docker-compose.override.yml` |
 | change ports, domains, storage | `gosite.yml`, then `gosite generate` |
-| load products into the store (Commerce) | Medusa's Admin API: `src/knowledge/medusa-admin-api.md` in the gosite installation (usually `~/.local/share/gosite/`) |
+| load products into the store (Commerce) | Medusa's Admin API: `gosite docs medusa-admin-api` |
 
 ## Rules
 

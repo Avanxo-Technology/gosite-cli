@@ -71,7 +71,7 @@ The addon respects Cockpit's ACL:
 
 ## Project documentation checklist
 
-In `MEMORY.md` under "Common tasks":
+In `ARCHITECTURE.md` under "Common tasks":
 
 ```
 | Manage content models via API | `GET /api/models`, `POST /api/models/save`, `POST /api/models/remove` |

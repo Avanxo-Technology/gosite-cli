@@ -5,11 +5,11 @@ templates.sh into real files under src/templates/.
 Replicates the byte semantics of the old writers exactly:
   - cat > FILE <<'EOF'          -> file ends with a newline
   - write_if_changed FILE <<EOF -> $(cat) strips the trailing newline
-  - cat >> MEMORY.md <<'EOF'    -> flavor-specific append parts
+  - cat >> AGENTS.md <<'EOF'    -> flavor-specific append parts
 
 Flavor mapping (TAILWIND=1|0) comes from the enclosing function
 (_write_views_tailwind / _write_views_plain) and the if/else around the
-MEMORY.md appends.
+AGENTS.md appends.
 """
 
 import os
@@ -59,7 +59,7 @@ def extract(path):
 
 
 def append_flavor(recent):
-    """Which branch of the TAILWIND if/else surrounds a MEMORY.md append?"""
+    """Which branch of the TAILWIND if/else surrounds an AGENTS.md append?"""
     joined = "\n".join(recent)
     if "-eq 1 ]]" in joined and "else" not in joined.split("-eq 1 ]]")[-1]:
         return "tailwind"
@@ -85,11 +85,11 @@ def main():
                 rel = f"flavors/tailwind/{dest}"
             elif fn == "_write_views_plain":
                 rel = f"flavors/plain/{dest}"
-            elif op == "cat>>" and dest == "MEMORY.md":
+            elif op == "cat>>" and dest == "AGENTS.md":
                 flavor = append_flavor(recent)
                 if flavor is None:
-                    sys.exit(f"cannot classify MEMORY.md append in {fn}")
-                rel = f"flavors/{flavor}/MEMORY.md.part"
+                    sys.exit(f"cannot classify AGENTS.md append in {fn}")
+                rel = f"flavors/{flavor}/AGENTS.md.part"
             else:
                 rel = dest
 

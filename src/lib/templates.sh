@@ -188,7 +188,7 @@ _copy_template_file() {
 # Renders the template tree into <dest>:
 #   1. every base file (everything outside flavors/)
 #   2. the styling flavor's files, overlaid (views + styles.css)
-#   3. the flavor's MEMORY.md.part appended to MEMORY.md
+#   3. the flavor's AGENTS.md.part appended to AGENTS.md
 #
 # scope=sync restricts the copy to the files sync manages; create uses the
 # default full scope. Placeholder substitution is NOT done here - callers run
@@ -214,8 +214,8 @@ render_template_tree() {
       _copy_template_file "${src}/flavors/${flavor}" "${dest}" "${rel}"
     done < <(cd "${src}/flavors/${flavor}" 2>/dev/null && find . -type f -print0)
 
-    if [[ -f "${src}/flavors/${flavor}/MEMORY.md.part" ]]; then
-      cat "${src}/flavors/${flavor}/MEMORY.md.part" >> "${dest}/MEMORY.md"
+    if [[ -f "${src}/flavors/${flavor}/AGENTS.md.part" ]]; then
+      cat "${src}/flavors/${flavor}/AGENTS.md.part" >> "${dest}/AGENTS.md"
     fi
   fi
 }
