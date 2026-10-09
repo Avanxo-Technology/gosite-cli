@@ -12,7 +12,16 @@
 !/ecommerce.md
 !/CHANGELOG.md
 !/MIGRATIONS.md
-!/MEMORY.md
+!/AGENTS.md
+!/CLAUDE.md
+# Agent context: OpenSpec skills and commands for Claude Code and OpenCode.
+# Local settings and other files under these folders stay ignored.
+!/.claude/
+/.claude/*
+!/.claude/skills/
+!/.opencode/
+/.opencode/*
+!/.opencode/commands/
 !/src/
 !/core/
 # gosite's own service images (gosite-medusa), not a generated project.

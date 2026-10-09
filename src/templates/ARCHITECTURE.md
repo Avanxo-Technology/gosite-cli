@@ -1,6 +1,6 @@
 # __PROJECT__ - architecture
 
-Reference for humans and AI assistants working on this project. `MEMORY.md` is
+Reference for humans and AI assistants working on this project. `AGENTS.md` is
 the short version; this file is the detail behind it.
 
 ## Stack
@@ -411,3 +411,68 @@ closed (503) in any non-development environment without it.
 - Errors are logged where they happen and returned as a safe message.
 - No global state; dependencies are passed through `handlers.Deps`.
 - No JavaScript build step. Ever.
+
+## Rules that are easy to get wrong
+
+1. **Echo v5, not v4.** Handlers take `*echo.Context`, `c.Response()` returns
+   `http.ResponseWriter`, `echo.NewHTTPError(code, string)` takes a string, and
+   there is no `e.Shutdown`. Do not copy v4 snippets from the web. See
+   [Echo v5](#echo-v5).
+2. **Every route is registered in `internal/app/router.go`.** An optional
+   feature that ships its own routes appends to `mountFeatures` from its own
+   file (`router_blog.go`), so installing one never rewrites this file - but
+   the call is still visible here. Nothing else registers routes anywhere else.
+3. **Handlers reply through `h.reply(c)`** (`internal/handlers/response.go`),
+   never by writing headers by hand.
+4. **Views get finished data.** No Redis, no HTTP and no CMS calls inside
+   `internal/views/`.
+5. **The page is cached.** After changing anything that affects the rendered
+   HTML, purge: `curl -X POST -H "X-Api-Key: $COCKPIT_API_TOKEN" https://__DOMAIN__/cache/purge`
+   Otherwise you will be looking at a stale page for up to 10 minutes.
+6. **No build step.** Do not add npm, a bundler or a framework. htmx and
+   Alpine are loaded from a CDN in `internal/views/layout.html`.
+7. **Templates are embedded** with `go:embed`, so a new file under
+   `internal/views/` only ships if it matches the embed patterns in
+   `internal/views/render.go`.
+8. **Data model lives in the database.** Content schemas (singletons,
+   collections, fields) are defined in the Cockpit admin UI and stored in
+   MongoDB. No migration files or SQL schemas exist in this repo - add fields
+   in Cockpit, then render them in the template with a fallback.
+9. **Every image attribute in a content model must be type `asset`.** Define
+   image fields as type `asset` (not `image`), so the value is the full asset
+   object (`path`, `url`, ...) that the `assetURL` helper renders with
+   `{{assetURL (index .Content "field")}}`. The `image` type does not give
+   `assetURL` what it needs - a model with images is only correct when each
+   image attribute is an `asset`.
+
+## Common tasks
+
+| Task | Do this |
+| --- | --- |
+| Add a route | one file in `internal/handlers/`, one line in `internal/app/router.go` |
+| Add a page | drop a template in `internal/views/pages/`; it registers itself by filename |
+| Add a component | file in `internal/views/components/`, call `{{template "name" .}}` |
+| Change content | edit it in Cockpit, then purge the cache |
+| Read the logs | `gosite logs __PROJECT__` |
+| Restart | `gosite restart __PROJECT__` (air already reloads code) |
+
+## Cockpit addons
+
+Cockpit loads `cockpit/addons/` as first-class modules. Locally the container
+mounts the folder; in production `deploy/Dockerfile.cms` bakes them (plus
+`cockpit/config.php`) into the image, because relative bind mounts do not
+resolve to the repo checkout in Coolify. The built-ins and the Forms and
+Replica options are described under [Addons](#addons) above.
+
+Choose the optional ones when creating (`--addons "Forms Replica"`, or
+`--no-addons` to skip).
+
+All addons come from gosite's addon library (`src/addons/`), so updating gosite
+keeps every future scaffold current. Update or add addons later with
+`gosite addons add <name>`.
+
+`sync` overwrites the addons in place and clears the Cockpit module cache. In
+production the module cache lives in the persistent `cockpit-storage` volume, so
+after a deploy that ships new or updated addons, clear
+`storage/cache/modules.cache.php` once inside the cms container (the image
+rebuild ships the files; the stale cache is what hides them).

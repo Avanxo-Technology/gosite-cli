@@ -79,7 +79,7 @@ Every gosite project that uses this endpoint should document in its `ARCHITECTUR
 1. That `POST /api/assets/upload` exists (via the built-in `Webapp` addon)
 2. How to upload assets via the API (curl command)
 
-And in `MEMORY.md` under "Common tasks":
+And in `ARCHITECTURE.md` under "Common tasks":
 
 ```
 | Upload assets via API | `POST /api/assets/upload` with `files[]` multipart; returns `{"assets":[{"path":"...","_id":"..."}]}` |

@@ -75,7 +75,7 @@ cmd_start() {
 # system/api_keys, it reads a registry cached in app memory - Redis here, so it
 # survives every container rebuild - and an empty registry is stored as a value,
 # not as a miss, so nothing ever expires it. Writing straight to Mongo left the
-# two out of step with no path back. See src/knowledge/cockpit-api-key.md.
+# two out of step with no path back. See `gosite docs cockpit-api-key`.
 #
 # Non-fatal either way: the addon repairs itself on any later API request, so a
 # CMS that is slow to boot costs nothing.
