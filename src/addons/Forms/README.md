@@ -19,7 +19,7 @@ Two collections are created **automatically** on first use — no manual setup:
 | Collection | Fields |
 | --- | --- |
 | `formSubmissions` | `form`, `data` (object), `origin`, `ip`, `userAgent`, `read` |
-| `formSettings` | `form`, `label`, `notify`, `subject`, `webhook`, `webhookSecret`, `throttle`, `dailyLimit` |
+| `formSettings` | `form`, `label`, `notify`, `subject`, `webhook`, `webhookFormat`, `webhookSecret`, `throttle`, `dailyLimit` |
 
 `data` is an **object** field, so the landing page can add or rename fields
 without ever touching the CMS. The admin screen derives one real column per
@@ -188,10 +188,49 @@ Create one item in **Content → Form settings** per form:
 | `label` | name shown in the Forms screen |
 | `notify` | e-mails that receive a summary of every submission |
 | `subject` | e-mail subject (defaults to `New submission: <form>`) |
-| `webhook` | URL that receives a JSON POST per submission |
+| `webhook` | URL that receives a POST per submission |
+| `webhookFormat` | `json` (default), `mattermost`, or `none` to opt this form out |
 | `webhookSecret` | signs the body as `X-Forms-Signature: sha256=<hmac>` |
 | `throttle` | seconds between submissions per IP (`0` disables) |
 | `dailyLimit` | max per IP per day (`0` disables) |
+
+### The webhook default, and why the format is a field
+
+The CMS config carries a default for every form, read from the environment
+(`cockpit/config.php` in legacy sites, `cockpit/config.core.php` in thin ones):
+
+```php
+'forms' => [
+    'webhook'       => getenv('FORMS_WEBHOOK_URL') ?: null,
+    'webhookFormat' => getenv('FORMS_WEBHOOK_FORMAT') ?: 'json',
+    'webhookSecret' => getenv('FORMS_WEBHOOK_SECRET') ?: null,
+],
+```
+
+A form's own field wins when it is set, so the environment default is what makes
+the setting hold for a form **nobody has configured yet** - create a form in the
+CMS and it inherits the webhook with no per-form setup. Leave the variables
+unset to configure each form in **Content → Form settings** instead.
+
+Because of that default, a form opts OUT with `webhookFormat: none`, not by
+clearing the URL: an empty text field arrives as `null`, which is
+indistinguishable from a field nobody has filled in yet.
+
+`webhookFormat` exists because a receiver does not get to choose the shape this
+addon sends, and a mismatch is **silent**: the POST goes out, the receiver
+answers 4xx, and the only trace is one line in this addon's log - the submission
+is stored either way.
+
+| Format | Body |
+| --- | --- |
+| `json` | the flat object shown below - the original contract |
+| `mattermost` | `{"text": …, "attachments": […]}` for an incoming webhook |
+
+Mattermost (and Slack) reject the flat object with `400 "Failed to handle the
+payload …"`, because both require `text` or `attachments`. The `mattermost`
+format sends the submitted fields as one attachment field per field, and
+**only** those fields - no IP and no user agent, since the chat is a second
+system that does not inherit this addon's `personal_data_retention`.
 
 E-mail goes through `$app->mailer`. Sites scaffolded by gosite 0.55.0 or later
 configure it from the CMS environment: set `SMTP_HOST` (plus `SMTP_PORT`,
@@ -199,7 +238,7 @@ configure it from the CMS environment: set `SMTP_HOST` (plus `SMTP_PORT`,
 in `.env` or in Coolify. Without `SMTP_HOST` Cockpit falls back to PHP `mail()`,
 which the CMS image cannot deliver, so `notify` only logs `mail failed`.
 
-Webhook payload:
+The `json` format's webhook payload:
 
 ```json
 {

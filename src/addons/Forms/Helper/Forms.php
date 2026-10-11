@@ -18,6 +18,23 @@ class Forms extends \Lime\Helper {
     const DEFAULT_DAILY_LIMIT      = 50;
     const HONEYPOT_FIELD           = '_hp';
 
+    // Webhook body shapes. A receiver does not get to choose the shape this
+    // addon sends, so a mismatch is silent: the POST goes out, the receiver
+    // answers 4xx, and the only trace is one line in this addon's log. Hence a
+    // named format per receiver instead of assuming everyone parses the flat
+    // object below.
+    //
+    //   json       the original contract: one flat object per submission,
+    //              signed as X-Forms-Signature when a secret is set.
+    //   mattermost an incoming-webhook message ({text, attachments}). Mattermost
+    //              answers 400 "Failed to handle the payload" for the flat
+    //              object, because it requires `text` or `attachments`.
+    //   none       opts this form out, which a global default needs: an empty
+    //              URL field is indistinguishable from one nobody filled in.
+    const WEBHOOK_JSON       = 'json';
+    const WEBHOOK_MATTERMOST = 'mattermost';
+    const WEBHOOK_NONE       = 'none';
+
     // Seconds advertised in Retry-After when the rate limit cannot be evaluated
     // because the memory backend is down.
     const RATE_LIMIT_RETRY_AFTER = 30;
@@ -41,16 +58,29 @@ class Forms extends \Lime\Helper {
     // often per installation when the admin screen is opened.
     const MAINTENANCE_INTERVAL_SECONDS = 86400;
 
+    // Bumped whenever ensureModels() has new work to do on an install that
+    // already exists - a field added to a model, a changed list. Comparing a
+    // version against the memory backend costs one read per request, which is
+    // what the "already checked" boolean below used to cost, while leaving a
+    // migration reachable.
+    //
+    // That boolean was the first shape of this and it was wrong: it was set by
+    // the first request that ran the creates, so every later migration was
+    // skipped for the life of the install - the model kept its old field list
+    // and Content silently dropped the new field on save.
+    const MODELS_VERSION = 2;
+
     protected bool $modelsChecked = false;
 
     // ------------------------------------------------------------- install
 
     /**
-     * Creates the two content models if they are missing.
+     * Creates the two content models if they are missing, and brings an
+     * existing formSettings up to the current field list.
      *
      * Called on admin init and before every submission, so a fresh install
-     * needs no manual setup. Cheap: the result is cached in $app->memory and
-     * once per request in $modelsChecked.
+     * needs no manual setup. Cheap: once per request in $modelsChecked, and
+     * across requests as a single memory read of MODELS_VERSION.
      */
     public function ensureModels(bool $force = false): void {
 
@@ -60,14 +90,14 @@ class Forms extends \Lime\Helper {
 
         $this->modelsChecked = true;
 
-        // The ready-flag is a cache, not a requirement: when the memory backend
+        // The version is a cache, not a requirement: when the memory backend
         // is down we simply do the (idempotent) model checks.
         try {
-            if (!$force && $this->memoryGet('forms.models.ready')) {
+            if (!$force && (int)$this->memoryGet('forms.models.version', 0) >= self::MODELS_VERSION) {
                 return;
             }
         } catch (\Throwable $e) {
-            $this->log('models.ready check skipped: '.$e->getMessage());
+            $this->log('models.version check skipped: '.$e->getMessage());
         }
 
         $content = $this->app->module('content');
@@ -105,6 +135,7 @@ class Forms extends \Lime\Helper {
                     $this->field('notify', 'tags', 'Notify e-mails'),
                     $this->field('subject', 'text', 'E-mail subject'),
                     $this->field('webhook', 'text', 'Webhook URL'),
+                    $this->field('webhookFormat', 'text', 'Webhook format'),
                     $this->field('webhookSecret', 'text', 'Webhook secret'),
                     $this->field('throttle', 'number', 'Seconds between submissions per IP'),
                     $this->field('dailyLimit', 'number', 'Max submissions per IP per day'),
@@ -112,10 +143,83 @@ class Forms extends \Lime\Helper {
             ]);
         }
 
+        // Models created before a field existed keep their old definition
+        // forever, because the block above only ever creates what is missing.
+        // Append-only: existing fields keep their place and their settings, and
+        // stored submissions are never touched.
+        $this->migrateSettingsModel($content);
+
         try {
-            $this->memorySet('forms.models.ready', 1);
+            $this->memorySet('forms.models.version', self::MODELS_VERSION);
         } catch (\Throwable $e) {
-            $this->log('models.ready flag not stored: '.$e->getMessage());
+            $this->log('models.version not stored: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Brings an existing formSettings model up to the current field list.
+     *
+     * `webhookFormat` arrived with the Mattermost format. Without this the code
+     * reads it and finds nothing on any install created earlier, and an editor
+     * has nowhere to write it - so the feature looks present and is
+     * unreachable.
+     */
+    protected function migrateSettingsModel($content): void {
+
+        if (!$content->exists(self::MODEL_SETTINGS)) return;
+
+        $model = $content->model(self::MODEL_SETTINGS);
+
+        if (!$model) return;
+
+        $have = [];
+
+        foreach ($model['fields'] ?? [] as $f) {
+            if (!empty($f['name'])) $have[$f['name']] = true;
+        }
+
+        // Anchored right after `webhook`: the field order is what the editor
+        // renders, and the format belongs next to the URL it shapes.
+        $order   = [];
+        $insert  = null;
+
+        foreach ($model['fields'] as $f) {
+            $order[] = $f;
+            if (($f['name'] ?? null) === 'webhook') $insert = count($order);
+        }
+
+        $added = false;
+
+        foreach ([
+            'webhookFormat' => $this->field('webhookFormat', 'text', 'Webhook format'),
+        ] as $name => $definition) {
+
+            if (isset($have[$name])) continue;
+
+            if ($insert !== null) {
+                array_splice($order, $insert, 0, [$definition]);
+                $insert++;
+            } else {
+                $order[] = $definition;
+            }
+
+            $added = true;
+        }
+
+        if (!$added) return;
+
+        $model['fields'] = $order;
+
+        try {
+            $content->updateModel(self::MODEL_SETTINGS, $model);
+
+            // Content\Helper\Model caches the registry under the
+            // 'content.models' memory key and only bypasses it when debug is
+            // on, so without this the new field is invisible on any non-debug
+            // instance until something else rebuilds it.
+            $this->app->helper('content.model')->cache(true);
+        } catch (\Throwable $e) {
+            $this->log('formSettings migration failed: '.$e->getMessage());
         }
     }
 
@@ -141,6 +245,18 @@ class Forms extends \Lime\Helper {
 
     /**
      * Configuration document for a form, with defaults applied.
+     *
+     * Resolution order for the webhook: the form's own field, then the
+     * environment's default (`forms.webhook` in cockpit/config.php), then
+     * nothing. The global default is what makes the setting hold for forms
+     * nobody has configured yet - a form created later in the CMS inherits it
+     * with no per-form setup, which is the only way "every form" stays true
+     * over time.
+     *
+     * Because of that default, a form is opted OUT with `webhookFormat: none`
+     * rather than by clearing the URL: an empty text field reaches this method
+     * as null (and is filtered out below), which is indistinguishable from a
+     * field nobody has filled in yet.
      */
     public function settings(string $form): array {
 
@@ -151,16 +267,23 @@ class Forms extends \Lime\Helper {
         // Empty values in the CMS must not override the defaults.
         $doc = array_filter($doc, fn($v) => $v !== null && $v !== '' && $v !== []);
 
-        return array_merge([
+        $settings = array_merge([
             'form'          => $form,
             'label'         => $form,
             'notify'        => [],
             'subject'       => null,
             'webhook'       => null,
+            'webhookFormat' => null,
             'webhookSecret' => null,
             'throttle'      => self::DEFAULT_THROTTLE_SECONDS,
             'dailyLimit'    => self::DEFAULT_DAILY_LIMIT,
         ], $doc);
+
+        $settings['webhook']       = $settings['webhook']       ?: $this->config('webhook', null);
+        $settings['webhookFormat'] = $settings['webhookFormat'] ?: $this->config('webhookFormat', self::WEBHOOK_JSON);
+        $settings['webhookSecret'] = $settings['webhookSecret'] ?: $this->config('webhookSecret', null);
+
+        return $settings;
     }
 
     /**
@@ -557,11 +680,15 @@ class Forms extends \Lime\Helper {
     }
 
     /**
-     * POSTs the submission as JSON to the configured webhook URL.
+     * POSTs the submission to the configured webhook.
      *
      * Synchronous with a short timeout: predictable, and a slow endpoint delays
      * the response by at most 5s rather than dropping the lead. When a secret is
      * set the body is signed as X-Forms-Signature: sha256=<hmac>.
+     *
+     * The body is shaped by `webhookFormat` - see the WEBHOOK_* constants. A
+     * format that is not one of ours falls back to the original contract, so a
+     * typo in the field cannot silence a receiver that was working.
      */
     protected function sendWebhook(array $settings, array $entry): void {
 
@@ -569,16 +696,29 @@ class Forms extends \Lime\Helper {
 
         if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) return;
 
-        $body = json_encode([
-            'event'     => 'submission.created',
-            'form'      => $entry['form'],
-            'data'      => $entry['data'],
-            'origin'    => $entry['origin'] ?? null,
-            'ip'        => $entry['ip'] ?? null,
-            'userAgent' => $entry['userAgent'] ?? null,
-            '_id'       => $entry['_id'] ?? null,
-            '_created'  => $entry['_created'] ?? time(),
-        ]);
+        $format = strtolower(trim((string)($settings['webhookFormat'] ?? '')));
+
+        if ($format === self::WEBHOOK_NONE) return;
+
+        if ($format === self::WEBHOOK_MATTERMOST) {
+            $body = $this->mattermostBody($settings, $entry);
+        } else {
+            $body = json_encode([
+                'event'     => 'submission.created',
+                'form'      => $entry['form'],
+                'data'      => $entry['data'],
+                'origin'    => $entry['origin'] ?? null,
+                'ip'        => $entry['ip'] ?? null,
+                'userAgent' => $entry['userAgent'] ?? null,
+                '_id'       => $entry['_id'] ?? null,
+                '_created'  => $entry['_created'] ?? time(),
+            ]);
+        }
+
+        if (!is_string($body) || $body === '') {
+            $this->log('webhook body could not be encoded for format '.$format);
+            return;
+        }
 
         $headers = ['Content-Type: application/json'];
 
@@ -614,6 +754,49 @@ class Forms extends \Lime\Helper {
         } catch (\Throwable $e) {
             $this->log('webhook failed: '.$e->getMessage());
         }
+    }
+
+    /**
+     * Body for `webhookFormat: mattermost` - an incoming-webhook message.
+     *
+     * `text` is what Mattermost requires; the attachment carries the submitted
+     * fields, one per line, with the field names the form uses.
+     *
+     * Only the submitted fields travel. No IP and no user agent: the chat is a
+     * second system with its own retention, this addon already prunes
+     * ip/userAgent from its own store after personal_data_retention, and a
+     * duplicate of that data in a chat history is not covered by that policy.
+     */
+    protected function mattermostBody(array $settings, array $entry): string {
+
+        $fields = is_array($entry['data'] ?? null) ? $entry['data'] : [];
+
+        $lines = [];
+
+        foreach ($fields as $name => $value) {
+
+            if (is_array($value)) {
+                $value = implode(', ', array_map(fn($v) => is_scalar($v) ? (string)$v : json_encode($v), $value));
+            } elseif (!is_scalar($value) && $value !== null) {
+                $value = json_encode($value);
+            }
+
+            $lines[] = [
+                'title' => (string)$name,
+                'value' => (string)$value === '' ? '—' : (string)$value,
+                'short' => false,
+            ];
+        }
+
+        return json_encode([
+            'text'        => 'New **'.($settings['label'] ?: $entry['form']).'** submission',
+            'attachments' => [[
+                'color'  => '#F26A2E',
+                'title'  => (string)$entry['form'],
+                'fields' => $lines,
+                'footer' => 'BA-POW! · '.date('Y-m-d H:i', (int)($entry['_created'] ?? time())),
+            ]],
+        ]);
     }
 
     protected function log(string $message): void {
