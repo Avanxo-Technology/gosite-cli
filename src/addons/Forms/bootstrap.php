@@ -6,8 +6,8 @@
  * on first use:
  *
  *   formSubmissions  form, data (object), origin, ip, userAgent, read
- *   formSettings     form, label, notify, subject, webhook, webhookSecret,
- *                    throttle, dailyLimit
+ *   formSettings     form, label, notify, subject, webhook, webhookFormat,
+ *                    webhookSecret, throttle, dailyLimit
  *
  * Public receiver (no auth):
  *   POST /forms/api/submit

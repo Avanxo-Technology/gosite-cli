@@ -87,6 +87,13 @@ services:
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
       SMTP_FROM_NAME: "${SMTP_FROM_NAME:-}"
+      # Default webhook for every form (optional - see cockpit/config.php).
+      # Empty = none; a form's own setting in the CMS still applies.
+      # FORMS_WEBHOOK_FORMAT=mattermost when the destination is an incoming
+      # webhook rather than a receiver written for the Forms addon.
+      FORMS_WEBHOOK_URL: "${FORMS_WEBHOOK_URL:-}"
+      FORMS_WEBHOOK_FORMAT: "${FORMS_WEBHOOK_FORMAT:-}"
+      FORMS_WEBHOOK_SECRET: "${FORMS_WEBHOOK_SECRET:-}"
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
       # The container name, not the service name: every gosite project has a

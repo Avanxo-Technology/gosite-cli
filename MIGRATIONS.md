@@ -561,6 +561,28 @@ rest in `ARCHITECTURE.md`, which the assistant reads on demand.
    run `gosite docs medusa-admin-api` and check that a note prints.
 5. **Rollback.** Revert the commit. Nothing that runs was touched.
 
+## → 0.58.0 — Forms webhook format
+
+Nothing is required. Every form keeps the `json` body it sends today.
+
+**Thin sites.** Move `core:` in `gosite.yml` and the core in `go.mod` to
+0.58.0, `go mod tidy`, `gosite generate`, `gosite restart <site> --build`.
+`cockpit/config.core.php` and the three composes gain the `FORMS_WEBHOOK_*`
+lines.
+
+**Legacy sites.** Copy `src/addons/Forms/` over `cockpit/addons/Forms/`, then
+merge by hand: the three `webhook*` keys under `forms` in `cockpit/config.php`
+and the `FORMS_WEBHOOK_*` lines on the CMS service of each compose. Rebuild the
+CMS image (`docker compose up -d --build cms`): the addons are baked into it.
+
+**Then, on every site.** The first CMS request after the deploy adds
+`webhookFormat` to the Form settings model. To send a form to Mattermost, either
+set `webhook` and `webhookFormat: mattermost` on that form in **Content → Form
+settings**, or set `FORMS_WEBHOOK_URL` and `FORMS_WEBHOOK_FORMAT=mattermost` in
+`.env` and Coolify for every form at once. Submit a form and check that the
+message reaches the channel: a mismatch only shows as a log line in the CMS.
+The URL is a bearer credential; keep it out of the repository.
+
 ---
 
 ### Verify before you call it done

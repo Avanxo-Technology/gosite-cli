@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.58.0
+
+### Forms: a webhook body Mattermost accepts, and a default for every form
+
+- **Added: `webhookFormat` on Form settings.** `json` (the original flat body,
+  unchanged and still the default), `mattermost` (an incoming-webhook message,
+  `{text, attachments}`) or `none`. Mattermost and Slack answer 400 to the flat
+  body, and the addon only logs that, so a form pointed at a chat hook looked
+  configured and delivered nothing. An unknown value falls back to `json`.
+  The `mattermost` body carries only the submitted fields: no IP, no user agent.
+- **Added: a default webhook for every form**, from `FORMS_WEBHOOK_URL`,
+  `FORMS_WEBHOOK_FORMAT` and `FORMS_WEBHOOK_SECRET` on the CMS service, so a
+  form created later inherits it. A form's own `webhook` / `webhookFormat` wins;
+  `webhookFormat: none` opts one form out. All three are empty in new sites.
+- **Fixed: Forms model migrations never ran after the first request.** A
+  boolean in app memory skipped `ensureModels()`, so a field added to
+  `formSettings` never reached an existing site and Content dropped it on save.
+  The addon now compares a `MODELS_VERSION`.
+- Existing sites: see MIGRATIONS.md, "0.58.0 — Forms webhook format".
+
 ## 0.57.0
 
 ### Agent context: AGENTS.md, CLAUDE.md and `gosite docs`

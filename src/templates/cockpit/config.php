@@ -94,6 +94,21 @@ $config = [
         'trustedProxies' => 1,
         'personal_data_retention' => 7776000, // 90 days
         'collect_personal_data'   => true,
+
+        // Default webhook for every form, so a form created later in the CMS
+        // inherits it with no per-form setup. A form's own `webhook` field wins
+        // when it is set, and `webhookFormat: none` opts one out.
+        //
+        // The URL is a bearer credential - anyone holding it can post to the
+        // destination - so it comes from the environment and never from this
+        // file. Unset means no webhook at all, which is the default state.
+        'webhook' => getenv('FORMS_WEBHOOK_URL') ?: null,
+        // json (the addon's original contract) or mattermost (an incoming
+        // webhook message). See Forms\Helper\Forms::WEBHOOK_*.
+        'webhookFormat' => getenv('FORMS_WEBHOOK_FORMAT') ?: 'json',
+        // Only meaningful for the json format, where the body is signed as
+        // X-Forms-Signature. Mattermost ignores it.
+        'webhookSecret' => getenv('FORMS_WEBHOOK_SECRET') ?: null,
     ],
 ];
 

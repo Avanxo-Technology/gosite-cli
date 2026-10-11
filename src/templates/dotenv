@@ -42,3 +42,13 @@ SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=
 SMTP_FROM_NAME=
+
+# Default webhook for EVERY Forms submission, so a form created later in the
+# CMS inherits it with no per-form setup. Optional: leave FORMS_WEBHOOK_URL
+# empty and only forms with their own `webhook` in the CMS post anywhere.
+# FORMS_WEBHOOK_FORMAT is json (the addon's own body) or mattermost (an
+# incoming-webhook message; Mattermost answers 400 to the json body). The URL
+# is a bearer credential: never commit it.
+FORMS_WEBHOOK_URL=
+FORMS_WEBHOOK_FORMAT=json
+FORMS_WEBHOOK_SECRET=
