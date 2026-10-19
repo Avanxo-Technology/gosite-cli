@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.57.1
+
+- **Fix: Wompi could not take a payment.** Two bugs in `gosite-medusa`'s Wompi
+  provider, both since it was added:
+  - It failed to load on the first payment session ("Unable to retrieve the
+    payment provider with id: pp_wompi_wompi", `AwilixResolutionError: Could
+    not resolve 'resolve'`). Medusa hands a provider the container's cradle,
+    which has no `resolve()`; the logger is now read as a property.
+  - The checkout URL's reference was a random UUID instead of the payment
+    session id: the provider read `context.payment_session.id`, which Medusa
+    2.21 does not send. Wompi's webhook reports that reference back, so no
+    payment could ever be authorized. The reference is now the session id
+    Medusa passes (`data.session_id`).
+- Sites with Commerce get the fix by moving `core:` and `go.mod` to 0.57.1
+  (`gosite-medusa:0.57.1`). No data migration.
+
 ## 0.57.0
 
 ### Agent context: AGENTS.md, CLAUDE.md and `gosite docs`

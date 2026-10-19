@@ -7,9 +7,20 @@ import {
   integritySignature,
   mapStatus,
   parseWebhookEvent,
+  sessionReference,
   type EventPayload,
   verifyEventChecksum,
 } from "../../src/modules/wompi/wompi.ts"
+
+test("the reference is the payment session id Medusa passes", () => {
+  // Medusa 2.21's createPaymentSession: data.session_id and
+  // context.idempotency_key, no context.payment_session.
+  assert.equal(sessionReference({ session_id: "payses_1" }, { idempotency_key: "payses_1" }), "payses_1")
+  assert.equal(sessionReference({}, { idempotency_key: "payses_2" }), "payses_2")
+  assert.equal(sessionReference(undefined, { payment_session: { id: "payses_3" } }), "payses_3")
+  assert.equal(sessionReference({ session_id: "" }, {}), undefined)
+  assert.equal(sessionReference(), undefined)
+})
 
 test("status mapping", () => {
   assert.equal(mapStatus("APPROVED"), "authorized")

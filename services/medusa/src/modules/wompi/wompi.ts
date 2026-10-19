@@ -59,6 +59,23 @@ export function mapStatus(status: string): "authorized" | "pending" | "error" {
   }
 }
 
+// sessionReference is the reference a checkout URL carries: the Medusa payment
+// session id, so the webhook (which reports it back) maps to that session.
+// Medusa 2.x passes the id as data.session_id and context.idempotency_key;
+// context.payment_session is read for older callers. undefined when none is
+// set.
+export function sessionReference(
+  data?: Record<string, unknown>,
+  context?: Record<string, any>
+): string | undefined {
+  for (const value of [data?.session_id, context?.idempotency_key, context?.payment_session?.id]) {
+    if (typeof value === "string" && value !== "") {
+      return value
+    }
+  }
+  return undefined
+}
+
 // integritySignature is the SHA-256 Wompi requires on a Web Checkout URL:
 // reference + amount-in-cents + currency + integrity secret.
 export function integritySignature(

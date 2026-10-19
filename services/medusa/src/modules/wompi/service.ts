@@ -25,7 +25,14 @@ import type {
   WebhookActionResult,
 } from "@medusajs/framework/types"
 
-import { buildCheckoutURL, mapStatus, parseWebhookEvent, toCents, type EventPayload } from "./wompi"
+import {
+  buildCheckoutURL,
+  mapStatus,
+  parseWebhookEvent,
+  sessionReference,
+  toCents,
+  type EventPayload,
+} from "./wompi"
 
 export type WompiOptions = {
   publicKey: string
@@ -50,9 +57,11 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
   protected logger: Logger
   protected options_: WompiOptions
 
-  constructor(container: Record<string, unknown>, options: WompiOptions) {
+  // Medusa hands a provider the container's cradle, not the container: a
+  // dependency is a property, and the cradle has no resolve().
+  constructor(container: { logger: Logger }, options: WompiOptions) {
     super(container, options)
-    this.logger = (container.resolve as (key: string) => Logger)("logger")
+    this.logger = container.logger
     this.options_ = options
   }
 
@@ -72,7 +81,7 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
   // exactly one session.
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
     const context = input.context as unknown as Record<string, any>
-    const reference = (context?.payment_session?.id as string) ?? randomUUID()
+    const reference = sessionReference(input.data, context) ?? randomUUID()
     const redirectURL = String(context?.redirect_url ?? "")
 
     const checkoutURL = buildCheckoutURL({
