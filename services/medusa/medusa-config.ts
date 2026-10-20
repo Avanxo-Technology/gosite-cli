@@ -84,6 +84,11 @@ const modules: Record<string, unknown>[] = [
   },
 ]
 
+// The mailer (Admin › Mailer): e-mails on store events, by rules each store
+// sets up. Always loaded; it sends nothing until a rule is active and SMTP_*
+// is set.
+modules.push({ resolve: "./src/modules/mailer" })
+
 // Uploads (product images from the Admin or the API) go to the site's bucket.
 const fileModule = s3FileModule(process.env)
 if (fileModule) {

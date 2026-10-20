@@ -33,8 +33,9 @@ S3_VERIFY=false
 # In production point this at a CDN or bucket endpoint.
 S3_PUBLIC_URL=https://minio.__TLD__/assets
 
-# Outgoing e-mail from the CMS (Forms notifications, password resets). Optional:
-# leave SMTP_HOST empty and no e-mail is sent. SMTP_ENCRYPTION is tls
+# Outgoing e-mail from the CMS (Forms notifications, password resets) and, with
+# Commerce, the store's mailer (Admin › Mailer). Optional: leave SMTP_HOST empty
+# and no e-mail is sent. SMTP_ENCRYPTION is tls
 # (STARTTLS, port 587), ssl (port 465) or none. SMTP_FROM must be a sender your
 # provider has verified.
 SMTP_HOST=
@@ -44,3 +45,12 @@ SMTP_USER=
 SMTP_PASSWORD=
 SMTP_FROM=
 SMTP_FROM_NAME=
+# Store e-mails (Commerce): the name, link and logo their templates show
+# ({{ $.store.name }}, {{ $.store.url }}, {{ $.store.logo_url }}), the locale
+# amounts and dates are written in, and custom events your code emits that a
+# mailer rule may send on (comma-separated).
+MAILER_STORE_NAME=
+MAILER_STORE_URL=
+MAILER_LOGO_URL=
+MAILER_LOCALE=es-CO
+MAILER_EXTRA_EVENTS=

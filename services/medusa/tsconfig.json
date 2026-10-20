@@ -14,5 +14,5 @@
     "sourceMap": false
   },
   "include": ["src/**/*", "medusa-config.ts"],
-  "exclude": ["node_modules", ".medusa"]
+  "exclude": ["node_modules", ".medusa", "src/admin"]
 }

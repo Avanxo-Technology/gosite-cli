@@ -218,6 +218,20 @@ services:
       - WOMPI_EVENTS_SECRET=${WOMPI_EVENTS_SECRET:-}
       - WOMPI_CHECKOUT_URL=${WOMPI_CHECKOUT_URL:-}
       - WOMPI_API_URL=${WOMPI_API_URL:-}
+      # The mailer (Admin › Mailer) sends through the CMS's SMTP settings;
+      # nothing is sent until SMTP_HOST is set and a rule is active.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_ENCRYPTION=${SMTP_ENCRYPTION:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
+      - MAILER_STORE_NAME=${MAILER_STORE_NAME:-}
+      - MAILER_STORE_URL=${MAILER_STORE_URL:-}
+      - MAILER_LOGO_URL=${MAILER_LOGO_URL:-}
+      - MAILER_LOCALE=${MAILER_LOCALE:-}
+      - MAILER_EXTRA_EVENTS=${MAILER_EXTRA_EVENTS:-}
       # Product images go to the site's bucket (medusa/ under S3_PREFIX), never
       # to the container's disk.
       - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}

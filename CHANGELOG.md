@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.59.0
+
+### Commerce: the store's e-mails
+
+- **Added: Admin › Mailer.** Rules say which event sends which e-mail, to
+  whom (the order's address, the customer's, an address in a custom event, or
+  fixed addresses, with optional Bcc), once per order or on every event. Each
+  rule's subject and HTML are edited in a textarea with a live preview from a
+  real order, a test send, and the log of sent e-mails. Rules start from
+  Spanish templates (pago confirmado, pedido cancelado sin pago, pedido
+  recibido, enviado, cancelado por la tienda) copied into the rule. Templates
+  use Go's syntax (`{{ $.order.display_id }}`, `{{ range }}`, `{{ if }}`),
+  escaped unless `raw`.
+- **Added: events `gosite.order.paid` and `gosite.order.expired`.** Medusa
+  emits nothing when a Wompi payment is confirmed, so job `notify-paid-orders`
+  (every minute) announces each newly paid order once; `expire-pending-payments`
+  emits `gosite.order.expired` when it cancels an unpaid order. A store that
+  places orders before payment e-mails on these instead of `order.placed`.
+- **Added: sending through the CMS's SMTP settings** (`SMTP_*`), with retries
+  (job `mailer-retry`). Nothing is sent until `SMTP_HOST` is set and a rule is
+  active. Optional `MAILER_STORE_NAME`, `MAILER_STORE_URL`, `MAILER_LOGO_URL`,
+  `MAILER_LOCALE` (es-CO) and `MAILER_EXTRA_EVENTS` (custom events a rule may
+  send on).
+- Proposal: `openspec/changes/add-commerce-mailer`. Sites move `core:` and
+  `go.mod` to 0.59.0 and run `gosite generate` (the compose files pass the new
+  variables to Medusa). The mailer's tables are created by the image's
+  migrations on start.
+
 ## 0.58.0
 
 ### Commerce: the order before the payment
