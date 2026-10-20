@@ -26,8 +26,8 @@ import type {
 } from "@medusajs/framework/types"
 
 import {
+  authorizationStatus,
   buildCheckoutURL,
-  mapStatus,
   parseWebhookEvent,
   sessionReference,
   toCents,
@@ -41,10 +41,17 @@ export type WompiOptions = {
   eventsSecret: string
   baseURL?: string
   checkoutURL?: string
+  // How long a buyer has to start paying, in minutes: the checkout URL expires
+  // then. Unset or 0: the URL does not expire.
+  expirationMinutes?: number
 }
 
 const DEFAULT_BASE_URL = "https://production.wompi.co/v1"
 const DEFAULT_CHECKOUT_URL = "https://checkout.wompi.co/p"
+
+// A transaction Wompi holds for a reference; undefined status when there is
+// none yet.
+type Transaction = { id?: string; status?: string }
 
 type SessionData = Record<string, unknown>
 
@@ -84,14 +91,19 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     const reference = sessionReference(input.data, context) ?? randomUUID()
     const redirectURL = String(context?.redirect_url ?? "")
 
+    const minutes = Number(this.options_.expirationMinutes ?? 0)
+
     const checkoutURL = buildCheckoutURL({
-      baseURL: this.options_.checkoutURL ?? DEFAULT_CHECKOUT_URL,
+      // Compose passes an unset variable as "": that is no URL either.
+      baseURL: this.options_.checkoutURL || DEFAULT_CHECKOUT_URL,
       publicKey: this.options_.publicKey,
       reference,
       amount: String(input.amount),
       currency: input.currency_code.toUpperCase(),
       redirectURL,
       integritySecret: this.options_.integritySecret,
+      expirationTime:
+        minutes > 0 ? new Date(Date.now() + minutes * 60_000).toISOString() : undefined,
     })
 
     return {
@@ -101,7 +113,11 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     }
   }
 
-  // authorizePayment checks the transaction with Wompi before authorizing.
+  // authorizePayment checks the transaction with Wompi. Completing the cart
+  // calls it before the buyer has paid: no transaction yet is
+  // pending_authorization, so the order is created and its stock reserved
+  // while the payment is awaited (see authorizationStatus). The webhook and the
+  // expire-pending-payments job call it again once Wompi has an answer.
   async authorizePayment(input: AuthorizePaymentInput): Promise<AuthorizePaymentOutput> {
     const reference = input.data?.reference
     if (!reference) {
@@ -109,9 +125,15 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     }
     const tx = await this.fetchTransaction(String(reference))
     // The transaction id is kept on the session: refunds need it.
+    // transaction_status tells the job whether the buyer has started paying.
     return {
-      status: tx.status,
-      data: { ...input.data, status: tx.status.toUpperCase(), transaction_id: tx.id },
+      status: authorizationStatus(tx.status),
+      data: {
+        ...input.data,
+        status: tx.status ?? "NONE",
+        transaction_status: tx.status ? tx.status.toLowerCase() : "none",
+        transaction_id: tx.id,
+      },
     }
   }
 
@@ -120,7 +142,8 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     if (!reference) {
       return { status: "error", data: input.data }
     }
-    return { status: (await this.fetchTransaction(String(reference))).status, data: input.data }
+    const tx = await this.fetchTransaction(String(reference))
+    return { status: authorizationStatus(tx.status), data: input.data }
   }
 
   async capturePayment(input: CapturePaymentInput): Promise<CapturePaymentOutput> {
@@ -207,7 +230,7 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
   }
 
   private baseURL(): string {
-    return this.options_.baseURL ?? DEFAULT_BASE_URL
+    return this.options_.baseURL || DEFAULT_BASE_URL
   }
 
   private apiHeaders(): Record<string, string> {
@@ -217,21 +240,23 @@ class WompiProviderService extends AbstractPaymentProvider<WompiOptions> {
     }
   }
 
-  // fetchTransaction looks a transaction up by reference. A missing one or an
-  // API failure is status "error" with no id.
-  private async fetchTransaction(
-    reference: string
-  ): Promise<{ id?: string; status: "authorized" | "pending" | "error" }> {
+  // fetchTransaction looks a transaction up by reference: no status when Wompi
+  // has none yet. An API failure throws, so it is never mistaken for "the
+  // buyer has not paid": Medusa then retries instead of acting on it.
+  private async fetchTransaction(reference: string): Promise<Transaction> {
     const response = await fetch(
       `${this.baseURL()}/transactions?reference=${encodeURIComponent(reference)}`,
       { headers: this.apiHeaders() }
     )
     if (!response.ok) {
-      return { status: "error" }
+      throw new MedusaError(
+        MedusaError.Types.UNEXPECTED_STATE,
+        `Wompi transaction lookup failed: ${response.status}`
+      )
     }
-    const body = (await response.json()) as { data?: Array<{ id?: string; status?: string }> }
+    const body = (await response.json()) as { data?: Transaction[] }
     const tx = body.data?.[0]
-    return { id: tx?.id, status: mapStatus(String(tx?.status ?? "ERROR")) }
+    return { id: tx?.id, status: tx?.status ? String(tx.status).toUpperCase() : undefined }
   }
 }
 
