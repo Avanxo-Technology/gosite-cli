@@ -2,6 +2,7 @@ import type { MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, MedusaError, Modules } from "@medusajs/framework/utils"
 import { cancelOrderWorkflow } from "@medusajs/medusa/core-flows"
 
+import { GOSITE_ORDER_EXPIRED } from "../lib/mailer/rules"
 import {
   allPages,
   awaitingPayment,
@@ -33,6 +34,7 @@ export default async function expirePendingPayments(container: MedusaContainer) 
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const paymentModule = container.resolve(Modules.PAYMENT)
   const orderModule = container.resolve(Modules.ORDER)
+  const eventBus = container.resolve(Modules.EVENT_BUS)
 
   const window = pendingWindow(process.env)
   const now = new Date()
@@ -83,8 +85,11 @@ export default async function expirePendingPayments(container: MedusaContainer) 
           ? "started"
           : "pending"
       },
+      // no_notification keeps Medusa's order.canceled from reading as a
+      // cancellation by the store; gosite.order.expired says why it happened.
       async cancelOrder(orderID: string) {
         await cancelOrderWorkflow(container).run({ input: { order_id: orderID, no_notification: true } })
+        await eventBus.emit({ name: GOSITE_ORDER_EXPIRED, data: { id: orderID } })
       },
     },
     now,
