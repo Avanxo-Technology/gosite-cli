@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.58.0
+
+### Commerce: the order before the payment
+
+- **Added: orders placed before payment, with their stock held.** The Wompi
+  provider answers `pending_authorization` while the buyer has not paid, so
+  completing the cart creates the order awaiting payment and reserves its
+  stock; Wompi's webhook then captures it. A site that completes the cart
+  before sending the buyer to Wompi gets this; core's flow (complete on the
+  return or by webhook) is unchanged.
+- **Added: job `expire-pending-payments`** (every 5 minutes). Authorizes an
+  order whose payment Wompi approved (a lost webhook, or local development),
+  cancels one whose payment failed or that nobody paid within
+  `COMMERCE_PENDING_PAYMENT_TTL_MINUTES` (60) or whose started payment is
+  undecided after `COMMERCE_PENDING_PAYMENT_MAX_HOURS` (24). Cancelling
+  releases the reserved stock. A payment found on a cancelled order is logged
+  as an error once. It reads every recent order (no page limit) and touches
+  only Wompi sessions; Stripe's are left alone.
+- **Added: Wompi checkout URLs expire** with their order (`expiration-time`,
+  part of the integrity signature).
+- **Added: `POST /store/gosite/checkout-session`**, internal, with the token
+  the site and Medusa share. After a paid order it gives the buyer a
+  registered account with a passwordless `email-code` identity and a customer
+  token, or attaches the order to the address's existing account (no token).
+  Signing in later by e-mail code is a later change.
+- **Fix:** an empty `WOMPI_API_URL` or `WOMPI_CHECKOUT_URL` (compose's unset
+  value) now falls back to Wompi's URLs instead of a relative one; a failed
+  Wompi lookup throws instead of reading as "not paid".
+- Proposal: `openspec/changes/add-commerce-pending-orders`. Sites move `core:`
+  and `go.mod` to 0.58.0 (`gosite-medusa:0.58.0`). No data migration.
+
 ## 0.57.1
 
 - **Fix: Wompi could not take a payment.** Two bugs in `gosite-medusa`'s Wompi

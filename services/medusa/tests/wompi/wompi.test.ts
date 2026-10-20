@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 
 import {
+  authorizationStatus,
   buildCheckoutURL,
   integritySignature,
   mapStatus,
@@ -33,6 +34,41 @@ test("status mapping", () => {
 test("integrity signature is sha256 of reference+amount+currency+secret", () => {
   const expected = createHash("sha256").update("REF-1" + "5990000" + "COP" + "secret").digest("hex")
   assert.equal(integritySignature("REF-1", 5990000, "COP", "secret"), expected)
+})
+
+test("no transaction or a pending one awaits authorization, an approved one is captured", () => {
+  // pending_authorization lets Medusa create the order and reserve its stock
+  // before the buyer pays.
+  assert.equal(authorizationStatus(undefined), "pending_authorization")
+  assert.equal(authorizationStatus(""), "pending_authorization")
+  assert.equal(authorizationStatus("PENDING"), "pending_authorization")
+  assert.equal(authorizationStatus("APPROVED"), "captured")
+  for (const status of ["DECLINED", "VOIDED", "ERROR"]) {
+    assert.equal(authorizationStatus(status), "error")
+  }
+})
+
+test("an expiring checkout url signs its expiration time", () => {
+  const expirationTime = "2026-10-20T13:00:00.000Z"
+  const url = new URL(
+    buildCheckoutURL({
+      baseURL: "https://checkout.wompi.co/p",
+      publicKey: "pub_test_x",
+      reference: "payses_1",
+      amount: "59900",
+      currency: "COP",
+      redirectURL: "https://tienda.test/checkout/retorno",
+      integritySecret: "secret",
+      expirationTime,
+    })
+  )
+  // Wompi: <reference><amount><currency><expiration><secret>.
+  const expected = createHash("sha256")
+    .update("payses_1" + "5990000" + "COP" + expirationTime + "secret")
+    .digest("hex")
+  assert.equal(url.searchParams.get("expiration-time"), expirationTime)
+  assert.equal(url.searchParams.get("signature:integrity"), expected)
+  assert.equal(integritySignature("payses_1", 5990000, "COP", "secret", expirationTime), expected)
 })
 
 test("checkout url carries the amount in cents and the signature", () => {

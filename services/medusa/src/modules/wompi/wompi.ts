@@ -76,15 +76,41 @@ export function sessionReference(
   return undefined
 }
 
+// AuthorizationStatus is what authorizePayment reports to Medusa for a
+// transaction, and transactionStatus says which transaction it was: "none"
+// (the buyer has not started paying) or Wompi's own status.
+export type AuthorizationStatus = "captured" | "pending_authorization" | "error"
+
+// authorizationStatus maps the transaction Wompi holds for a reference (none
+// yet: undefined) to a Medusa session status. No transaction or a PENDING one
+// is pending_authorization: Medusa then creates the order and reserves its
+// stock before the payment is confirmed, and the webhook (or the
+// expire-pending-payments job) authorizes it later. APPROVED is captured:
+// Web Checkout charges on approval, there is nothing left to capture.
+export function authorizationStatus(transactionStatus?: string): AuthorizationStatus {
+  switch (transactionStatus?.toUpperCase()) {
+    case undefined:
+    case "":
+    case "PENDING":
+      return "pending_authorization"
+    case "APPROVED":
+      return "captured"
+    default:
+      return "error"
+  }
+}
+
 // integritySignature is the SHA-256 Wompi requires on a Web Checkout URL:
-// reference + amount-in-cents + currency + integrity secret.
+// reference + amount-in-cents + currency (+ expiration time, when the URL has
+// one) + integrity secret.
 export function integritySignature(
   reference: string,
   amountInCents: number,
   currency: string,
-  integritySecret: string
+  integritySecret: string,
+  expirationTime = ""
 ): string {
-  return sha256(`${reference}${amountInCents}${currency}${integritySecret}`)
+  return sha256(`${reference}${amountInCents}${currency}${expirationTime}${integritySecret}`)
 }
 
 export interface CheckoutOptions {
@@ -95,6 +121,9 @@ export interface CheckoutOptions {
   currency: string
   redirectURL: string
   integritySecret: string
+  // ISO 8601 in UTC. After it Wompi no longer lets the buyer start paying, so
+  // a checkout left open cannot be paid once its order was cancelled.
+  expirationTime?: string
 }
 
 // buildCheckoutURL builds the Web Checkout URL, with the integrity signature
@@ -105,7 +134,8 @@ export function buildCheckoutURL(options: CheckoutOptions): string {
     options.reference,
     amountInCents,
     options.currency,
-    options.integritySecret
+    options.integritySecret,
+    options.expirationTime
   )
   const query = new URLSearchParams({
     "public-key": options.publicKey,
@@ -115,6 +145,9 @@ export function buildCheckoutURL(options: CheckoutOptions): string {
     "signature:integrity": signature,
     "redirect-url": options.redirectURL,
   })
+  if (options.expirationTime) {
+    query.set("expiration-time", options.expirationTime)
+  }
   return `${options.baseURL.replace(/\/$/, "")}/?${query.toString()}`
 }
 

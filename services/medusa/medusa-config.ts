@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "@medusajs/framework/utils"
 
 import { s3FileModule } from "./src/lib/file-storage"
+import { pendingWindow } from "./src/lib/pending-payments"
 
 loadEnv(process.env.NODE_ENV || "development", process.cwd())
 
@@ -37,6 +38,9 @@ if (wompi.publicKey && wompi.privateKey && wompi.integritySecret && wompi.events
       ...wompi,
       checkoutURL: process.env.WOMPI_CHECKOUT_URL,
       baseURL: process.env.WOMPI_API_URL,
+      // The checkout URL expires when its order would: a buyer cannot start
+      // paying an order the expire-pending-payments job already cancelled.
+      expirationMinutes: pendingWindow(process.env).ttlMinutes,
     },
   })
 }
