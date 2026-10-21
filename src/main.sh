@@ -59,6 +59,8 @@ source "${GOSITE_ROOT}/lib/helpers.sh"
 source "${GOSITE_ROOT}/lib/hostdeps.sh"
 # shellcheck source=lib/tls.sh
 source "${GOSITE_ROOT}/lib/tls.sh"
+# shellcheck source=lib/versions.sh
+source "${GOSITE_ROOT}/lib/versions.sh"
 # shellcheck source=dispatcher.sh
 source "${GOSITE_ROOT}/dispatcher.sh"
 

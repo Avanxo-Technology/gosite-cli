@@ -51,6 +51,8 @@ $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
 $(printf "${C_BOLD}OTHER${C_NC}")
   open   <name>         Open a project directory in Finder
   doctor             Verify dependencies + audit security defaults (--strict)
+  versions <local|prod>  Compare image tags with Docker Hub, read-only
+                     flags: --patch DIR (prod: write diffs), --strict
   docs   [topic]     Print an agent note (no topic lists them)
   update             Update gosite to the latest version from GitHub
   shell-init         Emit shell integration; eval "\$(gosite shell-init)"
@@ -89,6 +91,7 @@ dispatch() {
     generate)        load_command generate; cmd_generate "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
+    versions)        load_command versions; cmd_versions "$@" ;;
     docs)            load_command docs;   cmd_docs "$@" ;;
     dns)             load_command dns; cmd_dns ;;
     setup)           load_command setup; cmd_setup "$@" ;;

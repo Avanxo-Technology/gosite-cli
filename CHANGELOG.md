@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.60.0
+
+### Image versions: `gosite versions`
+
+- **Added: `gosite versions local|prod`.** Compares every image reference with
+  the newest Docker Hub tag in the same line. Read-only by default.
+  - `local` covers the shared infrastructure compose and each project's
+    `docker-compose.yml`, `deploy/Dockerfile.dev` and `deploy/Dockerfile.cms`.
+  - `prod` covers `docker-compose.prod.yml`, `docker-compose.qa.yml`,
+    `deploy/Dockerfile` and `deploy/Dockerfile.cms` in each registered project.
+    The repository is the source of truth for these files.
+- **Added: `gosite versions prod --patch DIR`.** Writes one unified diff per
+  file for updates inside the current major.minor line. Diff paths are relative
+  to the project, so `git apply` works from the project directory. Minor and
+  major updates are reported but never written.
+- **Added: `--strict`.** Exits non-zero when any reference is not current, for
+  use in a pre-deploy check.
+- Status values: `current`, `patch`, `minor`, `major`, `floating` (no version
+  in the tag), `unknown` and `unchecked` (registry other than Docker Hub, or the
+  API could not be reached). Variant tags such as `-windowsservercore` or
+  `-alpine3.24` are never compared with the plain tag.
+- Known limit: Docker Hub returns at most 100 tags per name prefix. A repository
+  with many matching tags (for example `golang` under `1`) can hide a newer tag;
+  the check does not detect that case.
+- No change to generated sites and no runtime change. Nothing is applied
+  automatically.
+
 ## 0.59.0
 
 ### Commerce: the store's e-mails
