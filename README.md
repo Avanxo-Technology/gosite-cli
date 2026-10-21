@@ -90,6 +90,8 @@ place. **Uninstall**: `rm -rf ~/.local/share/gosite ~/.local/bin/gosite`
 
 ```bash
 gosite doctor                 # toolchain check + security audit of projects & infra (--strict fails on findings)
+gosite versions local         # image tags in infra and dev files vs the newest Docker Hub tag (read-only)
+gosite versions prod          # the same check for prod and QA files (--patch DIR writes diffs, --strict fails)
 gosite docs [topic]           # agent notes on Cockpit and Medusa (no topic lists them)
 gosite infra up               # gosite-network + Traefik and Redis
 gosite create my-site         # scaffold ~/gosites/my-site + issue its TLS cert
@@ -406,6 +408,36 @@ differs, reporting it (`--force` takes the template version).
 After an install, Cockpit's module cache is cleared so the new addons register
 on the next boot.
 
+### Image versions
+
+`gosite versions` compares every image reference with the newest tag on Docker
+Hub in the same line. It never changes a file unless you ask for a patch.
+
+- `local` checks the shared infrastructure compose and each project's
+  `docker-compose.yml`, `deploy/Dockerfile.dev` and `deploy/Dockerfile.cms`.
+- `prod` checks `docker-compose.prod.yml`, `docker-compose.qa.yml`,
+  `deploy/Dockerfile` and `deploy/Dockerfile.cms`. Production deploys from
+  GitHub, so the repository is the source of truth for these files.
+- `prod --patch DIR` writes one unified diff per file for updates inside the
+  current major.minor line. Apply a diff with `git apply` from the project
+  directory. Minor and major updates are reported and left for a person.
+
+The status column means:
+
+| Status | Meaning |
+| --- | --- |
+| `current` | Nothing newer exists in the same line. |
+| `patch` | A newer patch in the same major.minor line exists. |
+| `minor` | A newer minor exists. The patch in the current line is shown too. |
+| `major` | A newer major exists. |
+| `floating` | The tag has no version (for example `latest`). Pin it. |
+| `unknown` | No tag with the same prefix and suffix was found. |
+| `unchecked` | The registry is not Docker Hub, or the API could not be reached. |
+
+A tag with one part, such as `redis:8-alpine`, counts newer versions in the same
+major as updates in its line. Variant tags, such as `-windowsservercore` or
+`-alpine3.24`, are never compared with the plain tag.
+
 ### Project registry
 
 Projects are indexed in `~/.gosite/projects.tsv` (`<name>\t<path>`) when they
@@ -431,6 +463,7 @@ gosite-cli/
     │   ├── helpers.sh            # logging, validation, registry, locking, ports, dep checks
     │   ├── templates.sh          # placeholder substitution, template renderer, addon install
     │   ├── manifest.sh           # per-project manifest of gosite-managed files (drift detection)
+    │   ├── versions.sh           # image tag parsing, classification and Docker Hub lookup
     │   └── tls.sh                # mkcert certificates + *.test DNS checks
     ├── templates/                # the project sources as REAL files (design D8):
     │   ├── cmd/server/main.go    #   rendered by copy + literal __PLACEHOLDER__ substitution
@@ -450,7 +483,8 @@ gosite-cli/
         ├── cmd_cd.sh             # cd/path/shell-init - jump into a project
         ├── cmd_remove.sh         # full teardown incl. the source (--keep-source opts out)
         ├── cmd_list.sh           # project inventory and status (--prune cleans the registry)
-        └── cmd_doctor.sh         # toolchain check + read-only security audit (--strict)
+        ├── cmd_doctor.sh         # toolchain check + read-only security audit (--strict)
+        └── cmd_versions.sh       # image tag check for local and prod (--patch, --strict)
 ```
 
 ## What `gosite create <name>` generates
