@@ -124,6 +124,20 @@ ${orderLines}`
     ),
   },
   {
+    key: "login_code",
+    label: "Código de acceso",
+    event: "gosite.customer.login_code",
+    recipient: "event_email",
+    subject: "Tu código de acceso: {{ $.data.code }}",
+    html: layout(
+      "Código de acceso",
+      `<h1 style="font-size:22px;margin:0 0 12px">{{ if $.data.new_account }}Crea tu cuenta{{ else }}Ingresa a tu cuenta{{ end }}</h1>
+<p style="font-size:15px;line-height:1.5;margin:0">Escribe este código en la página donde lo pediste:</p>
+<p style="font-size:32px;letter-spacing:8px;font-weight:bold;margin:24px 0;text-align:center">{{ $.data.code }}</p>
+<p style="font-size:14px;line-height:1.5;margin:0;color:#52525b">Vence en {{ $.data.expires_in_minutes }} minutos. Si no lo pediste, ignora este correo: nadie puede entrar a tu cuenta sin él.</p>`
+    ),
+  },
+  {
     key: "blank",
     label: "En blanco",
     event: "gosite.order.paid",

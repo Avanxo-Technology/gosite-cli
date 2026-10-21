@@ -116,4 +116,5 @@ export const VARIABLES: Array<{ name: string; description: string }> = [
   { name: "$.order.customer.first_name / .email", description: "the order's customer" },
   { name: "$.fulfillment.labels → .tracking_number .tracking_url", description: "shipment.created and delivery.created" },
   { name: "$.customer.first_name / .email", description: "customer.* events" },
+  { name: "$.data.code / .expires_in_minutes / .new_account / .email", description: "gosite.customer.login_code: the sign-in code, its minutes, whether it creates the account" },
 ]

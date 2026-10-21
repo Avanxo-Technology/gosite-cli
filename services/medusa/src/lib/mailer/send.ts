@@ -4,6 +4,7 @@ import nodemailer, { type Transporter } from "nodemailer"
 
 import { MAILER_MODULE } from "../../modules/mailer"
 import type MailerModuleService from "../../modules/mailer/service"
+import { redact } from "../login-code"
 import { mailerLocale, shapeOrder, storeInfo } from "./context"
 import { dedupeKey, MAX_ATTEMPTS, resolveRecipients, resourceOf, type RuleInput } from "./rules"
 import { smtpSettings } from "./smtp"
@@ -154,9 +155,21 @@ function isDuplicate(error: unknown): boolean {
   return /duplicate|unique|already exists/i.test(text) || (error as { type?: string })?.type === "duplicate_error"
 }
 
+export interface DeliverOptions {
+  // A secret in the e-mail (a sign-in code): sent, but never stored.
+  secret?: string
+  // false: a failed send is not retried later (a code would arrive expired).
+  retry?: boolean
+}
+
 // deliver renders a rule for one event, records it and sends it. A rule that
 // sends once per record and already sent for this one records nothing.
-export async function deliver(container: MedusaContainer, rule: Rule, context: MailContext): Promise<"sent" | "failed" | "skipped" | "duplicate"> {
+export async function deliver(
+  container: MedusaContainer,
+  rule: Rule,
+  context: MailContext,
+  options: DeliverOptions = {}
+): Promise<"sent" | "failed" | "skipped" | "duplicate"> {
   const mailer: MailerModuleService = container.resolve(MAILER_MODULE)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const resource = resourceOf(context.event, context.data)
@@ -184,8 +197,8 @@ export async function deliver(container: MedusaContainer, rule: Rule, context: M
       dedupe_key: dedupeKey(rule.id, context.event, resource.id, rule.once),
       to: rendered?.to.join(", ") ?? "",
       bcc: rule.bcc,
-      subject: rendered?.subject ?? "",
-      html: rendered?.html ?? "",
+      subject: redact(rendered?.subject ?? "", options.secret ?? ""),
+      html: redact(rendered?.html ?? "", options.secret ?? ""),
       status: problem ? "skipped" : "pending",
       last_error: problem ?? null,
     })
@@ -199,14 +212,19 @@ export async function deliver(container: MedusaContainer, rule: Rule, context: M
     logger.warn(`mailer: ${rule.name} on ${context.event} skipped: ${problem}`)
     return "skipped"
   }
-  return attempt(container, { id: delivery.id, to: rendered.to.join(", "), bcc: rule.bcc, subject: rendered.subject, html: rendered.html, attempts: 0 })
+  return attempt(
+    container,
+    { id: delivery.id, to: rendered.to.join(", "), bcc: rule.bcc, subject: rendered.subject, html: rendered.html, attempts: 0 },
+    options.retry === false
+  )
 }
 
 // attempt sends a recorded e-mail and stores the outcome; a failure is
-// retried by jobs/mailer-retry until MAX_ATTEMPTS.
+// retried by jobs/mailer-retry until MAX_ATTEMPTS, unless final.
 export async function attempt(
   container: MedusaContainer,
-  delivery: { id: string; to: string; bcc?: string | null; subject: string; html: string; attempts: number }
+  delivery: { id: string; to: string; bcc?: string | null; subject: string; html: string; attempts: number },
+  final = false
 ): Promise<"sent" | "failed"> {
   const mailer: MailerModuleService = container.resolve(MAILER_MODULE)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
@@ -217,7 +235,7 @@ export async function attempt(
     return "sent"
   } catch (error) {
     const message = String((error as Error)?.message ?? error).slice(0, 500)
-    await mailer.updateMailerDeliveries({ id: delivery.id, status: "failed", attempts, last_error: message })
+    await mailer.updateMailerDeliveries({ id: delivery.id, status: "failed", attempts: final ? MAX_ATTEMPTS : attempts, last_error: message })
     logger.warn(`mailer: sending ${delivery.id} failed (attempt ${attempts} of ${MAX_ATTEMPTS}): ${message}`)
     return "failed"
   }

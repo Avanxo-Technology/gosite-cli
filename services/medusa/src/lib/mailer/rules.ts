@@ -1,15 +1,18 @@
 // The mailer's rules: which events send an e-mail, to whom, with which
 // template. Pure (no Medusa imports) so it is unit-tested with node --test.
 
+import { LOGIN_CODE_EVENT } from "../login-code"
 import { checkTemplate } from "./template"
 
 // gosite's own events. Medusa emits no event when a deferred payment is
 // confirmed (the provider reports it captured while authorizing), so gosite
 // emits these itself: see jobs/notify-paid-orders and
-// jobs/expire-pending-payments.
+// jobs/expire-pending-payments. The sign-in code's e-mail is sent by its
+// route directly (api/store/gosite/login-code), never through the event bus.
 export const GOSITE_ORDER_PAID = "gosite.order.paid"
 export const GOSITE_ORDER_EXPIRED = "gosite.order.expired"
-export const GOSITE_EVENTS = [GOSITE_ORDER_PAID, GOSITE_ORDER_EXPIRED] as const
+export const GOSITE_LOGIN_CODE = LOGIN_CODE_EVENT
+export const GOSITE_EVENTS = [GOSITE_ORDER_PAID, GOSITE_ORDER_EXPIRED, GOSITE_LOGIN_CODE] as const
 
 // The Medusa events a store may want to e-mail about. The subscriber listens
 // to these plus GOSITE_EVENTS and MAILER_EXTRA_EVENTS; an event nobody listens

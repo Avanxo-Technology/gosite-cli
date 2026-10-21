@@ -89,6 +89,9 @@ const modules: Record<string, unknown>[] = [
 // is set.
 modules.push({ resolve: "./src/modules/mailer" })
 
+// Sign-in codes e-mailed to buyers (api/store/gosite/login-code).
+modules.push({ resolve: "./src/modules/login-code" })
+
 // Uploads (product images from the Admin or the API) go to the site's bucket.
 const fileModule = s3FileModule(process.env)
 if (fileModule) {
