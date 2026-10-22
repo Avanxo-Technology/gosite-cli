@@ -1,15 +1,8 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
-import { createCustomerAccountWorkflow } from "@medusajs/medusa/core-flows"
-import { generateJwtTokenForAuthIdentity } from "@medusajs/medusa/api/auth/utils/generate-jwt-token"
 
-import {
-  ACCOUNT_CREATED,
-  decideSession,
-  EMAIL_CODE_PROVIDER,
-  normalizeEmail,
-  sharedTokenMatches,
-} from "../../../../lib/checkout-session"
+import { ACCOUNT_CREATED, decideSession, normalizeEmail, sharedTokenMatches } from "../../../../lib/checkout-session"
+import { createEmailCodeAccount, customerToken, emailCodeIdentity, fillAddressBook } from "../../../../lib/customer-account"
 
 // POST /store/gosite/checkout-session { cart_id }: the session of the buyer
 // who just paid (see lib/checkout-session). Only the site calls it: /store is
@@ -65,7 +58,6 @@ async function openSession(req: MedusaRequest, orderID: string) {
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
   const customerModule = req.scope.resolve(Modules.CUSTOMER)
   const orderModule = req.scope.resolve(Modules.ORDER)
-  const authModule = req.scope.resolve(Modules.AUTH)
 
   const { data: rows } = await query.graph({
     entity: "order",
@@ -110,13 +102,14 @@ async function openSession(req: MedusaRequest, orderID: string) {
 
     case "existing_account":
       await orderModule.updateOrders(order.id, { customer_id: decision.customerID })
+      await fillAddressBook(req.scope, decision.customerID, [order.id])
       return {
         code: 200,
         body: { status: "existing_account", email, customer_id: decision.customerID },
       }
 
     case "reissue": {
-      const identity = await emailCodeIdentity(authModule, email)
+      const identity = await emailCodeIdentity(req.scope, email)
       if (!identity) {
         return { code: 409, body: { status: "existing_account", email, customer_id: decision.customerID } }
       }
@@ -126,69 +119,26 @@ async function openSession(req: MedusaRequest, orderID: string) {
           status: "reissued",
           email,
           customer_id: decision.customerID,
-          token: await customerToken(req, identity),
+          token: await customerToken(req.scope, identity),
         },
       }
     }
 
     case "create": {
-      // An identity left by an attempt that failed before its customer was
-      // created is reused rather than duplicated.
-      let identity = await emailCodeIdentity(authModule, email)
-      if (!identity) {
-        identity = await authModule.createAuthIdentities({
-          provider_identities: [{ provider: EMAIL_CODE_PROVIDER, entity_id: email }],
-        })
-      }
-      const { result: customer } = await createCustomerAccountWorkflow(req.scope).run({
-        input: {
-          authIdentityId: identity.id,
-          customerData: {
-            email,
-            first_name: order.shipping_address?.first_name || undefined,
-            last_name: order.shipping_address?.last_name || undefined,
-            phone: order.shipping_address?.phone || undefined,
-          },
-        },
+      const { customer, identity } = await createEmailCodeAccount(req.scope, email, {
+        first_name: order.shipping_address?.first_name,
+        last_name: order.shipping_address?.last_name,
+        phone: order.shipping_address?.phone,
       })
       await orderModule.updateOrders(order.id, {
         customer_id: customer.id,
         metadata: { ...(order.metadata ?? {}), [ACCOUNT_CREATED]: customer.id },
       })
-      // The account workflow wrote customer_id into the identity's app_metadata;
-      // the token is built from the stored identity.
-      const stored = await authModule.retrieveAuthIdentity(identity.id, {
-        relations: ["provider_identities"],
-      })
+      await fillAddressBook(req.scope, customer.id, [order.id])
       return {
         code: 200,
-        body: { status: "created", email, customer_id: customer.id, token: await customerToken(req, stored) },
+        body: { status: "created", email, customer_id: customer.id, token: await customerToken(req.scope, identity) },
       }
     }
   }
-}
-
-// emailCodeIdentity is the auth identity of the address's e-mail code login,
-// if it exists.
-async function emailCodeIdentity(authModule: any, email: string) {
-  const providers = await authModule.listProviderIdentities(
-    { provider: EMAIL_CODE_PROVIDER, entity_id: email },
-    { select: ["auth_identity_id"], take: 1 }
-  )
-  const id = providers[0]?.auth_identity_id
-  return id ? authModule.retrieveAuthIdentity(id, { relations: ["provider_identities"] }) : null
-}
-
-// customerToken is the token Medusa's own login would give this identity: the
-// same signing secret, lifetime and claims, so /store/customers/me accepts it
-// and /auth/token/refresh renews it.
-async function customerToken(req: MedusaRequest, authIdentity: any): Promise<string> {
-  const { http } = req.scope.resolve(ContainerRegistrationKeys.CONFIG_MODULE).projectConfig
-  if (!http.jwtSecret) {
-    throw new Error("checkout-session: JWT_SECRET is not set")
-  }
-  return generateJwtTokenForAuthIdentity(
-    { authIdentity, actorType: "customer", authProvider: EMAIL_CODE_PROVIDER, container: req.scope },
-    { secret: http.jwtSecret, expiresIn: http.jwtExpiresIn, options: http.jwtOptions }
-  )
 }

@@ -2,6 +2,7 @@ import type { MedusaContainer } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 
 import { loadContext, type MailContext } from "../../../lib/mailer/send"
+import { CODE_TTL_MINUTES, LOGIN_CODE_EVENT } from "../../../lib/login-code"
 import { resourceOf } from "../../../lib/mailer/rules"
 
 // sampleContext is what a preview or a test e-mail renders with: the order
@@ -13,6 +14,16 @@ export async function sampleContext(
   orderID?: string
 ): Promise<{ context: MailContext; sample: string }> {
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
+  if (event === LOGIN_CODE_EVENT) {
+    // A made-up code: a real one is only ever in the buyer's e-mail.
+    const context = await loadContext(container, event, {
+      email: "comprador@ejemplo.com",
+      code: "123456",
+      expires_in_minutes: CODE_TTL_MINUTES,
+      new_account: false,
+    })
+    return { context, sample: "sample code 123456" }
+  }
   const type = resourceOf(event, { id: "x" }).type
   if (type === "customer") {
     const { data } = await query.graph({

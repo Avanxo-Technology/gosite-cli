@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.61.0
+
+### Commerce: signing in by e-mail code
+
+- **Added: sign-in codes.** `POST /store/gosite/login-code { email }` e-mails
+  a six-digit code (10 minutes; one a minute and five an hour per address)
+  and `POST /store/gosite/login-code/verify { email, code }` answers a right
+  one with the customer token Medusa's own login gives. Five wrong tries
+  spend a code. Both are internal routes with the shared token, like
+  `checkout-session`.
+- **Added: accounts by code.** An address without an account gets one when
+  its code comes back; an account made another way gets the `email-code`
+  identity; the address's guest orders move into the account.
+- **Added: saved addresses from orders.** Orders that come into an account
+  (guest orders on a code sign-in, the order that made or joined an account
+  at checkout) add their shipping addresses to it, without repeats; an empty
+  address book is filled from all the account's orders on the next sign-in.
+  The newest becomes the default when there is none.
+- **Added: the code's e-mail is a Mailer rule.** Event
+  `gosite.customer.login_code`, starter "Código de acceso" (`$.data.code`,
+  `$.data.expires_in_minutes`, `$.data.new_account`). The route sends it
+  itself and answers `no_rule` or `send_failed` when it could not; the Mailer
+  log stores `••••••` instead of the code, and a failed code e-mail is not
+  retried.
+- **Added: job `cleanup-login-codes`** (daily) and table `login_code`
+  (migration in the image; only a keyed hash of each code is kept).
+- Proposal: `openspec/changes/add-commerce-login-code`; `gosite docs
+  medusa-login-code`. Sites move `core:` and `go.mod` to 0.61.0.
+
 ## 0.60.0
 
 ### Image versions: `gosite versions`
