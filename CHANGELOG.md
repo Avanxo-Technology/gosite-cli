@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.62.0
+
+### Commerce: local delivery by area and weight
+
+- **Added: fulfillment provider `local-delivery`** in gosite-medusa, always
+  registered next to Medusa's manual one. It prices delivery inside one
+  city: a base amount for the first km, an amount per further km (or part
+  of one) of the buyer's area, a surcharge by the order's weight, rounding,
+  and free delivery from an order total.
+- **Rates are the shipping option's `data`** (city, area -> km table,
+  amounts, weight tiers), checked when the option is created or updated. The
+  buyer's area is the shipping address's `metadata.area`; weight is the
+  variant's, else the product's, else a default, in grams.
+- An address outside the city or the table has no price: Medusa drops the
+  method instead of failing the cart's update. The area and km stay in the
+  shipping method's `data`.
+- Proposal: `openspec/changes/add-commerce-local-delivery`; `gosite docs
+  medusa-local-delivery`. Sites move `core:` and `go.mod` to 0.62.0.
+
 ## 0.61.0
 
 ### Commerce: signing in by e-mail code
