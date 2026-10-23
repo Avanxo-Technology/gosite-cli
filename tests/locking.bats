@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# with_lock: mkdir-based mutual exclusion (tasks 4.1/4.2) - bounded wait,
+# with_lock: exclusive-create mutual exclusion (tasks 4.1/4.2) - bounded wait,
 # trap-driven release even on failure, and orphan reclamation by pid + age.
 
 setup() {
@@ -55,20 +55,18 @@ _bump() {
 
 @test "times out with a clear error when the lock stays held" {
   local target; target="$(_test_target)"
-  mkdir -p "${target}.lock"
-  printf '%s\n' $$ > "${target}.lock/pid"   # a live pid: this shell
+  printf '%s\n' $$ > "${target}.lock"   # a live pid: this shell
 
   run with_lock "${target}" _bump "${target}" 1
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "Timed out"
   [ -e "${target}.lock" ]    # holder keeps its lock
-  rm -rf "${target}.lock"
+  rm -f "${target}.lock"
 }
 
 @test "reclaims an orphaned lock whose pid is gone" {
   local target; target="$(_test_target)"
-  mkdir -p "${target}.lock"
-  printf '999999\n' > "${target}.lock/pid"   # no such process
+  printf '999999\n' > "${target}.lock"   # no such process
   # Age it past GOSITE_LOCK_STALE_SECONDS so reclaim is allowed.
   touch -t 202001010000 "${target}.lock"
 
@@ -80,13 +78,36 @@ _bump() {
 
 @test "a fresh orphan (dead pid, young lock) is not reclaimed" {
   local target; target="$(_test_target)"
-  mkdir -p "${target}.lock"
-  printf '999999\n' > "${target}.lock/pid"
+  printf '999999\n' > "${target}.lock"
 
   run with_lock "${target}" _bump "${target}" 7
   [ "$status" -ne 0 ]
   [ -e "${target}.lock" ]
+  rm -f "${target}.lock"
+}
+
+@test "an older gosite's directory lock held by a live pid is waited for" {
+  local target; target="$(_test_target)"
+  mkdir -p "${target}.lock"
+  printf '%s\n' $$ > "${target}.lock/pid"
+
+  run with_lock "${target}" _bump "${target}" 1
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "held by pid $$"
+  [ -d "${target}.lock" ]
   rm -rf "${target}.lock"
+}
+
+@test "an older gosite's orphaned directory lock is reclaimed" {
+  local target; target="$(_test_target)"
+  mkdir -p "${target}.lock"
+  printf '999999\n' > "${target}.lock/pid"
+  touch -t 202001010000 "${target}.lock"
+
+  run with_lock "${target}" _bump "${target}" 7
+  [ "$status" -eq 0 ]
+  [ "$(cat "${target}")" == "7" ]
+  [ ! -e "${target}.lock" ]
 }
 
 @test "contention between two processes resolves without leftovers" {
