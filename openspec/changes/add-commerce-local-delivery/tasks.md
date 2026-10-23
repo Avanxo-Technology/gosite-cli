@@ -11,4 +11,4 @@
 
 ## 3. Release
 
-- [x] 3.1 CHANGELOG, VERSION 0.62.0, `gosite docs medusa-local-delivery`
+- [x] 3.1 CHANGELOG, VERSION 0.62.0 (released as 0.62.1), `gosite docs medusa-local-delivery`

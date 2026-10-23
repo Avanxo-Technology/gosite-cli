@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.62.0
+## 0.62.1
+
+0.62.0 was merged but never tagged: its CI failed on the lock below. This
+release carries both.
+
+### Locks that hold on Ubuntu 25.10 and later
+
+- **Fixed: concurrent gosite commands could both enter a locked section.**
+  `with_lock` took its lock with `mkdir`, and uutils' mkdir (the default on
+  Ubuntu 25.10+, and on GitHub's `ubuntu-latest` since October 2026) lets
+  several concurrent callers succeed on the same directory. Registry entries
+  and port allocations made at the same time could be lost or repeated. The
+  lock is now the file `<state>.lock`, created by bash's noclobber
+  redirection (an exclusive create), with the owner's pid written in the same
+  step; it no longer depends on which coreutils are installed. A directory
+  lock left by an older gosite is still waited for and reclaimed.
 
 ### Commerce: local delivery by area and weight
 

@@ -1,6 +1,6 @@
 # Local delivery by area and weight (gosite-medusa)
 
-Checked on `gosite-medusa:0.62.0` (Medusa 2.21.2) through the Store API on
+Checked on `gosite-medusa:0.62.1` (Medusa 2.21.2; first released there) through the Store API on
 aldu-dev.
 
 ## What it is

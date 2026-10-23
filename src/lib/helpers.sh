@@ -31,11 +31,21 @@ validate_project_name() {
 is_gosite_project() { [[ -f "${1:-.}/${GOSITE_MARKER}" ]]; }
 
 # --- locking ------------------------------------------------------------------
-# Portable mutual exclusion built on mkdir(2), which is atomic on POSIX and
-# available on macOS, where flock(1) does not ship. A lock is a directory
-# "<target>.lock" holding the owner pid; release removes it. Locks left behind
-# by dead processes are reclaimed by checking the pid (kill -0) and, as a
-# fallback for owners that died before writing their pid, the lock's age.
+# Portable mutual exclusion without flock(1), which macOS does not ship. A lock
+# is the file "<target>.lock" holding the owner pid, created by bash's own
+# noclobber redirection: an exclusive create (O_EXCL), so of several processes
+# racing for it exactly one gets it, and the pid is written in the same step.
+#
+# It used to be a directory made with mkdir(1). uutils' mkdir (the default on
+# Ubuntu 25.10 and later, so on GitHub's ubuntu-latest) lets several concurrent
+# callers succeed on the same directory: two gosite commands ran their critical
+# sections together and lost updates to the registry and the port file. The
+# shell's redirection does not depend on which coreutils are installed.
+#
+# Locks left behind by dead processes are reclaimed by checking the pid
+# (kill -0) and, as a fallback for an owner that died before its pid reached
+# the file, the lock's age. A directory lock left by an older gosite is still
+# honoured and reclaimed the same way.
 
 # Seconds to wait for a contended lock before giving up with a clear error.
 : "${GOSITE_LOCK_TIMEOUT:=30}"
@@ -75,20 +85,35 @@ _mtime() {
   return 1
 }
 
+# Creates <lock> holding this shell's pid; fails when it already exists.
+_lock_try() {
+  ( set -o noclobber; printf '%s\n' "$$" > "$1" ) 2>/dev/null
+}
+
+# The pid a lock names: the file's content, or pid inside an older gosite's
+# directory lock. Empty when there is none yet.
+_lock_pid() {
+  if [[ -d "$1" ]]; then
+    cat "$1/pid" 2>/dev/null || true
+  else
+    cat "$1" 2>/dev/null || true
+  fi
+}
+
 # Returns 0 when the lock was reclaimed (removed), 1 while an owner may live.
 _lock_reclaim() {
-  local lockdir="$1" pid mtime now
-  [[ -d "${lockdir}" ]] || return 0
+  local lock="$1" pid mtime now
+  [[ -e "${lock}" ]] || return 0
 
-  pid="$(cat "${lockdir}/pid" 2>/dev/null || true)"
+  pid="$(_lock_pid "${lock}")"
   if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
     return 1
   fi
 
-  # Pid gone or never written. Only reclaim past an age bound so a live owner
-  # still between mkdir and its pid write keeps its lock.
+  # Pid gone or not yet written. Only reclaim past an age bound so a live owner
+  # whose pid has not reached the file keeps its lock.
   now="$(date +%s)"
-  mtime="$(_mtime "${lockdir}")"
+  mtime="$(_mtime "${lock}")"
 
   # A mtime we could not read is treated as "now", which means NOT stale and so
   # not reclaimed. Refusing to reclaim costs a manual rm; reclaiming a lock a
@@ -99,41 +124,43 @@ _lock_reclaim() {
     return 1
   fi
 
-  debug "Reclaiming orphaned lock ${lockdir} (pid '${pid:-?}' is gone, age $((now - mtime))s)."
-  rm -rf "${lockdir}"
+  debug "Reclaiming orphaned lock ${lock} (pid '${pid:-?}' is gone, age $((now - mtime))s)."
+  rm -rf "${lock}"
 }
 
 # with_lock <state-file> <function> [args...]
 #
 # Runs <function> while holding an exclusive lock on <state-file>. Acquiring
-# is mkdir (atomic), release happens through a trap even if <function> fails,
-# exits or is interrupted. Contention waits up to GOSITE_LOCK_TIMEOUT seconds.
+# is an exclusive create (see above), release happens through a trap even if
+# <function> fails, exits or is interrupted. Contention waits up to
+# GOSITE_LOCK_TIMEOUT seconds.
 with_lock() {
   local target="$1" fn="$2"; shift 2
-  local lockdir="${target}.lock" start=$SECONDS pid="?"
+  local lock="${target}.lock" start=$SECONDS pid
 
-  until mkdir "${lockdir}" 2>/dev/null; do
-    _lock_reclaim "${lockdir}" && continue
+  # A directory lock (older gosite) makes the create fail too: it is waited
+  # for or reclaimed like a file one.
+  until [[ ! -d "${lock}" ]] && _lock_try "${lock}"; do
+    _lock_reclaim "${lock}" && continue
     if (( SECONDS - start >= GOSITE_LOCK_TIMEOUT )); then
-      pid="$(cat "${lockdir}/pid" 2>/dev/null || printf '?')"
-      err "Timed out after ${GOSITE_LOCK_TIMEOUT}s waiting for lock ${lockdir} (held by pid ${pid})."
+      pid="$(_lock_pid "${lock}")"
+      err "Timed out after ${GOSITE_LOCK_TIMEOUT}s waiting for lock ${lock} (held by pid ${pid:-?})."
       return 1
     fi
     sleep 0.25
   done
-  printf '%s\n' "$$" > "${lockdir}/pid"
-  debug "Lock acquired: ${lockdir}"
+  debug "Lock acquired: ${lock}"
 
   # Release no matter how the wrapped function ends: failure, exit() or signal.
-  # Double quotes are deliberate: the CURRENT lockdir is baked into the trap
-  # when it is armed, not whatever the variable holds when it fires.
+  # Double quotes are deliberate: the CURRENT lock is baked into the trap when
+  # it is armed, not whatever the variable holds when it fires.
   # shellcheck disable=SC2064
-  trap "_lock_release '${lockdir}'" EXIT
+  trap "_lock_release '${lock}'" EXIT
   set +e
   "${fn}" "$@"
   local rc=$?
   set -e
-  _lock_release "${lockdir}"
+  _lock_release "${lock}"
   trap - EXIT
   return "${rc}"
 }
