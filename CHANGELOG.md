@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.63.0
+
+### Commerce: local delivery by a point on the map, and bulk orders
+
+- **Added: `local-delivery` prices by distance from the store.** With
+  `origin` (the store's point) in place of the `areas` table, the km are the
+  straight line to the point the buyer marked, read from the shipping
+  address's `metadata.lat` and `metadata.lng`. Optional `zones` (named rings
+  of `[lng, lat]` corners) limit delivery to the parts of the city in them
+  and name the one the point falls in, kept on the shipping method as
+  `area`; optional `max_km` caps the distance. The `areas` table works as
+  before.
+- **Added: `bulk_units`.** An order with that many units of one product, its
+  variants added up, gets no price from the provider, so the store can
+  arrange it with the buyer. Works with either way of measuring.
+- See `gosite docs medusa-local-delivery`.
+
 ## 0.62.1
 
 0.62.0 was merged but never tagged: its CI failed on the lock below. This
