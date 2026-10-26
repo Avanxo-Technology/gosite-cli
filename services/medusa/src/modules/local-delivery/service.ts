@@ -9,9 +9,10 @@ import type {
 
 import { DeliveryError, parseRates, quote, type DeliveryCart } from "./delivery"
 
-// LocalDeliveryProviderService prices delivery inside one city by the buyer's
-// area (km from the store) and the order's weight; the rate logic lives in
-// ./delivery. Fulfilling is manual, as with Medusa's manual provider.
+// LocalDeliveryProviderService prices delivery inside one city by how far the
+// buyer is from the store (their area's km, or the straight line to the point
+// they marked) and the order's weight; the rate logic lives in ./delivery.
+// Fulfilling is manual, as with Medusa's manual provider.
 class LocalDeliveryProviderService extends AbstractFulfillmentProviderService {
   static identifier = "local-delivery"
 
@@ -34,9 +35,10 @@ class LocalDeliveryProviderService extends AbstractFulfillmentProviderService {
   }
 
   // Runs when the buyer picks the option. Medusa has already refused an
-  // address outside the city or the table, for having no price ("do not have a
-  // price"); this keeps the area and km on the shipping method, for whoever
-  // delivers, and refuses such an address itself should Medusa stop checking.
+  // address it cannot deliver to, for having no price ("do not have a
+  // price"); this keeps the area (or zone) and km on the shipping method, for
+  // whoever delivers, and refuses such an address itself should Medusa stop
+  // checking.
   async validateFulfillmentData(
     optionData: Record<string, unknown>,
     data: Record<string, unknown>,
