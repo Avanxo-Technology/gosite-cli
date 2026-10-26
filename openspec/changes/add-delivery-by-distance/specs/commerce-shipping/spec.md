@@ -18,7 +18,11 @@ With `origin`, the commerce service SHALL deliver only to points inside one of t
 - **WHEN** the point falls in the ring of the zone "Riomar"
 - **THEN** the method's `data.area` is "Riomar" and `data.km` its distance
 
-#### Scenario: A point in another municipality
+#### Scenario: A zone in a neighbouring municipality
+- **WHEN** the point falls in a zone whose `city` is "Soledad"
+- **THEN** the option prices it when the address's city is Soledad, and has no price when it says another city
+
+#### Scenario: A point outside the zones
 - **WHEN** the point is outside every zone, or farther than `max_km`
 - **THEN** the option has no price for the cart, even when the order would be free
 

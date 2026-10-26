@@ -133,6 +133,7 @@ const byDistance: DeliveryRates = parseRates({
   zones: [
     { name: "Norte", rings: [square(origin.lat, 11.1, -74.9, -74.7)] },
     { name: "Sur", rings: [square(10.93, origin.lat, -74.9, -74.7), square(10.89, 10.91, -74.9, -74.7)] },
+    { name: "Soledad", city: "Soledad", rings: [square(10.85, 10.88, -74.9, -74.7)] },
   ],
   max_km: 12,
   base_amount: 10000,
@@ -224,4 +225,15 @@ test("parseRates checks the distance fields", () => {
   const moved = parseRates({ ...ok, areas: null, zones: null })
   assert.equal(moved.areas, undefined)
   assert.equal(quote(moved, { items: [boots], shipping_address: { city: "X", metadata: north(2) } }).amount, 3)
+})
+
+test("a zone in another municipality wants the address in its city", () => {
+  const soledad = { lat: 10.875, lng: -74.77872 } // 11.6 km south, within max_km
+  const there = (city: string) => ({ items: [boots], shipping_address: { city, metadata: { ...soledad } } })
+  const q = quote(byDistance, there("Soledad"))
+  assert.deepEqual([q.area, q.km, q.amount], ["Soledad", 11.6, 19000])
+  assert.throws(() => quote(byDistance, there("Barranquilla")), (e: DeliveryError) => e.code === "city")
+  // And a point in Barranquilla's zones wants Barranquilla.
+  assert.throws(() => quote(byDistance, { items: [boots], shipping_address: { city: "Soledad", metadata: north(5) } }), (e: DeliveryError) => e.code === "city")
+  assert.throws(() => parseRates({ ...byDistance, zones: [{ name: "A", city: "", rings: [square(0, 1, 0, 1)] }] }), /zones\[0\]\.city/)
 })

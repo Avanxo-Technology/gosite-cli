@@ -9,15 +9,18 @@ export type WeightTier = { up_to_grams?: number; surcharge: number }
 // A place on the map, in degrees.
 export type Point = { lat: number; lng: number }
 
-// A named part of the city: one or more rings of [lng, lat] corners, as in
-// GeoJSON. A point inside any of the rings is in the zone.
-export type Zone = { name: string; rings: Array<Array<[number, number]>> }
+// A named part of the area delivered to: one or more rings of [lng, lat]
+// corners, as in GeoJSON. A point inside any of the rings is in the zone.
+// city, when the zone is in another municipality than the rates' city: the
+// address's city must then be the zone's.
+export type Zone = { name: string; rings: Array<Array<[number, number]>>; city?: string }
 
 // The rates price the distance one of two ways: by area, from a table of km
 // per neighbourhood the buyer picks (areas), or by the straight line from
 // the store to the point the buyer marks on a map (origin).
 export type DeliveryRates = {
-  // The one city delivered to, compared without case or accents.
+  // The city delivered to, compared without case or accents; with origin,
+  // zones may add others (Zone.city).
   city: string
   // Area (neighbourhood) name -> km by road from the starting point.
   areas?: Record<string, number>
@@ -183,6 +186,9 @@ export function parseRates(data: unknown): DeliveryRates {
         if (!Array.isArray(zone.rings) || !zone.rings.length || !zone.rings.every(isRing)) {
           fail(`zones[${i}].rings`, "must be rings of 3 or more [lng, lat] corners")
         }
+        if (zone.city != null && (typeof zone.city !== "string" || !zone.city.trim())) {
+          fail(`zones[${i}].city`, "must name the zone's municipality")
+        }
       })
     }
   }
@@ -276,9 +282,9 @@ export function inRing(p: Point, ring: Array<[number, number]>): boolean {
   return inside
 }
 
-// findZone returns the name of the zone a point falls in.
-export function findZone(rates: DeliveryRates, p: Point): string | undefined {
-  return rates.zones?.find((z) => z.rings.some((ring) => inRing(p, ring)))?.name
+// findZone returns the zone a point falls in.
+export function findZone(rates: DeliveryRates, p: Point): Zone | undefined {
+  return rates.zones?.find((z) => z.rings.some((ring) => inRing(p, ring)))
 }
 
 // mostUnits is the largest number of units of one product in the cart.
@@ -338,26 +344,31 @@ export function weightSurcharge(rates: DeliveryRates, grams: number): number {
   return 0
 }
 
+function sameCity(city: string | null | undefined, wanted: string): boolean {
+  return !!city && normalizeName(city) === normalizeName(wanted)
+}
+
 // place answers where the address is and how far: the area picked from the
-// table, or the zone and straight-line km of the point on the map.
-function place(rates: DeliveryRates, metadata: Record<string, unknown> | null | undefined): [string, number] {
+// table, or the zone and straight-line km of the point on the map, and the
+// city the address must be in.
+function place(rates: DeliveryRates, metadata: Record<string, unknown> | null | undefined): [string, number, string] {
   if (!rates.origin) {
     const found = findArea(rates, metadata?.[AREA_KEY])
     if (!found) {
       throw new DeliveryError("area", `The address's ${AREA_KEY} is not one delivered to`)
     }
-    return found
+    return [...found, rates.city]
   }
   const point = addressPoint(metadata)
   if (!point) {
     throw new DeliveryError("location", `The address has no ${LAT_KEY} and ${LNG_KEY}`)
   }
   const km = distanceKm(rates.origin, point)
-  const zone = rates.zones ? findZone(rates, point) : ""
+  const zone = rates.zones ? findZone(rates, point) : { name: "" }
   if (zone === undefined || (rates.max_km !== undefined && km > rates.max_km)) {
     throw new DeliveryError("zone", "The address is outside the area delivered to")
   }
-  return [zone, km]
+  return [zone.name, km, (zone as Zone).city ?? rates.city]
 }
 
 // quote prices delivering the cart to its shipping address. It throws a
@@ -365,13 +376,16 @@ function place(rates: DeliveryRates, metadata: Record<string, unknown> | null | 
 // to, or the order is one the store arranges itself (bulk_units).
 export function quote(rates: DeliveryRates, cart: DeliveryCart): DeliveryQuote {
   const address = cart.shipping_address
-  if (!address?.city || normalizeName(address.city) !== normalizeName(rates.city)) {
+  if (!address?.city) {
     throw new DeliveryError("city", `Delivery is only to ${rates.city}`)
   }
   if (rates.bulk_units !== undefined && mostUnits(cart) >= rates.bulk_units) {
     throw new DeliveryError("bulk", `Orders of ${rates.bulk_units} or more units of one product are arranged with the store`)
   }
-  const [area, km] = place(rates, address.metadata)
+  const [area, km, city] = place(rates, address.metadata)
+  if (!sameCity(address.city, city)) {
+    throw new DeliveryError("city", `This address is in ${city}`)
+  }
   const weight = itemsWeight(cart, rates.default_weight_grams ?? 0)
   const result = { area, km, weight_grams: weight }
 

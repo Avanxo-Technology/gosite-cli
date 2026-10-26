@@ -70,7 +70,10 @@ tenth of a km: shorter than by road, so set `per_km` and `included_km` with
 that in mind. `zones` are the parts of the city delivered to, each one or more
 rings of `[lng, lat]` corners as in GeoJSON (holes are not read); a point
 outside every zone is not delivered to, and the zone's name is the one kept
-on the method. Without `zones`, any point within `max_km` is. `areas` and
+on the method. A zone may name its own `city` (a neighbouring
+municipality): a point there wants the address's city to be the zone's, and
+a point in a zone without one wants `city`. Without `zones`, any point within
+`max_km` is. `areas` and
 `origin` are exclusive.
 
 `bulk_units` (either way, optional): an order with that many units of one

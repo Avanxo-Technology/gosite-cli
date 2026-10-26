@@ -10,7 +10,9 @@
   address's `metadata.lat` and `metadata.lng`. Optional `zones` (named rings
   of `[lng, lat]` corners) limit delivery to the parts of the city in them
   and name the one the point falls in, kept on the shipping method as
-  `area`; optional `max_km` caps the distance. The `areas` table works as
+  `area`; a zone's optional `city` lets delivery reach a neighbouring
+  municipality, whose name the address must carry. Optional `max_km` caps
+  the distance. The `areas` table works as
   before.
 - **Added: `bulk_units`.** An order with that many units of one product, its
   variants added up, gets no price from the provider, so the store can
