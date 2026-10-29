@@ -156,7 +156,9 @@ class Analytics extends \Lime\Helper {
             'pattern' => ['containerId' => '/^GTM-[A-Z0-9]+$/'],
         ],
         'posthog' => [
-            'fields'  => ['key' => true, 'host' => true],
+            // session_recording is optional. It is set from the "Record
+            // sessions" switch on the entry (see beforeSave), not typed here.
+            'fields'  => ['key' => true, 'host' => true, 'session_recording' => false],
             'pattern' => ['key' => '/^[A-Za-z0-9_-]{16,200}$/'],
         ],
         'google-analytics' => [
@@ -233,6 +235,9 @@ class Analytics extends \Lime\Helper {
                 ]),
                 $this->field('enabled', 'boolean', 'Enabled', false, [
                     'info' => 'Turn a provider off without losing its configuration.',
+                ]),
+                $this->field('recording', 'boolean', 'Record sessions', false, [
+                    'info' => 'PostHog only. Turns session recordings on or off for this site. Recording also has to be enabled in the PostHog project, and only visitors who accept analytics cookies are recorded.',
                 ]),
                 $this->field('environments', 'select', 'Applies to', true, [
                     'opts' => ['options' => self::ENVIRONMENTS],
@@ -465,6 +470,7 @@ class Analytics extends \Lime\Helper {
 
         $changed  = false;
         $hasCategory = false;
+        $hasRecording = false;
 
         foreach ($model['fields'] as $i => $field) {
 
@@ -472,6 +478,11 @@ class Analytics extends \Lime\Helper {
 
             if ($name === 'category') {
                 $hasCategory = true;
+                continue;
+            }
+
+            if ($name === 'recording') {
+                $hasRecording = true;
                 continue;
             }
 
@@ -495,6 +506,15 @@ class Analytics extends \Lime\Helper {
             $model['fields'][] = $this->field('category', 'select', 'Consent category', false, [
                 'opts' => ['options' => ['', 'analytics', 'marketing']],
                 'info' => 'Which consent a visitor must give before this loads. Empty uses the provider default.',
+            ]);
+            $changed = true;
+        }
+
+        if (!$hasRecording) {
+            // Appended for the same reason as the category field above: an
+            // editor's existing field order is theirs to keep.
+            $model['fields'][] = $this->field('recording', 'boolean', 'Record sessions', false, [
+                'info' => 'PostHog only. Turns session recordings on or off for this site. Recording also has to be enabled in the PostHog project, and only visitors who accept analytics cookies are recorded.',
             ]);
             $changed = true;
         }
@@ -599,7 +619,26 @@ class Analytics extends \Lime\Helper {
             $config[$key] = $value;
         }
 
+        // The "Record sessions" switch is the only source for this option. The
+        // config the browser reads is derived from it, so the two cannot
+        // disagree. Cockpit fills an omitted boolean as false, so a REST writer
+        // sets `recording`, not `config.session_recording`.
+        if ($provider === 'posthog') {
+            $config['session_recording'] = $this->truthy($item['recording'] ?? false);
+        }
+
         $item['config'] = $config;
+    }
+
+    /**
+     * Reads a switch that may arrive as a boolean, or as text from the REST
+     * API. "false" is false; a plain (bool) cast would call it true.
+     */
+    protected function truthy($value): bool {
+        if (is_string($value)) {
+            return in_array(strtolower(trim($value)), ['true', '1', 'on', 'yes'], true);
+        }
+        return (bool)$value;
     }
 
     /**
@@ -697,6 +736,8 @@ class Analytics extends \Lime\Helper {
         $templates['gtm']['containerId']                  = 'GTM-';
         $templates['google-analytics-v3']['trackingId']   = 'UA-';
         $templates['posthog']['host']                     = 'https://us.i.posthog.com';
+        // Set from the "Record sessions" switch, never typed into config.
+        unset($templates['posthog']['session_recording']);
 
         return $templates;
     }
