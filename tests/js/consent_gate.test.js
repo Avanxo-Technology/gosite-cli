@@ -351,6 +351,22 @@ function fireBanner(win, labelText) {
   check('the page keeps one tracking object after consent', threw === null, threw && threw.message);
 }
 
+// --- 14. two entries of one provider: the first one only -------------------
+{
+  // A duplicate PostHog entry used to reach the analytics library, which
+  // refuses a second plugin with the same name and tracks nothing at all.
+  const PH_SECOND = { Provider: 'posthog', Config: { key: 'phc_second', host: 'https://second' } };
+  const win = boot({ consent: CONSENT_ON, integrations: [PH, PH_SECOND] });
+  fireBanner(win, 'A');
+  await flush();
+  const phPlugins = win.mounts.flatMap(m => m.plugins.map(p => p.name)).filter(n => n === 'posthog');
+  check('a duplicate provider entry mounts one plugin, not two',
+    phPlugins.length === 1, 'posthog plugins mounted: ' + phPlugins.length);
+  let threw = null;
+  try { win.analytics.track('dup', { b: 3 }); } catch (e) { threw = e; }
+  check('a duplicate provider entry does not break tracking', threw === null, threw && threw.message);
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nall gate checks passed');
 process.exit(failures ? 1 : 0);
 })();

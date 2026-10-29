@@ -695,7 +695,46 @@ class Analytics extends \Lime\Helper {
                 .self::PROVIDERS[$provider].' expects '.implode(', ', array_keys($rules['fields'])).'.';
         }
 
+        if ($this->hasOverlappingDuplicate($item, $provider)) {
+            $problems[] = 'Another enabled '.self::PROVIDERS[$provider].' entry applies to the same environment. '
+                .'The site loads only the first one, so disable or delete the other.';
+        }
+
         return $problems;
+    }
+
+    /**
+     * Is there another enabled entry of this provider that applies to the same
+     * environment? Two such entries cannot both load: the browser keeps one and
+     * the analytics library refuses the second. Both entries get the warning.
+     */
+    protected function hasOverlappingDuplicate(array $item, string $provider): bool {
+
+        if (empty($item['enabled'])) {
+            return false;
+        }
+
+        $environment = $this->selectValue($item['environments'] ?? null) ?: 'all';
+        $id          = (string)($item['_id'] ?? '');
+
+        foreach ($this->all() as $other) {
+
+            if ((string)($other['_id'] ?? '') === $id || empty($other['enabled'])) {
+                continue;
+            }
+
+            if ($this->selectValue($other['provider'] ?? null) !== $provider) {
+                continue;
+            }
+
+            $otherEnvironment = $this->selectValue($other['environments'] ?? null) ?: 'all';
+
+            if ($environment === 'all' || $otherEnvironment === 'all' || $environment === $otherEnvironment) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
