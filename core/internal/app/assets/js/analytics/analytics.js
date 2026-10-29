@@ -320,8 +320,23 @@
    */
   function mount(batch) {
     var plugins = [];
+    var seen = {};
 
     batch.forEach(function (item) {
+      /*
+       * One plugin per provider. The analytics library refuses a second one
+       * with the same name (posthogAlreadyLoaded) and then tracks nothing for
+       * any provider, so a duplicate entry must not reach it. The first entry
+       * wins. Cockpit sorts entries by provider only, so which of two entries
+       * of the same provider comes first is not fixed: the CMS guard warns,
+       * it does not choose.
+       */
+      if (seen[item.Provider]) {
+        console.warn('[analytics] more than one "' + item.Provider + '" entry applies here; loading the first one only');
+        return;
+      }
+      seen[item.Provider] = true;
+
       var config = item.Config || {};
       var factory;
 
