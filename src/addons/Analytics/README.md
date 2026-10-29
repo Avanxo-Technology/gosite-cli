@@ -37,6 +37,23 @@ gtm      { "id": "GTM-ABC1234" }
 posthog  { "key": "phc_...", "host": "https://us.i.posthog.com" }
 ```
 
+### PostHog session recording
+
+PostHog entries have a **Record sessions** switch. It turns session recordings
+on or off without editing the configuration. The switch writes
+`session_recording` into the configuration the browser reads, so do not type
+that key by hand: the switch is the only source for it.
+
+Three conditions must hold for a recording to happen:
+
+1. The switch is on.
+2. Session recording is enabled in the PostHog project settings.
+3. The visitor accepted analytics cookies.
+
+Recording is off by default. Recordings capture what is on screen, so keep
+input masking on in PostHog, especially on checkout pages that collect personal
+data.
+
 `environments` exists so development traffic does not land in a client's
 production account. An entry set to `production` is invisible to a site running
 with `APP_ENV=development`, and the reverse. Both halves have to line up for an
