@@ -262,8 +262,8 @@ _resolve_dependencies() {
     return 0
   fi
 
-  warn "Could not resolve dependencies (offline?). Run 'go mod tidy' in ${dir} before deploying."
-  return 0
+  err "Could not resolve Go dependencies in ${dir}: go.sum was not written."
+  return 1
 }
 
 # -----------------------------------------------------------------------------
