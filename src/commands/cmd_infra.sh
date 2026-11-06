@@ -299,16 +299,20 @@ cmd_infra() {
         warn "Anyone on your network can read and write them. Use a loopback bind unless you truly need LAN access."
       fi
 
-      # Self-heal a proxy that lost its network: if gosite-network was removed
-      # and recreated while the proxy kept running, docker compose sees no
-      # config change and never reattaches it - then Traefik cannot see any
-      # project container. Reattach here, non-destructively.
-      if container_exists "${GOSITE_PROXY_HOST}" \
-          && ! container_on_network "${GOSITE_PROXY_HOST}" "${GOSITE_NETWORK}"; then
-        warn "Proxy is not attached to '${GOSITE_NETWORK}'; reattaching so it can route projects."
-        docker network connect "${GOSITE_NETWORK}" "${GOSITE_PROXY_HOST}" >/dev/null 2>&1 \
-          || info "Reattach failed; 'gosite infra restart' will recreate the proxy."
-      fi
+      # Self-heal infra containers that lost gosite-network: if the network was
+      # removed and recreated while they kept running, docker compose sees no
+      # config change and never reattaches them (the proxy then cannot route
+      # projects; Redis, Mongo and MinIO become unresolvable by name). Reattach
+      # here, non-destructively.
+      local infra_svc
+      for infra_svc in "${GOSITE_PROXY_HOST}" "${GOSITE_REDIS_HOST}" "${GOSITE_MONGO_HOST}" "${GOSITE_MINIO_HOST}"; do
+        if container_exists "${infra_svc}" \
+            && ! container_on_network "${infra_svc}" "${GOSITE_NETWORK}"; then
+          warn "'${infra_svc}' is not attached to '${GOSITE_NETWORK}'; reattaching."
+          docker network connect "${GOSITE_NETWORK}" "${infra_svc}" >/dev/null 2>&1 \
+            || info "Reattach of '${infra_svc}' failed; 'gosite infra restart' will recreate it."
+        fi
+      done
 
       # The dashboard is served over HTTPS like everything else.
       ensure_project_cert "proxy" >/dev/null 2>&1 || true
