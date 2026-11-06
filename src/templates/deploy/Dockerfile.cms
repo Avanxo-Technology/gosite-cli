@@ -1,4 +1,4 @@
-FROM cockpithq/cockpit:core-2.14.0
+FROM cockpithq/cockpit:core-2.14.1
 
 RUN install-php-extensions mongodb
 

@@ -250,6 +250,13 @@ func (c *Client) fetchRawOnce(ctx context.Context, path string) ([]byte, error) 
 		statusErr := fmt.Errorf("cockpit returned %s: %s", res.Status,
 			strings.TrimSpace(detail.String()))
 
+		// A missing model is the normal state of a project without the addon
+		// that owns it. Wrap ErrNotFound so callers can treat it as "none"
+		// without logging, the same as the single-item path does.
+		if res.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("%w: %v", ErrNotFound, statusErr)
+		}
+
 		if transientStatuses[res.StatusCode] {
 			return nil, transientErr{statusErr}
 		}
