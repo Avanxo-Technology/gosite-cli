@@ -628,3 +628,23 @@ already uploaded keep their ACL; only new uploads change.
 Thin sites: `cockpit/config.core.php` changes with `gosite generate`. Legacy
 sites: copy the `visibility` line in `cockpit/config.php`. `S3_ACL` also
 accepts `yes`, `1` and `on`, in any letter case.
+
+## → 0.65.5 — Cache keys carry the environment
+
+The page, blog, SEO and purge cache keys now include `APP_ENV`:
+`<project>:<env>:cache:` instead of `<project>:cache:`. Production and QA that
+share one Redis no longer read or purge each other's pages.
+
+**The cache rebuilds on its own.** After the deploy, the first request to each
+page renders it again. Nothing is lost.
+
+**App state does not move.** Keys under `<project>:app:` keep their names, so
+votes, limits and other state are untouched.
+
+**Set `APP_ENV` in every deployment.** With `APP_ENV` empty the keys keep the
+old prefix, so nothing breaks, but production and QA still share keys. Use
+`production` and `qa` (or `development` locally).
+
+Thin sites: the change comes from the core upgrade; `gosite generate` is not
+needed. Legacy sites: the cache keys follow `config.CacheKeyPrefix()` after
+upgrading the core module.

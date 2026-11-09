@@ -67,7 +67,7 @@ CachedRender(c *Context, page string, build func(ctx context.Context) (Page, err
   core serves **replaces** core's handler.
 - `CMS()` is the only way to read content. Core has no MongoDB reader and its
   tests fail if a Mongo driver is ever added to the module.
-- `CachedRender` keys pages by URL under `<project>:cache:page:`; every purge
+- `CachedRender` keys pages by URL under `<project>:<env>:cache:page:` (`<env>` is `APP_ENV`, omitted when empty); every purge
   clears them. A failed build is never cached, and a stale copy is served
   instead when one exists.
 
@@ -87,7 +87,7 @@ under `/static/` comes from the site's `static/` directory.
 ```
 
 Keys are relative and stored under `<project>:app:`. No purge deletes them.
-Cache keys live under `<project>:cache:` and nothing else is ever purged.
+Cache keys live under `<project>:<env>:cache:` (`<env>` is `APP_ENV`, omitted when empty) and nothing else is ever purged.
 
 ## Templates
 
