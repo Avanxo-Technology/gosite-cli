@@ -3,6 +3,7 @@ package cms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -169,6 +170,20 @@ func TestFailedReadReturnsError(t *testing.T) {
 
 	if _, err := c.Items(context.Background(), "blogPosts", Query{Limit: 10}); err == nil {
 		t.Fatal("expected an error for a 502")
+	}
+}
+
+// A collection the project does not have answers 404. That must surface as
+// ErrNotFound so callers can treat it as "none" without logging a warning.
+func TestMissingCollectionIsErrNotFound(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"Model <analyticsIntegrations> not found"}`))
+	})
+
+	_, err := c.Items(context.Background(), "analyticsIntegrations", Query{Limit: 50})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
