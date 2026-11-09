@@ -67,6 +67,9 @@ services:
     restart: unless-stopped
     environment:
       - APP_ENV=production
+      # Optional HTTP Basic Auth gate for the whole site ("user:password").
+      # Empty keeps the site public. Set it in the deployment's environment.
+      - HTTP_BASIC_CREDENTIALS=${HTTP_BASIC_CREDENTIALS:-}
       - PORT=8080
       # Every Redis key is prefixed with GOSITE_PROJECT, the same in every
       # environment of this project. Two environments sharing one Redis

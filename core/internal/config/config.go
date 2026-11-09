@@ -23,6 +23,12 @@ type Config struct {
 	// canonical links and Open Graph tags, which crawlers require absolute.
 	// Empty is allowed: those tags are then omitted rather than emitted wrong.
 	SiteURL string
+
+	// BasicAuth is "user:password" from HTTP_BASIC_CREDENTIALS. When set, every
+	// route except /healthz, /cache/purge and /robots.txt requires it, and the
+	// site asks crawlers not to index it. Empty (or without a colon) leaves the
+	// site public. Read from the environment of each deployment, never a file.
+	BasicAuth string
 }
 
 func Load() Config {
@@ -41,6 +47,7 @@ func Load() Config {
 		StorageAdapter: env("STORAGE_ADAPTER", "local"),
 		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),
 		SiteURL:        strings.TrimRight(os.Getenv("SITE_URL"), "/"),
+		BasicAuth:      strings.TrimSpace(os.Getenv("HTTP_BASIC_CREDENTIALS")),
 	}
 }
 
