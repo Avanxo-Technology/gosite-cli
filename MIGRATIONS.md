@@ -610,3 +610,21 @@ publish them, and only then compare.
 
 In the 0.53.0 rollout the body diff caught the duplicated consent button on
 aga-growth-dev, which the build, `go vet` and every test package passed.
+
+## → 0.65.3 — S3 uploads are private by default
+
+Uploads to S3 no longer send a public-read ACL unless you ask for it. The old
+default sent `public-read`, which fails with `AccessControlListNotSupported` on
+buckets where ACLs are disabled ("Bucket owner enforced"): the upload then
+reported success with no asset stored.
+
+**Nothing to change if your bucket serves objects through a bucket policy or
+a CDN.** New uploads are private objects and work on any bucket.
+
+**If your site links S3 objects directly and relies on public-read**, set
+`S3_ACL=true` in the deployment's environment (Coolify), then restart. Objects
+already uploaded keep their ACL; only new uploads change.
+
+Thin sites: `cockpit/config.core.php` changes with `gosite generate`. Legacy
+sites: copy the `visibility` line in `cockpit/config.php`. `S3_ACL` also
+accepts `yes`, `1` and `on`, in any letter case.

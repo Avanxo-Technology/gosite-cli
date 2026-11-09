@@ -9,6 +9,27 @@
 // Values are read with getenv() directly. Cockpit's DotEnv ${VAR} resolution
 // does not run reliably on all images for values baked into config.php.
 
+if (!function_exists('gosite_env_flag')) {
+    // Reads a boolean environment variable. 1, true, yes and on are true;
+    // 0, false, no and off are false; letter case and surrounding spaces do not
+    // matter. Anything else - unset, empty, an unknown word - gives $default.
+    function gosite_env_flag(string $name, bool $default = false): bool
+    {
+        $raw = getenv($name);
+        if ($raw === false) {
+            return $default;
+        }
+        $value = strtolower(trim($raw));
+        if (in_array($value, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+        if (in_array($value, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+        return $default;
+    }
+}
+
 $mongoUser = (string)getenv('MONGO_USER');
 $mongoPass = (string)getenv('MONGO_PASSWORD');
 $mongoHost = getenv('MONGO_HOST') ?: 'localhost';
@@ -171,10 +192,10 @@ if (getenv('STORAGE_ADAPTER') === 's3') {
             'region' => getenv('S3_REGION') ?: 'auto',
             'bucket' => getenv('S3_BUCKET'),
             'prefix' => getenv('S3_PREFIX') ?: '',
-            // null = bucket policy handles access (required for "Bucket owner
-            // enforced" buckets where ACLs are disabled). Set S3_ACL=true (yes
-            // is also accepted) to switch to public-read ACL.
-            'visibility' => in_array(getenv('S3_ACL'), ['true', 'yes'], true) ? 'public' : null,
+            // private by default: no ACL is sent, so uploads work on buckets
+            // where ACLs are disabled ("Bucket owner enforced"). Set S3_ACL=true
+            // to send public-read instead; objects are then reachable directly.
+            'visibility' => gosite_env_flag('S3_ACL') ? 'public' : 'private',
             // Browser-reachable base for asset URLs: https://minio.<TLD> for
             // local MinIO, a CDN or bucket endpoint in production. When unset
             // the addon keeps Cockpit's own /storage/uploads proxy (which only
