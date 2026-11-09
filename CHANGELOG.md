@@ -11,6 +11,17 @@
   logged as a warning. This runs in the Go core, so it protects every site that
   takes this core release, whatever the addon version.
 
+## 0.65.3
+
+### S3 uploads are private by default
+
+- **Changed: `S3_ACL` controls the ACL.** Uploads send no ACL unless `S3_ACL` is
+  `true`, `yes`, `1` or `on` (any letter case). The old default `public-read`
+  failed on buckets where ACLs are disabled, and the upload reported success
+  with no stored asset. See MIGRATIONS.md, "0.65.3".
+- **Added: `gosite_env_flag()` in both Cockpit config files.** One reader for
+  boolean environment variables, with a test in `tests/thin.bats`.
+
 
 ## 0.65.0
 
