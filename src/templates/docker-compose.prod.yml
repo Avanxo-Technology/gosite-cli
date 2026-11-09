@@ -37,6 +37,19 @@
 # SMTP_PASSWORD, SMTP_FROM (a sender the provider has verified) and
 # SMTP_FROM_NAME. Without SMTP_HOST the CMS sends no e-mail.
 #
+# Optional, default webhook for every Forms submission (read by the cms only):
+#   FORMS_WEBHOOK_URL       a form created later inherits it with no per-form
+#                           setup. Unset means no default. The URL is a bearer
+#                           credential: anyone holding it can post to the
+#                           destination.
+#   FORMS_WEBHOOK_FORMAT    json (default) or mattermost. An incoming-webhook
+#                           message needs mattermost - Mattermost answers 400
+#                           to the flat json body.
+#   FORMS_WEBHOOK_SECRET    signs the json body as X-Forms-Signature; ignored
+#                           by Mattermost.
+# A form's own `webhook` / `webhookFormat` in the CMS overrides all three, and
+# `webhookFormat: none` opts that form out of the default.
+#
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
 # key prefix for Cockpit's app memory in Redis, and that memory holds the API
 # key registry the /api/* gate reads. Giving two environments the same MONGO_DB
@@ -127,6 +140,11 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-}
+      # Default webhook for every form; see the header comment. Unset means
+      # none, which is the state every stack starts in.
+      - FORMS_WEBHOOK_URL=${FORMS_WEBHOOK_URL:-}
+      - FORMS_WEBHOOK_FORMAT=${FORMS_WEBHOOK_FORMAT:-}
+      - FORMS_WEBHOOK_SECRET=${FORMS_WEBHOOK_SECRET:-}
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
       # Every service in this file is named for the project AND the
