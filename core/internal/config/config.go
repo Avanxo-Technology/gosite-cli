@@ -51,8 +51,16 @@ func Load() Config {
 	}
 }
 
-// CacheKeyPrefix is the only Redis prefix a purge may sweep.
-func (c Config) CacheKeyPrefix() string { return c.Project + ":cache:" }
+// CacheKeyPrefix is the only Redis prefix a purge may sweep. It includes the
+// environment when APP_ENV is set, so production and QA sharing one Redis
+// never read or purge each other's pages. With APP_ENV empty it is the
+// project-only prefix, as before this change.
+func (c Config) CacheKeyPrefix() string {
+	if c.Environment == "" {
+		return c.Project + ":cache:"
+	}
+	return c.Project + ":" + c.Environment + ":cache:"
+}
 
 // StateKeyPrefix holds application state. Nothing purges it.
 func (c Config) StateKeyPrefix() string { return c.Project + ":app:" }

@@ -102,6 +102,13 @@ func WithProject(project string) Option {
 	return func(s *SEO) { s.keyPrefix = project + ":cache:seo:" }
 }
 
+// WithCachePrefix sets the SEO cache keys under the given cache prefix
+// (config.CacheKeyPrefix), which includes the environment. Use it instead of
+// WithProject so production and QA sharing one Redis keep separate SEO entries.
+func WithCachePrefix(prefix string) Option {
+	return func(s *SEO) { s.keyPrefix = prefix + "seo:" }
+}
+
 func WithAssetBase(base string) Option {
 	return func(s *SEO) { s.assetBase = base }
 }

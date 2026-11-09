@@ -58,7 +58,7 @@ func NewApp(cfg config.Config, log *slog.Logger, viewOpts ...views.Option) (*App
 	// than a list.
 	cmsClient := cms.New(cfg, log)
 	cacheInstance := cache.New(rdb, log, cfg.IsDev())
-	seoResolver := seo.New(cmsClient, cacheInstance, log, seo.WithAssetBase(cfg.AssetBaseURL()), seo.WithProject(cfg.Project))
+	seoResolver := seo.New(cmsClient, cacheInstance, log, seo.WithAssetBase(cfg.AssetBaseURL()), seo.WithCachePrefix(cfg.CacheKeyPrefix()))
 
 	// One reader for both halves of the addon: the integrations and the consent
 	// banner that gates them.

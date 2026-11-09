@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.65.5
+
+### Cache keys carry the environment
+
+- **Changed: cache keys include `APP_ENV`.** The page, blog, SEO and purge keys
+  are `<project>:<env>:cache:`. Production and QA sharing one Redis no longer
+  read or purge each other's pages. With `APP_ENV` empty the prefix is
+  unchanged. The cache rebuilds after the deploy; app state keys do not move.
+  See MIGRATIONS.md, "0.65.5".
+- **Added: `seo.WithCachePrefix`.** Takes the full cache prefix from
+  `config.CacheKeyPrefix()`. `WithProject` stays for existing callers.
+
 ## 0.65.4
 
 ### Analytics: one provider loads once, in a stable order

@@ -191,7 +191,7 @@ func TestPurgeKeepsAppState(t *testing.T) {
 	if err := state.Set(ctx, "votes:1.2.3.4", "1", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	mr.Set("demo:cache:page", "cached")
+	mr.Set("demo:development:cache:page", "cached")
 	if got := state.Key("votes:1.2.3.4"); got != "demo:app:votes:1.2.3.4" {
 		t.Fatalf("state key = %q", got)
 	}
@@ -200,7 +200,7 @@ func TestPurgeKeepsAppState(t *testing.T) {
 		t.Fatalf("purge: status %d", rec.Code)
 	}
 
-	if mr.Exists("demo:cache:page") {
+	if mr.Exists("demo:development:cache:page") {
 		t.Error("the site-wide purge left a cache key")
 	}
 	if !mr.Exists("demo:app:votes:1.2.3.4") {
