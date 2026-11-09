@@ -157,9 +157,9 @@ if (getenv('STORAGE_ADAPTER') === 's3') {
             'bucket' => getenv('S3_BUCKET'),
             'prefix' => getenv('S3_PREFIX') ?: '',
             // null = bucket policy handles access (required for "Bucket owner
-            // enforced" buckets where ACLs are disabled). Set S3_ACL=yes to
-            // switch to public-read ACL.
-            'visibility' => getenv('S3_ACL') === 'yes' ? 'public' : null,
+            // enforced" buckets where ACLs are disabled). Set S3_ACL=true (yes
+            // is also accepted) to switch to public-read ACL.
+            'visibility' => in_array(getenv('S3_ACL'), ['true', 'yes'], true) ? 'public' : null,
             // Browser-reachable base for asset URLs: https://minio.<TLD> for
             // local MinIO, a CDN or bucket endpoint in production. When unset
             // the addon keeps Cockpit's own /storage/uploads proxy (which only
