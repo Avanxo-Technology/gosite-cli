@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.65.4
+
+### Analytics: one provider loads once, in a stable order
+
+- **Changed: integrations are read in a stable order.** Entries sort by provider,
+  then by `_id`, so "the first entry" is the same on every request.
+- **Added: a duplicate provider is skipped.** When two enabled entries for one
+  provider both apply to this deployment, the first loads and the rest are
+  logged as a warning. This runs in the Go core, so it protects every site that
+  takes this core release, whatever the addon version.
+
 ## 0.65.3
 
 ### S3 uploads are private by default
