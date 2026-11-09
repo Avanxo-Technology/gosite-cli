@@ -93,11 +93,22 @@ _audit_project() {
   local config="${dir}/cockpit/config.php" envfile="${dir}/.env"
 
   # forms.trustedProxies: without it the Forms rate limit buckets all visitors
-  # together, so one abusive client exhausts the quota for everyone.
-  if [[ -f "${config}" ]] && ! grep -q "trustedProxies" "${config}"; then
+  # together, so one abusive client exhausts the quota for everyone. A thin
+  # site sets it in the generated config.core.php; a legacy site in config.php.
+  # The site's own override (config.local.php) is also a valid place.
+  local trusted_file found=0
+  for trusted_file in "${config}" "${dir}/cockpit/config.core.php" "${dir}/cockpit/config.local.php"; do
+    if [[ -f "${trusted_file}" ]] && grep -q "trustedProxies" "${trusted_file}"; then
+      found=1
+      break
+    fi
+  done
+  if [[ -f "${config}" || -f "${dir}/cockpit/config.core.php" ]] && [[ "${found}" -eq 0 ]]; then
+    local fix_file="${config}"
+    [[ -f "${dir}/gosite.yml" ]] && fix_file="${dir}/cockpit/config.local.php"
     _audit_finding "${name}" "forms.trustedProxies" "absent" \
       "the Forms rate limit applies globally, not per visitor" \
-      "add forms.trustedProxies to ${dir}/cockpit/config.php"
+      "add forms.trustedProxies to ${fix_file}"
   fi
 
   # Empty purge token: the cache-purge endpoint answers unauthenticated in
