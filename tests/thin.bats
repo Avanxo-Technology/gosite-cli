@@ -228,3 +228,28 @@ EOF
   # QA's and production's routers must differ (one Traefik).
   ! grep -q '__PROJECT__-shop\.' "${GOSITE_ROOT}/templates-thin/generated/docker-compose.qa.yml"
 }
+
+@test "gosite_env_flag: true-ish values enable, false-ish and unknown values fall back to the default" {
+  local src="${BATS_TEST_TMPDIR}/flag.php" probe="${BATS_TEST_TMPDIR}/probe.php"
+  {
+    printf '<?php\n'
+    awk '/^    function gosite_env_flag/,/^    }$/' "${GOSITE_ROOT}/templates-thin/generated/cockpit/config.core.php" | sed 's/^    //'
+  } > "${src}"
+  cat > "${probe}" <<PHP
+<?php
+require '${src}';
+\$out = [];
+foreach (['1', 'true', 'YES', ' on ', '0', 'off', 'maybe', ''] as \$v) {
+    putenv("F=\$v");
+    \$out[] = \$v . '=' . (gosite_env_flag('F') ? 'T' : 'F');
+}
+putenv('F=maybe');
+\$out[] = 'default-true=' . (gosite_env_flag('F', true) ? 'T' : 'F');
+putenv('F');
+\$out[] = 'unset=' . (gosite_env_flag('F') ? 'T' : 'F');
+echo implode(' ', \$out);
+PHP
+  run php "${probe}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1=T true=T YES=T  on =T 0=F off=F maybe=F =F default-true=T unset=F" ]
+}
