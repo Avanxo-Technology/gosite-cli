@@ -103,8 +103,10 @@ func (r *Reader) Integrations() []views.Integration {
 		// one) and expressing it as a remote query would be trading a line of
 		// obvious Go for an assumption about how Cockpit forwards filters.
 		Filter: map[string]any{"enabled": true},
-		Sort:   map[string]int{"provider": 1},
-		Limit:  50,
+		// _id breaks ties within a provider, so "the first entry" is the same
+		// entry on every request, not whichever one storage returns first.
+		Sort:  map[string]int{"provider": 1, "_id": 1},
+		Limit: 50,
 	})
 	if err != nil {
 		// A missing collection is the normal state of a project without the
@@ -116,6 +118,7 @@ func (r *Reader) Integrations() []views.Integration {
 	}
 
 	out := make([]views.Integration, 0, len(res.Items))
+	loaded := make(map[string]bool, len(res.Items))
 
 	for _, item := range res.Items {
 		provider, _ := item["provider"].(string)
@@ -142,6 +145,17 @@ func (r *Reader) Integrations() []views.Integration {
 		// to keep in step. An unrecognised value there means "no category
 		// granted", which is the fail-closed reading.
 		category, _ := item["category"].(string)
+
+		// Two entries for one provider that both apply here would load the
+		// provider twice, which the browser would reject. The first in the
+		// stable order wins; the rest are logged, so the editor can see why.
+		if loaded[provider] {
+			id, _ := item["_id"].(string)
+			r.log.Warn("duplicate analytics integration for this environment; keeping the first",
+				"provider", provider, "id", id)
+			continue
+		}
+		loaded[provider] = true
 
 		out = append(out, views.Integration{
 			Provider: provider,
