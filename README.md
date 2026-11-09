@@ -568,7 +568,7 @@ overridable, so an upgrade is a deliberate change rather than a surprise:
 | air | v1.67.4 | edit `Dockerfile.dev` |
 | Traefik | v3.7 | `GOSITE_TRAEFIK_VERSION` |
 | Redis | 8-alpine | `GOSITE_REDIS_VERSION` |
-| Cockpit | core-2.14.0 | edit the compose files |
+| Cockpit | core-2.14.1 | edit the compose files |
 
 ### Cache-aside flow
 
