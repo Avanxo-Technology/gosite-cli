@@ -54,6 +54,7 @@ func NewRouter(a *App, opts RouterOptions) *echo.Echo {
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Gzip())
 	e.Use(assetCacheHeaders())
+	e.Use(basicAuthGate(a.Config))
 	e.Use(canonicalHost(a.Config))
 	for _, m := range opts.Middleware {
 		e.Use(m)
