@@ -103,7 +103,7 @@ const testToken = "test-token"
 // eventually point at a real deployment's Redis, and the setup below flushes
 // the database it connects to. Opt in with, for example:
 //
-//	docker run -d --rm -p 63799:6379 redis:7-alpine
+//	docker run -d --rm -p 63799:6379 redis:7.4.12-alpine
 //	REDIS_TEST_URL=redis://127.0.0.1:63799/9 go test ./...
 func testRedisURL(t *testing.T) string {
 	t.Helper()

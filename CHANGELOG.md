@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.65.6
+
+### Latest patch versions of images and libraries
+
+- **Changed: infrastructure images pinned to a patch.** Traefik `v3.7.17`, Redis
+  `8.10.3`, MongoDB `8.0.34` (`src/lib/config.sh`). They were floating on the
+  minor, so a new host got an older patch than the current one.
+- **Changed: site and Medusa images pinned to a patch.** `golang:1.26.10-alpine`,
+  `alpine:3.24.4`, `node:22.23.4-bookworm-slim`, `postgres:16.15-alpine`,
+  `redis:7.4.12-alpine` (the Medusa Redis in the generated compose files).
+- **Changed: Go libraries.** `klauspost/cpuid/v2` v2.2.11 and `yuin/gopher-lua`
+  v1.1.2 (indirect dependencies of the core).
+- **Changed: Medusa libraries.** `@medusajs/*` 2.22.6, `@mikro-orm/*` 6.6.17,
+  `nodemailer` 10.0.16, and patch updates for `@swc/*`, `pg`, `typescript`, `vite`.
+
+Not changed in this release: `coollabsio/minio:latest` (floating, no dated tag
+newer than 2025-10-15 was visible), and the minor updates of Go libraries
+(echo v5.4, go-redis v9.23, x/sys v0.50 and others).
+
 ## 0.65.5
 
 ### Cache keys carry the environment

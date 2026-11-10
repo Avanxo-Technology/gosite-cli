@@ -17,9 +17,9 @@
 : "${GOSITE_INFRA_PROJECT:=gosite-infra}"
 
 # Image versions for the shared infrastructure. Pinned and overridable.
-: "${GOSITE_TRAEFIK_VERSION:=v3.7}"
-: "${GOSITE_REDIS_VERSION:=8}"
-: "${GOSITE_MONGO_VERSION:=8.0}"
+: "${GOSITE_TRAEFIK_VERSION:=v3.7.17}"
+: "${GOSITE_REDIS_VERSION:=8.10.3}"
+: "${GOSITE_MONGO_VERSION:=8.0.34}"
 
 # Shared service container names, referenced by every project as DNS hostnames.
 : "${GOSITE_REDIS_HOST:=gosite-redis}"

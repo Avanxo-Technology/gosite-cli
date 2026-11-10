@@ -256,7 +256,7 @@ _resolve_dependencies() {
     warn "Host 'go mod tidy' failed; retrying inside a container."
   fi
 
-  if docker run --rm -v "${dir}:/src" -w /src golang:1.26-alpine \
+  if docker run --rm -v "${dir}:/src" -w /src golang:1.26.10-alpine \
        sh -c 'apk add --no-cache git >/dev/null && go mod tidy'; then
     ok "go.sum written."
     return 0

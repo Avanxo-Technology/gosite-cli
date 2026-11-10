@@ -3,7 +3,7 @@
 # `gosite generate` rewrites this file. Put local changes in docker-compose.override.yml.
 # Local development only. The source tree is bind-mounted, so this image just
 # carries the toolchain and runs air for hot reload.
-FROM golang:1.26-alpine
+FROM golang:1.26.10-alpine
 
 RUN apk add --no-cache git curl
 
