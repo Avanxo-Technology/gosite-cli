@@ -188,7 +188,7 @@ services:
       - commerce
 
   medusa-db:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     container_name: __PROJECT__-medusa-db
     restart: unless-stopped
     environment:
@@ -208,7 +208,7 @@ services:
       - commerce
 
   medusa-redis:
-    image: redis:7-alpine
+    image: redis:7.4.12-alpine
     container_name: __PROJECT__-medusa-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${MEDUSA_REDIS_PASSWORD}"]

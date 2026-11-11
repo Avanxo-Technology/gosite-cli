@@ -4,7 +4,7 @@
 # Medusa v2 builds the runnable server into .medusa/server (config and src
 # compiled to JS). Production runs from that output, not from the TypeScript
 # sources: the runtime image has no ts-node, which is a build-time tool.
-FROM node:22-bookworm-slim AS builder
+FROM node:22.23.4-bookworm-slim AS builder
 WORKDIR /app
 ENV NODE_ENV=production
 # npm ci installs exactly the committed lockfile: two builds of one version
@@ -14,7 +14,7 @@ RUN npm ci --include=dev
 COPY . .
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:22.23.4-bookworm-slim AS runtime
 WORKDIR /app
 # The medusa CLI lives in node_modules/.bin; the entrypoint calls it by name.
 ENV NODE_ENV=production \

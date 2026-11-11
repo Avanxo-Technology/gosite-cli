@@ -3,7 +3,7 @@
 # `gosite generate` rewrites this file. Put local changes in gosite.yml (this file has no override).
 
 # --- stage 1: build ----------------------------------------------------------
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 
 ARG GO_BUILD_CPUS=2
 
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=${GO_BUILD_CPUS} go build -p=${GO_BUILD_
       -o /out/app .
 
 # --- stage 2: runtime --------------------------------------------------------
-FROM alpine:latest
+FROM alpine:3.24.4
 
 RUN apk add --no-cache ca-certificates tzdata wget \
  && adduser -D -u 10001 app
