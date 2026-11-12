@@ -15,8 +15,8 @@ Facts confirmed in Meta's documentation (developers.facebook.com/docs/meta-pixel
 - Same consent guarantees as every other provider.
 
 **Non-Goals:**
-- Conversions API (server-side events). It needs a secret access token, which must never be in this public collection; it is a separate mechanism.
-- Wiring Forms or Commerce to send `Lead`/`Purchase` automatically. Page code can call `analytics.track()`; automatic events are a later change.
+- Conversions API. A later change; it needs a secret token in the environment (never in the CMS), Go code in the core and browser/server event deduplication.
+- Automatic `Lead` from Forms. Forms has no front-end code in the core; each site's template submits it. Sites can call `analytics.track('Lead')` themselves.
 - Legacy sites. `src/templates/` is frozen.
 - Advanced matching (hashed e-mail/phone). It sends personal data and needs its own consent review.
 
@@ -42,9 +42,26 @@ Unknown providers already fall to `marketing`, but `CUSTOM_CATEGORY['meta-pixel'
 ### D6. The `custom` flag in `providerReference()` becomes a list
 Today it is `$value === 'posthog'`. It becomes a `CUSTOM_PROVIDERS` constant so the admin reference table shows both own plugins correctly.
 
+### D7. The CMS offers Meta Pixel only on thin sites
+The addon is shared by legacy and thin sites, but only thin sites have the browser plugin. The generated `cockpit/config.core.php` gains `'gosite' => ['layout' => 'thin']`; `Analytics::providers()` drops `meta-pixel` when `$app->retrieve('gosite/layout') !== 'thin'`, and validation refuses it there. **Where the value comes from:** the same generated file is copied into the CMS image for local and production, so both read the same marker. A legacy `config.php` has no marker, so absence means legacy. A provider list `THIN_ONLY_PROVIDERS` keeps the rule in one place.
+
+Alternatives: an environment variable — one more setting to forget in Coolify; copying the plugin into the frozen legacy tree — against the freeze.
+
+### D8. Commerce events are provider-neutral, emitted as data
+Event names follow Meta's standard names (`ViewContent`, `AddToCart`, `InitiateCheckout`, `Purchase`) because they are the most widely used e-commerce vocabulary, and D3 forwards them to the Pixel unchanged; PostHog receives the same names. Properties: `value` (number), `currency` (ISO code), `content_ids` (variant ids), `content_type: "product"`, `num_items`, and `order_id` on `Purchase`.
+
+How they reach the browser, without inline executable script:
+- full pages (PDP, checkout, confirmation) render `<script type="application/json" data-analytics-event>` blocks; `analytics.js` reads them after consent and calls `analytics.track()`;
+- the htmx add-to-cart response sets an `HX-Trigger` header with the event; `analytics.js` listens for it on `document`.
+
+`Purchase` uses the order total from Medusa on the confirmation handler. A reload of the confirmation page must not count twice: `analytics.js` keeps sent order ids in `sessionStorage`, and Meta also deduplicates on `order_id` when it is sent as `eventID`.
+
+Events that happen before consent are not queued for later: a visitor who has not decided is not tracked.
+
 ## Risks / Trade-offs
 
-- [A legacy site's CMS offers Meta Pixel, but its browser file has no plugin, so the entry saves and never loads] → the README and the admin screen help text say the provider needs an up-to-date site; listed in Open Questions.
+- [A thin site not yet regenerated has no marker, so it does not see Meta Pixel] → the upgrade note says `gosite generate` and a CMS rebuild are needed.
+- [Commerce events double-count when the visitor reloads the confirmation page] → sessionStorage guard plus Meta's `eventID` deduplication.
 - [Meta changes the script or the `fbq` API] → the plugin is small and in one place; the JS tests pin the calls it makes.
 - [Ad blockers block `connect.facebook.net`] → expected; out of scope (no first-party proxy).
 - [A Pixel ID with a wrong digit saves without error] → the pattern checks the shape only; the admin screen shows the stored ID.
@@ -57,5 +74,4 @@ Today it is `$value === 'posthog'`. It becomes a `CUSTOM_PROVIDERS` constant so 
 
 ## Open Questions
 
-- Legacy sites: hide `meta-pixel` from the select on legacy sites, or accept the risk above?
-- Automatic `Lead` from Forms and `Purchase` from Commerce: a follow-up change?
+- The confirmation handler's Medusa read for the order total: confirm it is already fetched (to validate the cookie) or add one read.
