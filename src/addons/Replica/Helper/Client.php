@@ -35,6 +35,9 @@ class Client extends \Lime\Helper {
     protected ?Target $target = null;
     protected ?string $transport = null;
 
+    // The peer manifest from transport detection, reused so protection needs no second request.
+    protected ?array $manifest = null;
+
     public function forTarget(Target $target): static {
 
         $client = new static($this->app);
@@ -72,11 +75,33 @@ class Client extends \Lime\Helper {
             ? self::TRANSPORT_PEER
             : self::TRANSPORT_CORE;
 
+        $this->manifest = $this->transport === self::TRANSPORT_PEER ? $response['body'] : null;
+
         return $this->transport;
     }
 
     public function isPeer(): bool {
         return $this->transport() === self::TRANSPORT_PEER;
+    }
+
+    /**
+     * Models the remote protects. Null when the remote is not a peer, or is a
+     * peer that predates protection (its manifest has no `protected` key), so
+     * the caller can tell "nothing protected" from "cannot know".
+     *
+     * @return string[]|null
+     */
+    public function remoteProtectedModels(): ?array {
+
+        if (!$this->isPeer() || !array_key_exists('protected', $this->manifest ?? [])) {
+            return null;
+        }
+
+        return array_values(array_map('strval', (array)$this->manifest['protected']));
+    }
+
+    public function remoteReplicaVersion(): ?string {
+        return $this->isPeer() ? (string)($this->manifest['replica'] ?? '') : null;
     }
 
     /**
@@ -245,6 +270,10 @@ class Client extends \Lime\Helper {
             'mode'   => $mode,
         ]);
 
+        if ($response['status'] === 423 && ($refused = $this->refusedProtectedModels($response))) {
+            return $this->protectedRefusal($refused);
+        }
+
         if ($response['status'] !== 200) {
             throw new \Exception('Remote model write failed: '.($response['error'] ?: 'HTTP '.$response['status']));
         }
@@ -266,6 +295,10 @@ class Client extends \Lime\Helper {
                 'items' => $items,
                 'mode'  => $mode,
             ]);
+
+            if ($response['status'] === 423 && ($refused = $this->refusedProtectedModels($response))) {
+                return $this->protectedRefusal($refused);
+            }
 
             if ($response['status'] !== 200) {
                 throw new \Exception("Remote write of '{$model}' failed: ".($response['error'] ?: 'HTTP '.$response['status']));
@@ -388,6 +421,32 @@ class Client extends \Lime\Helper {
         }
 
         return $result;
+    }
+
+    /**
+     * Names the remote refused under protection, from a 423 body. Empty when the
+     * body names none: the caller then treats the 423 as a failure, because a
+     * refusal that says nothing about what it refused cannot be reported safely.
+     *
+     * @return string[]
+     */
+    protected function refusedProtectedModels(array $response): array {
+
+        $names = is_array($response['body'] ?? null) ? ($response['body']['protected'] ?? []) : [];
+
+        return array_values(array_map('strval', (array)$names));
+    }
+
+    /**
+     * Zero-count result for a write the remote refused under protection.
+     *
+     * @param string[] $refused
+     */
+    protected function protectedRefusal(array $refused): array {
+        return [
+            'created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0,
+            'messages' => [], 'protectedRefused' => $refused,
+        ];
     }
 
     // ----------------------------------------------------------------- assets

@@ -14,7 +14,7 @@ use Replica\Model\Target;
  */
 class Replica extends \Lime\Helper {
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
 
     const MODE_MIRROR = 'mirror';
     const MODE_MERGE  = 'merge';
@@ -259,6 +259,82 @@ class Replica extends \Lime\Helper {
 
     public function clearIdMap(string $targetId): void {
         $this->app->dataStorage->remove(REPLICA_IDMAP, ['target' => $targetId]);
+    }
+
+    // --------------------------------------------------------- protection
+
+    /*
+     * The protected list lives in this instance's own dataStorage, outside
+     * content/*, so no replication path can rewrite it. Each instance keeps
+     * its own list: a production destination protects what production
+     * editors own, whatever a local copy protects.
+     */
+
+    /**
+     * @return string[] sorted model names
+     */
+    public function protectedModels(): array {
+
+        $names = [];
+
+        foreach ($this->app->dataStorage->find(REPLICA_PROTECTED)->toArray() as $doc) {
+            if (!empty($doc['model'])) $names[] = (string)$doc['model'];
+        }
+
+        $names = array_values(array_unique($names));
+        sort($names);
+
+        return $names;
+    }
+
+    public function isProtected(string $model): bool {
+        return $this->app->dataStorage->count(REPLICA_PROTECTED, ['model' => $model]) > 0;
+    }
+
+    /**
+     * Idempotent, and only a real change is logged: the admin screen saves the
+     * whole list at once, so logging every call would bury the changes that
+     * matter under repeats of the current state.
+     *
+     * @return bool whether the list changed
+     */
+    public function protect(string $model, ?string $by): bool {
+
+        if ($this->isProtected($model)) return false;
+
+        // insert() takes the document by reference, so it needs a variable.
+        $doc = ['model' => $model, 'by' => $by, '_created' => time()];
+        $this->app->dataStorage->insert(REPLICA_PROTECTED, $doc);
+        $this->logProtection($model, 'protected', $by);
+
+        return true;
+    }
+
+    public function unprotect(string $model, ?string $by): bool {
+
+        if (!$this->isProtected($model)) return false;
+
+        $this->app->dataStorage->remove(REPLICA_PROTECTED, ['model' => $model]);
+        $this->logProtection($model, 'unprotected', $by);
+
+        return true;
+    }
+
+    /**
+     * Protection entries have no counts or mode, unlike push and pull entries;
+     * readers of REPLICA_LOG must check `direction` before reading those keys.
+     */
+    protected function logProtection(string $model, string $state, ?string $by): void {
+
+        $doc = [
+            'direction' => 'protect',
+            'model'     => $model,
+            'state'     => $state,
+            'by'        => $by,
+            '_created'  => time(),
+            'messages'  => [],
+        ];
+        $this->app->dataStorage->insert(REPLICA_LOG, $doc);
     }
 
     // -------------------------------------------------------------- local
@@ -750,6 +826,20 @@ class Replica extends \Lime\Helper {
                 $result['messages'][] = 'Remote does not run Replica: entries only, and the remote will stamp its own _created/_modified.';
             }
 
+            // Read before any write: a null list means the destination predates protection.
+            $remoteProtected = [];
+
+            if ($peer) {
+                $remoteProtected = $client->remoteProtectedModels();
+
+                if ($remoteProtected === null) {
+                    $remoteProtected = [];
+                    $result['messages'][] = 'Destination Replica '.$client->remoteReplicaVersion().' does not support model protection';
+                }
+            } else {
+                $result['messages'][] = "Model protection is not available on a destination without Replica; only the API key's role permissions restrict writes.";
+            }
+
             $models = $target->scope($options['model'] ?? null, $this->localCollections());
 
             if (!count($models)) {
@@ -770,6 +860,17 @@ class Replica extends \Lime\Helper {
                 }
             }
 
+            // Protected models leave the run before any definition or entry is read or sent.
+            // Scope gaps were reported above, so a protected model is not listed as missing.
+            $models = array_values(array_filter($models, function($name) use ($remoteProtected, &$result) {
+
+                if (!in_array($name, $remoteProtected, true)) return true;
+
+                $this->markProtected($result, $name, 'protected on the destination');
+
+                return false;
+            }));
+
             // Schema first, so entries land in a model that exists remotely.
             if ($target->syncModels && count($models)) {
 
@@ -788,9 +889,46 @@ class Replica extends \Lime\Helper {
                     if ($dryRun) {
                         $result['messages'][] = 'would push '.count($definitions).' model definition(s)';
                     } elseif (count($definitions)) {
-                        $modelResult = $client->pushModels($definitions, $mode);
-                        $result['models'] = $modelResult;
-                        $result['messages'][] = 'models: '.json_encode($modelResult);
+
+                        $written = null;
+
+                        /*
+                         * The destination may protect a model after the manifest was read, and then
+                         * refuses the whole batch. Drop the refused models and send the rest, so one
+                         * protected model does not leave every other definition unwritten.
+                         */
+                        while (count($definitions)) {
+
+                            $attempt = $client->pushModels($definitions, $mode);
+                            $refused = $attempt['protectedRefused'] ?? [];
+
+                            if (!count($refused)) {
+                                $written = $attempt;
+                                break;
+                            }
+
+                            $before      = count($definitions);
+                            $definitions = array_values(array_filter(
+                                $definitions,
+                                fn($definition) => !in_array($definition['name'] ?? null, $refused, true)
+                            ));
+
+                            // A refusal naming a model that was not sent would loop forever.
+                            if (count($definitions) === $before) {
+                                throw new \Exception('Destination refused models that were not part of the request: '.implode(', ', $refused));
+                            }
+
+                            foreach (array_intersect($models, $refused) as $name) {
+                                $this->markProtected($result, $name, 'protected on the destination');
+                            }
+
+                            $models = array_values(array_diff($models, $refused));
+                        }
+
+                        if ($written !== null) {
+                            $result['models'] = $written;
+                            $result['messages'][] = 'models: '.json_encode($written);
+                        }
                     }
                 }
             }
@@ -815,6 +953,12 @@ class Replica extends \Lime\Helper {
                 }
 
                 $outcome = $client->pushItems($name, $items, $mode, $idMap, $type);
+
+                // Protection added after the manifest was read: skip this model, keep pushing the rest.
+                if (!empty($outcome['protectedRefused'])) {
+                    $this->markProtected($result, $name, 'protected on the destination');
+                    continue;
+                }
 
                 if (!$peer && $target->id) {
 
@@ -911,6 +1055,17 @@ class Replica extends \Lime\Helper {
                         .' (run replica:targets:sync "'.$target->name.'" to include them)';
                 }
             }
+
+            // A model protected here takes no writes at all, definitions included. Reads from the
+            // remote are not restricted, so the remote's protection is not consulted.
+            $models = array_values(array_filter($models, function($name) use (&$result) {
+
+                if (!$this->isProtected($name)) return true;
+
+                $this->markProtected($result, $name, 'protected here');
+
+                return false;
+            }));
 
             if ($target->syncModels && count($models)) {
 
@@ -1209,11 +1364,23 @@ class Replica extends \Lime\Helper {
             'updated'   => 0,
             'skipped'   => 0,
             'errors'    => 0,
+            'protected' => 0,
+            'protectedModels' => [],
             'collections' => [],
             'models'    => null,
             'assets'    => null,
             'messages'  => [],
         ];
+    }
+
+    /**
+     * Records a model the run left alone because of protection. It is a skip with a
+     * reason, not an error, so the run still succeeds.
+     */
+    protected function markProtected(array &$result, string $model, string $reason): void {
+        $result['protected']++;
+        $result['protectedModels'][] = $model;
+        $result['messages'][] = "{$model}: {$reason}";
     }
 
     protected function accumulate(array &$result, array $outcome, string $model, bool $verbose): void {
@@ -1267,6 +1434,7 @@ class Replica extends \Lime\Helper {
                 'updated'   => $result['updated'],
                 'skipped'   => $result['skipped'],
                 'errors'    => $result['errors'],
+                'protected' => $result['protected'],
                 'assets'    => [
                     'created' => (int)($result['assets']['created'] ?? 0),
                     'updated' => (int)($result['assets']['updated'] ?? 0),

@@ -1,22 +1,22 @@
 ## 1. Sandbox baseline
 
-- [ ] 1.1 Start two peer CMS containers and one plain Cockpit for the sandbox site `~/gosites/analytics-draft-v2` (README "Verification" pattern, own Docker network, no real infra)
-- [ ] 1.2 Prove that `mirror` push does not delete destination-only entries; record the output for the PR
+- [x] 1.1 Start two peer CMS containers and one plain Cockpit for the sandbox site `~/gosites/analytics-draft-v2` (README "Verification" pattern, own Docker network, no real infra)
+- [x] 1.2 Prove that `mirror` push does not delete destination-only entries; record the output for the PR
 
 ## 2. Protection store and enforcement
 
-- [ ] 2.1 Add `REPLICA_PROTECTED` (`replica/protected`) and `protectedModels()`, `isProtected()`, `protect()`, `unprotect()` to `Helper/Replica.php`; log each change
-- [ ] 2.2 Add `protected` to `GET /api/replica/manifest`
-- [ ] 2.3 Answer 423 with the protected names in `POST /api/replica/items/{model}` and `POST /api/replica/models`
-- [ ] 2.4 Refuse pull writes into locally protected models in `pull()`
-- [ ] 2.5 Bump `Replica::VERSION` to 1.1.0
+- [x] 2.1 Add `REPLICA_PROTECTED` (`replica/protected`) and `protectedModels()`, `isProtected()`, `protect()`, `unprotect()` to `Helper/Replica.php`; log each change
+- [x] 2.2 Add `protected` to `GET /api/replica/manifest`
+- [x] 2.3 Answer 423 with the protected names in `POST /api/replica/items/{model}` and `POST /api/replica/models`
+- [x] 2.4 Refuse pull writes into locally protected models in `pull()`
+- [x] 2.5 Bump `Replica::VERSION` to 1.1.0
 
 ## 3. Source behaviour
 
-- [ ] 3.1 Read `protected` from the manifest in `push()`; skip those models, add the `protected` counter to results and log
-- [ ] 3.2 Turn a 423 from `pushItems()`/`pushModels()` into a protected result; keep throwing on other errors
-- [ ] 3.3 Message for peers without `protected` in the manifest and for core destinations
-- [ ] 3.4 Show protected models in the dry-run plan
+- [x] 3.1 Read `protected` from the manifest in `push()`; skip those models, add the `protected` counter to results and log
+- [x] 3.2 Turn a 423 from `pushItems()`/`pushModels()` into a protected result; keep throwing on other errors
+- [x] 3.3 Message for peers without `protected` in the manifest and for core destinations
+- [x] 3.4 Show protected models in the dry-run plan
 
 ## 4. Admin: Protected view
 

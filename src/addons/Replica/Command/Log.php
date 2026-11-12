@@ -39,6 +39,19 @@ class Log extends Base {
         }
 
         foreach ($log['items'] as $entry) {
+
+            // Protection changes carry no run counts, so they cannot share the run format below.
+            if (($entry['direction'] ?? '') === 'protect') {
+                $output->writeln(sprintf(
+                    '%s  protect %-18s %s by %s',
+                    date('Y-m-d H:i:s', $entry['_created']),
+                    $entry['model'] ?? '?',
+                    $entry['state'] ?? '?',
+                    $entry['by'] ?? 'unknown'
+                ));
+                continue;
+            }
+
             $output->writeln(sprintf(
                 '%s  %-5s %-18s %-7s%s created %-4d updated %-4d skipped %-4d errors %d',
                 date('Y-m-d H:i:s', $entry['_created']),

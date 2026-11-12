@@ -54,14 +54,19 @@ abstract class Base extends Command {
             ));
         }
 
+        // Protected models have no counts: they were never read or written, so they get one line each.
+        foreach (($result['protectedModels'] ?? []) as $name) {
+            $output->writeln(sprintf('  %-28s  protected', $name));
+        }
+
         foreach (($result['messages'] ?? []) as $message) {
             $tag = str_contains($message, 'FAILED') || str_starts_with($message, 'error') ? 'error' : 'comment';
             $output->writeln("  <{$tag}>{$message}</{$tag}>");
         }
 
         $output->writeln(sprintf(
-            "<info>total</info> created %d, updated %d, skipped %d, errors %d",
-            $result['created'], $result['updated'], $result['skipped'], $result['errors']
+            "<info>total</info> created %d, updated %d, skipped %d, errors %d, protected %d",
+            $result['created'], $result['updated'], $result['skipped'], $result['errors'], $result['protected']
         ));
 
         return $result['errors'] === 0 ? Command::SUCCESS : Command::FAILURE;
