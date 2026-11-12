@@ -7,7 +7,7 @@ export const MailerRule = model.define("mailer_rule", {
   name: model.text(),
   event: model.text().index(),
   active: model.boolean().default(false),
-  recipient: model.enum(["order_email", "customer_email", "event_email", "custom"]).default("order_email"),
+  recipient: model.enum(["order_email", "order_receipt", "customer_email", "event_email", "custom"]).default("order_email"),
   recipient_address: model.text().nullable(),
   bcc: model.text().nullable(),
   subject: model.text(),

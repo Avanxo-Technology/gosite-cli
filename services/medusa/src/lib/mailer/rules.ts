@@ -59,7 +59,7 @@ export function mailerEvents(env: Record<string, string | undefined>): string[] 
   return [...new Set<string>([...GOSITE_EVENTS, ...MEDUSA_EVENTS, ...extra])]
 }
 
-export const RECIPIENTS = ["order_email", "customer_email", "event_email", "custom"] as const
+export const RECIPIENTS = ["order_email", "order_receipt", "customer_email", "event_email", "custom"] as const
 export type Recipient = (typeof RECIPIENTS)[number]
 
 export interface RuleInput {
@@ -151,13 +151,32 @@ export function parseRule(
   }
 }
 
+// RECEIPT_EMAIL is the order metadata key a storefront sets when the buyer
+// wants the order's e-mails somewhere else than the order's e-mail: one or
+// more addresses, separated by commas. The "order_receipt" recipient sends to
+// them, and to the order's e-mail when the key is missing or holds no valid
+// address.
+export const RECEIPT_EMAIL = "receipt_email"
+
 // resolveRecipients says where a rule's e-mail goes for one event, or [] when
 // the event carries no address of that kind (the e-mail is then skipped).
 export function resolveRecipients(
   rule: Pick<RuleInput, "recipient" | "recipient_address">,
-  context: { order?: { email?: string | null; customer?: { email?: string | null } | null } | null; customer?: { email?: string | null } | null; data?: Record<string, unknown> }
+  context: {
+    order?: { email?: string | null; metadata?: Record<string, unknown> | null; customer?: { email?: string | null } | null } | null
+    customer?: { email?: string | null } | null
+    data?: Record<string, unknown>
+  }
 ): string[] {
   switch (rule.recipient) {
+    case "order_receipt": {
+      const chosen = context.order?.metadata?.[RECEIPT_EMAIL]
+      const addresses = typeof chosen === "string" ? [...new Set(emailList(chosen).filter((a) => EMAIL.test(a)))] : []
+      if (addresses.length) {
+        return addresses
+      }
+      return resolveRecipients({ recipient: "order_email", recipient_address: null }, context)
+    }
     case "order_email": {
       const email = context.order?.email || context.order?.customer?.email
       return email ? [email] : []

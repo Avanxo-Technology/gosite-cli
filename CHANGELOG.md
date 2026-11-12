@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.66.0
+
+### Mailer: send an order's e-mails to the address the buyer chose
+
+- **Added: the recipient "The order's receipt address" (`order_receipt`).**
+  It sends to the addresses in the order's `metadata.receipt_email` (one or
+  more, separated by commas; invalid ones are dropped), and to the order's
+  e-mail when the key is missing or holds none. A checkout can ask the buyer
+  where the purchase details go without changing the order's e-mail.
+  A migration adds the value to `mailer_rule.recipient`.
+- See `gosite docs medusa-mailer`.
+
 ## 0.65.6
 
 ### Latest patch versions of images and libraries

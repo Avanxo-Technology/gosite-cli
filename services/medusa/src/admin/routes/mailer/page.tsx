@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from "react"
 // HTML), a preview rendered with a real order, test sends and the log of what
 // was sent. Backed by /admin/mailer/* (src/api/admin/mailer).
 
-type Recipient = "order_email" | "customer_email" | "event_email" | "custom"
+type Recipient = "order_email" | "order_receipt" | "customer_email" | "event_email" | "custom"
 
 type Rule = {
   id?: string
@@ -63,6 +63,7 @@ type Delivery = {
 
 const RECIPIENT_LABELS: Record<Recipient, string> = {
   order_email: "The order's e-mail",
+  order_receipt: "The order's receipt address (metadata.receipt_email), else the order's e-mail",
   customer_email: "The customer's e-mail",
   event_email: "The event's email field (custom events)",
   custom: "Fixed addresses",
