@@ -65,6 +65,18 @@ test("recipients come from the order, the customer, the event or the rule", () =
   assert.deepEqual(resolveRecipients({ recipient: "order_email", recipient_address: null }, {}), [])
 })
 
+test("order_receipt goes to the address the buyer chose, else the order's e-mail", () => {
+  const rule = { recipient: "order_receipt" as const, recipient_address: null }
+  const order = (metadata: Record<string, unknown> | null) => ({ email: "ana@a.co", metadata })
+  assert.deepEqual(resolveRecipients(rule, { order: order({ receipt_email: "conta@b.co" }) }), ["conta@b.co"])
+  assert.deepEqual(resolveRecipients(rule, { order: order({ receipt_email: "ana@a.co, conta@b.co" }) }), ["ana@a.co", "conta@b.co"])
+  assert.deepEqual(resolveRecipients(rule, { order: order({ receipt_email: "conta@b.co,conta@b.co" }) }), ["conta@b.co"])
+  assert.deepEqual(resolveRecipients(rule, { order: order({ receipt_email: "not an address" }) }), ["ana@a.co"])
+  assert.deepEqual(resolveRecipients(rule, { order: order({ receipt_email: 42 }) }), ["ana@a.co"])
+  assert.deepEqual(resolveRecipients(rule, { order: order(null) }), ["ana@a.co"])
+  assert.deepEqual(resolveRecipients(rule, {}), [])
+})
+
 test("once-per-record rules get a dedupe key, others none", () => {
   assert.equal(dedupeKey("mrule_1", "gosite.order.paid", "order_1", true), "mrule_1:gosite.order.paid:order_1")
   assert.equal(dedupeKey("mrule_1", "order.updated", "order_1", false), null)

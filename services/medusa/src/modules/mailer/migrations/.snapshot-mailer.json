@@ -394,6 +394,7 @@
           "comment": null,
           "enumItems": [
             "order_email",
+            "order_receipt",
             "customer_email",
             "event_email",
             "custom"

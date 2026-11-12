@@ -27,6 +27,17 @@ server.
   (restart Medusa), emit them with an `email` field and choose "The event's
   email field".
 
+## Who receives it
+
+- "The order's e-mail": the e-mail the order was placed with.
+- "The order's receipt address" (0.66.0): the addresses in the order's
+  `metadata.receipt_email` (one or more, separated by commas), else the
+  order's e-mail. A storefront that asks the buyer where the purchase details
+  go sets it on the cart's metadata before completing it; the order keeps the
+  buyer's e-mail. Pick it for the order e-mails the buyer chose an address
+  for (payment confirmed, for example).
+- "The customer's e-mail", "The event's email field", "Fixed addresses".
+
 ## Templates
 
 Go template syntax, values escaped: `{{ $.order.display_id }}`,
