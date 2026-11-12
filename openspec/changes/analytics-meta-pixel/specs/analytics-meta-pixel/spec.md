@@ -1,0 +1,68 @@
+## ADDED Requirements
+
+### Requirement: The CMS accepts a meta-pixel entry
+The Analytics addon SHALL offer `meta-pixel` (label "Meta Pixel") in the provider select, SHALL require a `pixelId` of 15 to 20 digits, SHALL apply the same character rules as every other provider, and SHALL drop undeclared keys.
+
+#### Scenario: Valid entry
+- **WHEN** an editor saves provider `meta-pixel` with config `{ "pixelId": "1234567890123456" }`
+- **THEN** the entry is saved with that config
+
+#### Scenario: Missing Pixel ID
+- **WHEN** an editor saves provider `meta-pixel` with an empty config
+- **THEN** the save is refused with a message that Meta Pixel expects `pixelId`
+
+#### Scenario: Ad account id instead of Pixel ID
+- **WHEN** an editor saves `{ "pixelId": "act_1234567890123456" }`
+- **THEN** the save is refused with a message that the Pixel ID is 15 to 20 digits
+
+#### Scenario: Unsafe characters
+- **WHEN** the `pixelId` contains a quote, an angle bracket or a backslash
+- **THEN** the save is refused
+
+#### Scenario: Extra keys
+- **WHEN** the config holds `pixelId` and `foo`
+- **THEN** only `pixelId` is stored
+
+### Requirement: Meta Pixel needs marketing consent
+The `meta-pixel` provider SHALL resolve to the `marketing` category in the browser gate and in the admin screen, unless the entry's `category` overrides it.
+
+#### Scenario: Analytics accepted, marketing refused
+- **WHEN** a visitor accepts analytics and refuses marketing
+- **THEN** `fbevents.js` is not requested and `window.fbq` is not defined
+
+#### Scenario: Marketing accepted
+- **WHEN** a visitor accepts marketing
+- **THEN** the plugin loads `https://connect.facebook.net/en_US/fbevents.js`, calls `fbq('init', pixelId)` once, and sends `PageView`
+
+#### Scenario: Consent disabled
+- **WHEN** the consent banner is disabled in the CMS
+- **THEN** the Pixel does not load, the same as every other provider
+
+### Requirement: Page views and events are forwarded
+The plugin SHALL send `PageView` for every page view the `analytics` library reports. `analytics.track(name, properties)` SHALL be sent with `fbq('track', ...)` when `name` is a Meta standard event, and with `fbq('trackCustom', ...)` otherwise.
+
+#### Scenario: Standard event
+- **WHEN** page code calls `analytics.track('Lead', { value: 10 })` after marketing consent
+- **THEN** the Pixel receives `fbq('track', 'Lead', { value: 10 })`
+
+#### Scenario: Custom event
+- **WHEN** page code calls `analytics.track('newsletter_signup')`
+- **THEN** the Pixel receives `fbq('trackCustom', 'newsletter_signup', ...)`
+
+#### Scenario: Event before the script loaded
+- **WHEN** `analytics.track()` runs before `fbevents.js` has loaded
+- **THEN** the event is delivered once the Pixel is ready, not lost
+
+### Requirement: No tracking without JavaScript
+The site SHALL NOT render the Pixel's `<noscript><img>` fallback, because it would send a page view without consent.
+
+#### Scenario: Rendered page
+- **WHEN** a page renders with an enabled `meta-pixel` entry
+- **THEN** the HTML contains no request to `facebook.com/tr`
+
+### Requirement: Withdrawing marketing consent clears Pixel cookies
+Withdrawing marketing consent SHALL clear the `_fbp` and `_fbc` cookies that a script can reach, and SHALL reload the page.
+
+#### Scenario: Withdraw
+- **WHEN** a visitor who accepted marketing withdraws it
+- **THEN** `_fbp` and `_fbc` are cleared and the page reloads without the Pixel
