@@ -151,6 +151,9 @@ func (s *Commerce) Add(c *echo.Context) error {
 	if err != nil {
 		return s.h.Reply(c).Fail(http.StatusInternalServerError, "could not render the product", err)
 	}
+	if err := setEventTrigger(c.Response().Header(), addToCartEvent(data, variantID, quantity)); err != nil {
+		s.Log.Warn("commerce: could not set the AddToCart trigger", "err", err)
+	}
 	return s.cartFragments(c, primary, updated)
 }
 
@@ -282,6 +285,9 @@ func (s *Commerce) buyData(ctx context.Context, regionID, handle, variantID stri
 		Title:     variant.Title,
 		Price:     priceLabel(*variant, def.currency),
 		Currency:  strings.ToUpper(def.currency),
+	}
+	if variant.CalculatedPrice != nil {
+		data.unitPrice = variant.CalculatedPrice.CalculatedAmount
 	}
 	if variant.InventoryQuantity != nil {
 		data.Stock = *variant.InventoryQuantity

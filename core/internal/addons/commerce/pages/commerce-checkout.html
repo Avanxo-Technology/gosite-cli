@@ -3,6 +3,7 @@
   embedded as .Body; htmx replaces it as the visitor advances.
 */}}
 {{define "content"}}
+{{with .Analytics}}<script type="application/json" data-analytics-event>{{.}}</script>{{end}}
 <header class="mb-8">
 	<h1 class="text-3xl font-bold tracking-tight">{{.Title}}</h1>
 </header>

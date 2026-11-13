@@ -318,14 +318,19 @@ func (s *Commerce) renderPDP(ctx context.Context, regionID, handle string) ([]by
 	product := list.Products[0]
 	def, _ := regionDefForCurrent()
 	view := buildProductView(product, def.currency)
+	analytics, err := eventBlock(pdpEvent(product, def.currency))
+	if err != nil {
+		return nil, err
+	}
 
 	data := map[string]any{
-		"Title":    product.Title,
-		"Path":     strings.TrimRight(cfgPDPPath, "/") + "/" + product.Handle,
-		"Product":  product,
-		"View":     view,
-		"Currency": strings.ToUpper(def.currency),
-		"IsDev":    s.Config.IsDev(),
+		"Title":     product.Title,
+		"Path":      strings.TrimRight(cfgPDPPath, "/") + "/" + product.Handle,
+		"Product":   product,
+		"View":      view,
+		"Currency":  strings.ToUpper(def.currency),
+		"IsDev":     s.Config.IsDev(),
+		"Analytics": analytics,
 	}
 
 	var buf bytes.Buffer

@@ -80,12 +80,25 @@ func (s *Commerce) Checkout(c *echo.Context) error {
 		return s.h.Reply(c).Fail(http.StatusBadGateway, "could not load the checkout", err)
 	}
 
+	// The cart's own currency: the region's could differ for a cart created
+	// before the region changed.
+	currency := cart.CurrencyCode
+	if currency == "" {
+		def, _ := regionDefForCurrent()
+		currency = def.currency
+	}
+	analytics, err := eventBlock(checkoutEvent(cart, currency))
+	if err != nil {
+		return s.h.Reply(c).Fail(http.StatusInternalServerError, "could not render the checkout", err)
+	}
+
 	data := map[string]any{
-		"Title": "Checkout",
-		"Path":  cfgCheckoutPath,
-		"Step":  step,
-		"Body":  templateHTML(stepHTML),
-		"IsDev": s.Config.IsDev(),
+		"Title":     "Checkout",
+		"Path":      cfgCheckoutPath,
+		"Step":      step,
+		"Body":      templateHTML(stepHTML),
+		"IsDev":     s.Config.IsDev(),
+		"Analytics": analytics,
 	}
 	var buf strings.Builder
 	if err := s.Renderer.Page(&buf, "commerce-checkout", data); err != nil {
