@@ -11,7 +11,8 @@
  *   replica:targets:remove  <target>
  *   replica:push            <target> [model] [--mode=] [--dry-run] [--verbose]
  *   replica:pull            <target> [model] [--mode=] [--dry-run] [--verbose]
- *   replica:log             [--target=] [--limit=]
+ *   replica:diff            <target> [model] [--verbose]
+ *   replica:log           [--target=] [--limit=]
  */
 
 if (!isset($cli, $app) || PHP_SAPI !== 'cli') {
@@ -25,4 +26,5 @@ $cli->add(new Replica\Command\TargetsSync($app));
 $cli->add(new Replica\Command\TargetsRemove($app));
 $cli->add(new Replica\Command\Push($app));
 $cli->add(new Replica\Command\Pull($app));
+$cli->add(new Replica\Command\Diff($app));
 $cli->add(new Replica\Command\Log($app));

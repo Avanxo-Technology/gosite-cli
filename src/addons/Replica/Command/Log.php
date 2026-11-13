@@ -39,6 +39,32 @@ class Log extends Base {
         }
 
         foreach ($log['items'] as $entry) {
+
+            // Protection changes carry no run counts, so they cannot share the run format below.
+            if (($entry['direction'] ?? '') === 'protect') {
+                $output->writeln(sprintf(
+                    '%s  protect %-18s %s by %s',
+                    date('Y-m-d H:i:s', $entry['_created']),
+                    $entry['model'] ?? '?',
+                    $entry['state'] ?? '?',
+                    $entry['by'] ?? 'unknown'
+                ));
+                continue;
+            }
+
+            // A diff is read-only and has no created/updated counters; it carries per-state counts instead.
+            if (($entry['direction'] ?? '') === 'diff') {
+                $c = $entry['counts'] ?? [];
+                $output->writeln(sprintf(
+                    '%s  diff  %-18s %-7s only-here %-4d newer-here %-4d newer-there %-4d only-there %-4d same %d',
+                    date('Y-m-d H:i:s', $entry['_created']),
+                    $entry['target_name'] ?? '?',
+                    $entry['transport'] ?? 'n/a',
+                    $c['only-here'] ?? 0, $c['newer-here'] ?? 0, $c['newer-there'] ?? 0, $c['only-there'] ?? 0, $c['same'] ?? 0
+                ));
+                continue;
+            }
+
             $output->writeln(sprintf(
                 '%s  %-5s %-18s %-7s%s created %-4d updated %-4d skipped %-4d errors %d',
                 date('Y-m-d H:i:s', $entry['_created']),

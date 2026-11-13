@@ -77,8 +77,33 @@ class Api extends \App\Controller\Base {
     }
 
     /**
+     * GET /replica/api/diff/{id}?model=  -> read-only comparison, per model
+     *
+     * A target that cannot be reached answers 502 with the reason in `error`.
+     */
+    public function diff($id = null) {
+
+        if (!$this->guard()) return false;
+
+        $replica = $this->helper('replica');
+        $target  = $replica->target((string)$id);
+
+        if (!$target) {
+            $this->app->response->status = 404;
+            return ['success' => false, 'error' => 'Target not found.'];
+        }
+
+        try {
+            return $replica->diff($target, $this->param('model', null) ?: null);
+        } catch (\Throwable $e) {
+            $this->app->response->status = 502;
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
      * POST /replica/api/run/{id}  (CSRF)
-     * body: direction=push|pull, mode=mirror|merge, dryRun, verbose, model
+     * body: direction=push|pull, mode=mirror|merge, dryRun, verbose, model, ids (push only)
      */
     public function run($id = null) {
 
@@ -105,6 +130,19 @@ class Api extends \App\Controller\Base {
             'verbose' => filter_var($this->param('verbose', false), FILTER_VALIDATE_BOOLEAN),
             'model'   => $this->param('model', null) ?: null,
         ];
+
+        $ids = $this->param('ids', null);
+
+        if ($ids !== null) {
+
+            if (!is_array($ids) || count(array_filter($ids, fn($entry) => !is_string($entry)))) {
+                $this->app->response->status = 412;
+                return ['success' => false, 'error' => 'ids must be a list of entry ids.'];
+            }
+
+            // Selections only narrow a push; a pull always takes the whole model.
+            if ($direction === 'push') $options['ids'] = $ids;
+        }
 
         // A run with assets can outlast the browser's patience. Finish it
         // anyway: stopping halfway leaves the destination half-copied.
@@ -157,7 +195,98 @@ class Api extends \App\Controller\Base {
         );
     }
 
+    /**
+     * GET /replica/api/protected -> every local content model with its protection state
+     *
+     * POST /replica/api/protected  (CSRF) body: models=string[], the full desired list.
+     * Models in the list become protected, every other local model is unprotected.
+     * Lime routes by method name, so the URL segment `protected` calls this method.
+     */
+    public function protected() {
+
+        if (!$this->guard()) return false;
+
+        if ($this->app->request->method === 'POST') {
+
+            if (!$this->csrf()) return false;
+
+            return $this->saveProtection();
+        }
+
+        return ['models' => $this->protectionState()];
+    }
+
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * Applies the desired protected list. Only real changes reach the activity log,
+     * because the protect helpers are idempotent.
+     */
+    protected function saveProtection(): array {
+
+        $requested = $this->param('models', []);
+
+        if (!is_array($requested) || count(array_filter($requested, fn($m) => !is_string($m)))) {
+            $this->app->response->status = 412;
+            return ['success' => false, 'error' => 'models must be a list of content model names.'];
+        }
+
+        $requested = array_values(array_unique($requested));
+        $replica   = $this->helper('replica');
+        $local     = array_column($replica->localModels(), 'name');
+        $unknown   = array_values(array_diff($requested, $local));
+
+        if (count($unknown)) {
+            $this->app->response->status = 412;
+            return ['success' => false, 'error' => 'Unknown content model: '.implode(', ', $unknown)];
+        }
+
+        $by      = $this->currentUserName();
+        $changed = [];
+
+        foreach ($local as $model) {
+
+            $did = in_array($model, $requested, true)
+                ? $replica->protect($model, $by)
+                : $replica->unprotect($model, $by);
+
+            if ($did) $changed[] = $model;
+        }
+
+        return ['success' => true, 'changed' => $changed, 'models' => $this->protectionState()];
+    }
+
+    /**
+     * Local content models with their protection state. `by` and `_created` only
+     * appear for protected models, taken from the REPLICA_PROTECTED document.
+     */
+    protected function protectionState(): array {
+
+        $docs   = $this->helper('replica')->protectionRecords();
+        $models = [];
+
+        foreach ($this->helper('replica')->localModels() as $model) {
+
+            $doc   = $docs[$model['name']] ?? null;
+            $entry = $model + ['protected' => (bool)$doc];
+
+            if ($doc) {
+                $entry['by']       = $doc['by'] ?? null;
+                $entry['_created'] = $doc['_created'] ?? null;
+            }
+
+            $models[] = $entry;
+        }
+
+        return $models;
+    }
+
+    protected function currentUserName(): ?string {
+
+        $auth = $this->helper('auth');
+
+        return $auth->getUser('name') ?: $auth->getUser('user') ?: null;
+    }
 
     protected function guard(): bool {
 

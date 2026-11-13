@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.67.0
+
+### Replica: protected content and comparison between instances
+
+- **Added: protected content per instance.** The Replica screen has a
+  **Protected content** card with one switch per content model. A protected
+  model refuses every replication write (entries and definitions), whoever
+  sends it; local editing and reading are not affected. Nothing is protected by
+  default. Each change is in the activity log.
+- **Added: a push skips protected models and continues.** The destination's
+  manifest lists them; they are counted as `protected`, not as errors. A pull
+  does not write into a model protected on the local instance.
+- **Added: `replica:diff` and the Compare view.** Read-only, per entry: only
+  here, changed here, changed there, only there, same. Sameness is a hash of
+  the content, so a re-save without changes is `same`.
+- **Added: push a selection.** `replica:push <target> <model> --ids=a,b`, or
+  tick entries in the Compare view.
+- **Changed: identical entries are skipped as `same`**, in the dry run and in
+  the real run, so a run reports what its dry run planned. Against a 1.0.0
+  destination the real run still rewrites them.
+- **Fixed: singletons pair by model.** Each instance creates its own singleton
+  (for example `analyticsConsent`), so the two sides had different ids: a push
+  left two documents on the destination and the site read either one. A push
+  or pull now replaces the destination's singleton, and the next push merges a
+  duplicate left by 1.0.0.
+- **Fixed: a push to a plain Cockpit no longer fails on an empty singleton.**
+  Its 404 stopped the whole run.
+- **Upgrade:** Replica goes to 1.1.0 and is baked into the CMS image, so rebuild
+  the CMS of each site that uses it. Upgrade the destination before the source:
+  a 1.0.0 source that pushes to a protected model fails that run with a
+  "protected" message and writes nothing for the model; a 1.0.0 destination has
+  no protection, and every push says so.
+
 ## 0.66.0
 
 ### Mailer: send an order's e-mails to the address the buyer chose

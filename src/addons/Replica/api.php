@@ -52,9 +52,10 @@ $this->on('restApi.config', function($restApi) {
             }
 
             return [
-                'replica' => Replica\Helper\Replica::VERSION,
-                'cockpit' => APP_VERSION ?? null,
-                'models'  => $models,
+                'replica'   => Replica\Helper\Replica::VERSION,
+                'cockpit'   => APP_VERSION ?? null,
+                'models'    => $models,
+                'protected' => $app->helper('replica')->protectedModels(),
             ];
         }
     ]);
@@ -90,7 +91,23 @@ $this->on('restApi.config', function($restApi) {
                 return ['error' => 'models must be an array'];
             }
 
-            return $app->helper('replica')->applyModels($models, $mode);
+            // Refused as a whole: a batch that is partly written would leave the peer half-updated.
+            $replica   = $app->helper('replica');
+            $requested = array_values(array_filter(array_map(
+                fn($model) => is_array($model) && isset($model['name']) ? (string)$model['name'] : null,
+                $models
+            )));
+            $protected = array_values(array_intersect($requested, $replica->protectedModels()));
+
+            if (count($protected)) {
+                $app->response->status = 423;
+                return [
+                    'error'     => 'Models '.implode(', ', $protected).' are protected on this instance',
+                    'protected' => $protected,
+                ];
+            }
+
+            return $replica->applyModels($models, $mode);
         }
     ]);
 
@@ -138,6 +155,11 @@ $this->on('restApi.config', function($restApi) {
             if (!$app->module('content')->model($model)) {
                 $app->response->status = 404;
                 return ['error' => "Model <{$model}> not found"];
+            }
+
+            if ($app->helper('replica')->isProtected($model)) {
+                $app->response->status = 423;
+                return ['error' => "Model <{$model}> is protected on this instance", 'protected' => [$model]];
             }
 
             $items = $app->param('items', []);

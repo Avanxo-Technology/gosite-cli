@@ -83,6 +83,21 @@
     <!-- Targets -->
     <div id="rp-targets"></div>
 
+    <!-- Protected content -->
+    <kiss-card id="rp-protected" class="kiss-padding kiss-margin" theme="contrast shadowed">
+        <h2 class="kiss-size-5 kiss-margin-remove">Protected content</h2>
+        <p class="kiss-size-small kiss-color-muted kiss-margin-xsmall-top kiss-margin-remove">
+            Protected content cannot be overwritten by replication from another instance. Editing it here still works.
+        </p>
+
+        <div id="rp-protected-list" class="rp-groups kiss-margin-small-top"></div>
+
+        <div class="kiss-margin-small kiss-flex kiss-flex-middle kiss-flex-wrap" gap="small">
+            <button id="rp-protected-save" class="kiss-button kiss-button-primary" type="button">Save protected content</button>
+            <span id="rp-protected-status" class="kiss-size-small kiss-color-muted" aria-live="polite"></span>
+        </div>
+    </kiss-card>
+
     <!-- Target editor -->
     <kiss-card id="rp-form" class="rp-hidden kiss-padding kiss-margin" theme="contrast shadowed">
         <h2 class="kiss-size-5 kiss-margin-small-bottom" id="rp-form-title">Add target</h2>
@@ -169,6 +184,37 @@
             <a id="rp-result-close" class="kiss-link-muted"><icon>close</icon></a>
         </div>
         <pre id="rp-result-body" class="kiss-size-small" style="white-space:pre-wrap;word-break:break-word;margin:0;"></pre>
+    </kiss-card>
+
+    <!-- Compare -->
+    <kiss-card id="rp-compare" class="rp-hidden kiss-padding kiss-margin" theme="contrast shadowed">
+        <div class="kiss-flex kiss-flex-middle kiss-flex-wrap kiss-margin-small-bottom" gap="small">
+            <h2 class="kiss-size-5 kiss-margin-remove kiss-flex-1" id="rp-compare-title">Compare</h2>
+            <select id="rp-compare-model" class="kiss-input kiss-size-small" style="width:auto;" aria-label="Content model"></select>
+            <a id="rp-compare-close" class="kiss-link-muted"><icon>close</icon></a>
+        </div>
+
+        <div id="rp-compare-tabs" class="kiss-flex kiss-flex-wrap kiss-margin-small-bottom" gap="xsmall" role="tablist"></div>
+        <div id="rp-compare-note" class="kiss-size-small kiss-color-muted kiss-margin-small-bottom"></div>
+
+        <div class="table-scroll">
+            <table class="kiss-table">
+                <thead>
+                    <tr>
+                        <th width="40"></th>
+                        <th>Title</th>
+                        <th width="160">Content model</th>
+                        <th width="200">Id</th>
+                    </tr>
+                </thead>
+                <tbody id="rp-compare-rows"></tbody>
+            </table>
+        </div>
+
+        <div class="kiss-margin-small kiss-flex kiss-flex-middle kiss-flex-wrap" gap="small">
+            <button id="rp-compare-push" class="kiss-button kiss-button-primary" type="button" disabled>Push selected</button>
+            <span id="rp-compare-selection" class="kiss-size-small kiss-color-muted" aria-live="polite"></span>
+        </div>
     </kiss-card>
 
     <!-- Activity log -->
@@ -268,6 +314,15 @@
     }
 
     .rp-helper { gap: 6px; }
+
+    /* Protected content switches ----------------------------------------- */
+
+    .rp-protect-row {
+        padding: 9px 0; cursor: pointer; user-select: none;
+        border-top: 1px solid var(--kiss-card-bordered-color, var(--kiss-hr-color, rgba(127,127,127,.3)));
+    }
+    .rp-protect-row:first-child { border-top: 0; }
+    .rp-protect-row input { margin: 0; flex: none; }
 </style>
 
 <script>
@@ -360,6 +415,7 @@
                         + '<button class="kiss-button kiss-button-small" data-run="pull" data-id="' + esc(t._id) + '"'
                             + (t.enabled ? '' : ' disabled') + ' title="Bring the target\'s content here.">Pull now</button>'
                         + '<button class="kiss-button kiss-button-small" data-ping="' + esc(t._id) + '" title="Check the target is reachable and which transport applies.">Test</button>'
+                        + '<button class="kiss-button kiss-button-small" data-compare="' + esc(t._id) + '" title="See which entries differ, then push a selection.">Compare</button>'
                         + '<button class="kiss-button kiss-button-small" data-edit="' + esc(t._id) + '">Edit</button>'
                         + '<button class="kiss-button kiss-button-small kiss-color-danger" data-del="' + esc(t._id) + '">Delete</button>'
                     + '</div>'
@@ -469,6 +525,70 @@
 
     function closeForm() { $('rp-form').classList.add('rp-hidden'); }
 
+    // ------------------------------------------------- protected content
+
+    var protection = [];
+
+    function showProtectionStatus(message, type) {
+        var el = $('rp-protected-status');
+        el.textContent = message;
+        el.className = 'kiss-size-small ' + (type === 'error' ? 'kiss-color-danger' : 'kiss-color-muted');
+    }
+
+    function renderProtection() {
+
+        var el = $('rp-protected-list');
+
+        if (!protection.length) {
+            el.innerHTML = '<div class="rp-empty kiss-size-small kiss-color-muted">'
+                + 'No local content models on this instance.</div>';
+            return;
+        }
+
+        var groups = {};
+        protection.forEach(function(m) {
+            (groups[m.type] = groups[m.type] || []).push(m);
+        });
+
+        var html = '';
+
+        ['collection', 'singleton'].forEach(function(type) {
+            var rows = groups[type];
+            if (!rows || !rows.length) return;
+            html += '<div class="rp-group">'
+                + '<div class="rp-group-head">'
+                    + '<span class="kiss-text-caption kiss-text-bold">'
+                        + (type === 'singleton' ? 'Singletons' : 'Collections') + '</span>'
+                    + '<span class="rp-group-count">' + rows.length + '</span>'
+                + '</div>'
+                + rows.map(function(m) {
+                    return '<label class="rp-protect-row kiss-flex kiss-flex-middle kiss-size-small rp-switch" gap="small">'
+                        + '<input type="checkbox" class="kiss-checkbox" value="' + esc(m.name) + '"'
+                        + (m.protected ? ' checked' : '') + '>'
+                        + '<span class="kiss-flex-1">'
+                            + '<strong>' + esc(m.name) + '</strong>'
+                            + (m.protected
+                                ? '<span class="kiss-size-xsmall kiss-color-muted" style="display:block;">'
+                                    + 'Protected by ' + esc(m.by || 'an unknown user') + ' '
+                                    + '<app-datetime type="relative" datetime="' + m._created + '"></app-datetime></span>'
+                                : '')
+                        + '</span>'
+                    + '</label>';
+                }).join('')
+            + '</div>';
+        });
+
+        el.innerHTML = html;
+    }
+
+    function loadProtection() {
+        return api('/protected').then(function(res) {
+            if (!res.models) return showProtectionStatus(res.error || 'Could not load protected content.', 'error');
+            protection = res.models;
+            renderProtection();
+        });
+    }
+
     function reload() {
         return api('/targets').then(function(data) {
             targets = data.targets || [];
@@ -477,9 +597,324 @@
         });
     }
 
+    // ----------------------------------------------------------- compare
+
+    var COMPARE_STATES = ['only-here', 'newer-here', 'newer-there', 'only-there', 'same'],
+        COMPARE_LABELS = {
+            'only-here':   'Only here',
+            'newer-here':  'Changed here',
+            'newer-there': 'Changed there',
+            'only-there':  'Only there',
+            'same':        'Same'
+        },
+        COMPARE_HINTS = {
+            'only-here':   'Entries that exist here only. A push creates them on the other instance.',
+            'newer-here':  'Entries changed here. A push updates them on the other instance.',
+            'newer-there': 'Entries changed on the other instance. A push does not change them.',
+            'only-there':  'Entries that exist on the other instance only. A push does not remove them.',
+            'same':        'Identical on both instances.'
+        },
+        PICKABLE = { 'only-here': true, 'newer-here': true };
+
+    var compareTargetId = null,
+        compareModel    = '',
+        compareState    = 'only-here',
+        compareData     = null,
+        compareSelection = {},
+        compareRequest  = 0,
+        pushing         = false;
+
+    function targetById(id) {
+        return targets.filter(function(t) { return t._id === id; })[0] || null;
+    }
+
+    function selectionKey(model, id) {
+        return JSON.stringify([model, id]);
+    }
+
+    function openCompare(id) {
+
+        var target = targetById(id);
+
+        compareTargetId  = id;
+        compareModel     = '';
+        compareState     = 'only-here';
+        compareSelection = {};
+        compareData      = null;
+
+        $('rp-compare-title').textContent = 'Compare with ' + (target ? target.name : 'target');
+        $('rp-compare-model').innerHTML = '<option value="">All models</option>'
+            + collections.map(function(c) {
+                return '<option value="' + esc(c.name) + '">' + esc(c.name) + '</option>';
+            }).join('');
+        $('rp-compare-model').value = '';
+
+        $('rp-compare').classList.remove('rp-hidden');
+        $('rp-compare-rows').innerHTML = '<tr><td colspan="4" class="kiss-padding kiss-color-muted">Comparing…</td></tr>';
+        $('rp-compare-tabs').innerHTML = '';
+        $('rp-compare-note').textContent = '';
+
+        updatePushButton();
+        loadCompare(id, '', true);
+        $('rp-compare').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function closeCompare() {
+        compareTargetId  = null;
+        compareSelection = {};
+        $('rp-compare').classList.add('rp-hidden');
+    }
+
+    function loadCompare(id, model, fresh) {
+
+        var request = ++compareRequest,
+            url     = '/diff/' + id + (model ? '?model=' + encodeURIComponent(model) : '');
+
+        api(url).then(function(res) {
+
+            if (request !== compareRequest || id !== compareTargetId) return;
+
+            if (!res.models) return showCompareFailure();
+
+            compareData = res;
+
+            if (fresh) compareState = firstStateWithEntries(res);
+
+            renderCompare();
+            updatePushButton();
+        }).catch(function() {
+            if (request === compareRequest) showCompareFailure();
+        });
+    }
+
+    function countsAcross(data) {
+        var counts = {};
+        COMPARE_STATES.forEach(function(s) { counts[s] = 0; });
+        Object.keys(data.models || {}).forEach(function(name) {
+            var m = data.models[name];
+            COMPARE_STATES.forEach(function(s) { counts[s] += (m.counts && m.counts[s]) || 0; });
+        });
+        return counts;
+    }
+
+    function firstStateWithEntries(data) {
+        var counts = countsAcross(data);
+        for (var i = 0; i < COMPARE_STATES.length; i++) {
+            if (counts[COMPARE_STATES[i]] > 0) return COMPARE_STATES[i];
+        }
+        return 'only-here';
+    }
+
+    function showCompareFailure() {
+
+        var target = targetById(compareTargetId);
+
+        compareData = null;
+        $('rp-compare-tabs').innerHTML = '';
+        $('rp-compare-note').textContent = 'Could not compare with ' + (target ? target.name : 'the target')
+            + '. Check that it is running and reachable, then try again.';
+        $('rp-compare-rows').innerHTML = '';
+        updatePushButton();
+    }
+
+    function renderCompare() {
+
+        var counts = countsAcross(compareData),
+            models = compareData.models || {},
+            names  = Object.keys(models),
+            rows   = [],
+            protectedNames = [],
+            failedNames    = [],
+            notes  = [];
+
+        names.forEach(function(name) {
+
+            var m = models[name];
+
+            if (m.protected) protectedNames.push(name);
+            if (m.error) failedNames.push(name);
+
+            (m.entries || []).forEach(function(entry) {
+                if (entry.state === compareState) rows.push({ model: name, protected: !!m.protected, entry: entry });
+            });
+        });
+
+        $('rp-compare-tabs').innerHTML = COMPARE_STATES.map(function(state) {
+            var active = state === compareState;
+            return '<button type="button" class="kiss-button kiss-button-small' + (active ? ' kiss-button-primary' : '')
+                + '" role="tab" aria-selected="' + active + '" data-tab="' + state + '">'
+                + COMPARE_LABELS[state] + ' <span class="rp-group-count">' + counts[state] + '</span></button>';
+        }).join('');
+
+        notes.push('<div>' + COMPARE_HINTS[compareState] + '</div>');
+
+        if (compareData.transport === 'core') {
+            notes.push('<div>This instance is a plain Cockpit. Entries that are not published there cannot be seen, so they are not listed as Only there.</div>');
+        }
+
+        if (protectedNames.length) {
+            notes.push('<div><span class="kiss-badge kiss-badge-outline">Protected on the destination</span> '
+                + protectedNames.map(esc).join(', ') + ': a push cannot change these entries.</div>');
+        }
+
+        if (failedNames.length) {
+            notes.push('<div class="kiss-color-danger">Could not read ' + failedNames.map(esc).join(', ')
+                + ' on the other instance.</div>');
+        }
+
+        $('rp-compare-note').innerHTML = notes.join('');
+
+        $('rp-compare-rows').innerHTML = rows.length ? rows.map(function(row) {
+
+            var entry    = row.entry,
+                pickable = !row.protected && PICKABLE[entry.state] === true && entry.id !== null,
+                checked  = pickable && compareSelection[selectionKey(row.model, entry.id)];
+
+            return '<tr>'
+                + '<td>' + (pickable
+                    ? '<input type="checkbox" class="kiss-checkbox" data-model="' + esc(row.model) + '"'
+                        + ' data-id="' + esc(entry.id) + '"' + (checked ? ' checked' : '')
+                        + ' aria-label="Select ' + esc(entry.title || entry.id) + '">'
+                    : '') + '</td>'
+                + '<td>' + esc(entry.title || '—') + '</td>'
+                + '<td class="kiss-size-small">' + esc(row.model) + '</td>'
+                + '<td class="kiss-size-small kiss-text-monospace kiss-color-muted">' + esc(entry.id || entry.remoteId || '') + '</td>'
+                + '</tr>';
+        }).join('') : '<tr><td colspan="4" class="kiss-padding kiss-color-muted">Nothing in this group.</td></tr>';
+    }
+
+    function updatePushButton() {
+
+        var selected = Object.keys(compareSelection).map(function(k) { return compareSelection[k]; }),
+            models   = {},
+            target   = targetById(compareTargetId),
+            note;
+
+        selected.forEach(function(s) { models[s.model] = true; });
+
+        var modelCount = Object.keys(models).length;
+
+        if (!selected.length) {
+            note = 'Select entries to push.';
+        } else if (modelCount > 1) {
+            note = 'Select entries of one content model at a time.';
+        } else {
+            note = selected.length + (selected.length === 1 ? ' entry' : ' entries') + ' selected.';
+        }
+
+        if (target && !target.enabled) note = 'This target is inactive. Activate it to push.';
+
+        $('rp-compare-selection').textContent = note;
+        $('rp-compare-push').disabled = !selected.length || modelCount > 1 || pushing || !(target && target.enabled);
+    }
+
+    /* Shared by the target cards and the Compare panel. */
+    function showRunResult(direction, res) {
+
+        if (!res.result) {
+            return notify(res.error || direction + ' could not start', 'error');
+        }
+
+        var r = res.result;
+
+        $('rp-result-body').textContent =
+            direction.toUpperCase() + (r.dryRun ? ' (dry run)' : '') +
+            '  mode=' + r.mode + '  transport=' + (r.transport || 'n/a') + '\n' +
+            'created ' + r.created + '  updated ' + r.updated +
+            '  skipped ' + r.skipped + '  errors ' + r.errors +
+            '  protected ' + (r.protected || 0) + '\n' +
+            ((r.protectedModels || []).length
+                ? 'protected models: ' + r.protectedModels.join(', ') + '\n'
+                : '') +
+            '\n' +
+            (r.messages || []).join('\n');
+
+        $('rp-result').classList.remove('rp-hidden');
+
+        notify(res.success ? direction + ' finished' : direction + ' finished with errors',
+               res.success ? 'success' : 'error');
+
+        reload();
+        loadLog();
+    }
+
     // -------------------------------------------------------------- events
 
     $('rp-new').addEventListener('click', function() { openForm(null); });
+
+    $('rp-compare-close').addEventListener('click', closeCompare);
+
+    $('rp-compare-model').addEventListener('change', function() {
+        compareModel = this.value;
+        loadCompare(compareTargetId, compareModel, false);
+    });
+
+    $('rp-compare-tabs').addEventListener('click', function(e) {
+        var tab = e.target.closest && e.target.closest('[data-tab]');
+        if (!tab || !compareData) return;
+        compareState = tab.getAttribute('data-tab');
+        renderCompare();
+    });
+
+    $('rp-compare-rows').addEventListener('change', function(e) {
+
+        var box = e.target;
+
+        if (!box || box.type !== 'checkbox' || !box.hasAttribute('data-id')) return;
+
+        var key = selectionKey(box.getAttribute('data-model'), box.getAttribute('data-id'));
+
+        if (box.checked) {
+            compareSelection[key] = { model: box.getAttribute('data-model'), id: box.getAttribute('data-id') };
+        } else {
+            delete compareSelection[key];
+        }
+
+        updatePushButton();
+    });
+
+    $('rp-compare-push').addEventListener('click', function() {
+
+        var selected = Object.keys(compareSelection).map(function(k) { return compareSelection[k]; });
+
+        if (!selected.length || !compareTargetId) return;
+
+        var card  = document.querySelector('[data-mode="' + compareTargetId + '"]'),
+            dry   = document.querySelector('[data-dry="' + compareTargetId + '"]'),
+            runId = compareTargetId;
+
+        pushing = true;
+        updatePushButton();
+        $('rp-compare-selection').textContent = 'Pushing…';
+
+        api('/run/' + runId, {
+            method: 'POST',
+            body: JSON.stringify({
+                direction: 'push',
+                mode:      (card && card.value) || 'merge',
+                dryRun:    !!(dry && dry.checked),
+                verbose:   true,
+                model:     selected[0].model,
+                ids:       selected.map(function(s) { return s.id; })
+            })
+        }).then(function(res) {
+
+            pushing = false;
+            showRunResult('push', res);
+
+            if (res.result) compareSelection = {};
+
+            if (compareTargetId === runId) loadCompare(runId, compareModel, false);
+            updatePushButton();
+
+        }, function() {
+
+            pushing = false;
+            notify('The push could not finish. Try again.', 'error');
+            updatePushButton();
+        });
+    });
+
     $('rp-cancel').addEventListener('click', closeForm);
     $('rp-result-close').addEventListener('click', function() { $('rp-result').classList.add('rp-hidden'); });
 
@@ -539,13 +974,13 @@
 
     $('rp-targets').addEventListener('click', function(e) {
 
-        var el = e.target.closest && e.target.closest('[data-run],[data-ping],[data-edit],[data-del],[data-toggle]');
+        var el = e.target.closest && e.target.closest('[data-run],[data-ping],[data-compare],[data-edit],[data-del],[data-toggle]');
 
         if (!el) return;
 
         var id = el.getAttribute('data-id') || el.getAttribute('data-ping')
-              || el.getAttribute('data-edit') || el.getAttribute('data-del')
-              || el.getAttribute('data-toggle');
+              || el.getAttribute('data-compare') || el.getAttribute('data-edit')
+              || el.getAttribute('data-del') || el.getAttribute('data-toggle');
 
         if (el.hasAttribute('data-toggle')) {
 
@@ -566,6 +1001,10 @@
 
         if (el.hasAttribute('data-edit')) {
             return openForm(targets.filter(function(t) { return t._id === id; })[0]);
+        }
+
+        if (el.hasAttribute('data-compare')) {
+            return openCompare(id);
         }
 
         if (el.hasAttribute('data-del')) {
@@ -597,25 +1036,42 @@
             method: 'POST',
             body: JSON.stringify({ direction: direction, mode: mode, dryRun: dryRun, verbose: true })
         }).then(function(res) {
-
             el.disabled = false;
+            showRunResult(direction, res);
+        });
+    });
 
-            var r = res.result || {};
+    $('rp-protected-save').addEventListener('click', function() {
 
-            $('rp-result-body').textContent =
-                direction.toUpperCase() + (r.dryRun ? ' (dry run)' : '') +
-                '  mode=' + r.mode + '  transport=' + (r.transport || 'n/a') + '\n' +
-                'created ' + r.created + '  updated ' + r.updated +
-                '  skipped ' + r.skipped + '  errors ' + r.errors + '\n\n' +
-                (r.messages || []).join('\n');
+        var button   = this,
+            selected = Array.prototype.slice
+                .call($('rp-protected-list').querySelectorAll('input[type=checkbox]:checked'))
+                .map(function(el) { return el.value; });
 
-            $('rp-result').classList.remove('rp-hidden');
+        button.disabled = true;
+        showProtectionStatus('Saving…');
 
-            notify(res.success ? direction + ' finished' : direction + ' finished with errors',
-                   res.success ? 'success' : 'error');
+        api('/protected', { method: 'POST', body: JSON.stringify({ models: selected }) }).then(function(res) {
 
-            reload();
+            button.disabled = false;
+
+            if (!res.success) {
+                return showProtectionStatus(res.error || 'Could not save protected content.', 'error');
+            }
+
+            protection = res.models || [];
+            renderProtection();
+
+            var message = res.changed.length
+                ? 'Saved. ' + res.changed.length + (res.changed.length === 1 ? ' model changed.' : ' models changed.')
+                : 'Saved. Nothing changed.';
+
+            showProtectionStatus(message);
+            notify('Protected content saved');
             loadLog();
+        }).catch(function() {
+            button.disabled = false;
+            showProtectionStatus('Could not save protected content. Try again.', 'error');
         });
     });
 
@@ -630,6 +1086,38 @@
             }
 
             $('rp-log').innerHTML = data.items.map(function(e) {
+
+                /* Protection changes have no target, counts or mode: one sentence instead. */
+                if (e.direction === 'protect') {
+                    return '<tr>'
+                        + '<td class="kiss-size-small kiss-text-monospace kiss-color-muted"><app-datetime type="relative" datetime="' + e._created + '"></app-datetime></td>'
+                        + '<td><span class="kiss-badge kiss-badge-outline">protection</span></td>'
+                        + '<td colspan="7" class="kiss-size-small">'
+                            + esc(e.model) + ' ' + (e.state === 'protected' ? 'protected' : 'unprotected')
+                            + ' by ' + esc(e.by || 'an unknown user')
+                        + '</td>'
+                        + '</tr>';
+                }
+
+                /* A comparison writes nothing, so it has no run counts: show what it found. */
+                if (e.direction === 'diff') {
+                    var c = e.counts || {};
+                    return '<tr>'
+                        + '<td class="kiss-size-small kiss-text-monospace kiss-color-muted"><app-datetime type="relative" datetime="' + e._created + '"></app-datetime></td>'
+                        + '<td><span class="kiss-badge kiss-badge-outline">compare</span></td>'
+                        + '<td class="kiss-size-small">' + esc(e.target_name || '—') + '</td>'
+                        + '<td></td>'
+                        + '<td class="kiss-size-small kiss-color-muted">' + esc(e.transport || '—') + '</td>'
+                        + '<td colspan="4" class="kiss-size-small">'
+                            + (c['only-here'] || 0) + ' only here, '
+                            + (c['newer-here'] || 0) + ' changed here, '
+                            + (c['newer-there'] || 0) + ' changed there, '
+                            + (c['only-there'] || 0) + ' only there, '
+                            + (c['same'] || 0) + ' same'
+                        + '</td>'
+                        + '</tr>';
+                }
+
                 return '<tr>'
                     + '<td class="kiss-size-small kiss-text-monospace kiss-color-muted"><app-datetime type="relative" datetime="' + e._created + '"></app-datetime></td>'
                     + '<td><span class="kiss-badge kiss-badge-outline">' + esc(e.direction) + '</span></td>'
@@ -647,5 +1135,6 @@
 
     renderTargets();
     loadLog();
+    loadProtection();
 })();
 </script>

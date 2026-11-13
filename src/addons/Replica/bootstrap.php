@@ -11,6 +11,8 @@
  *   replica/log       one document per operation
  *   replica/idmap     source id <-> remote id pairs, for targets that cannot
  *                     keep our _id (see Helper\Client, core transport)
+ *   replica/protected models this instance refuses to receive replication
+ *                     writes for; one document per model (see Helper\Replica)
  *
  * Admin screen:  GET /replica
  * Admin API:     /replica/api/*        (session auth + replica/manage + CSRF)
@@ -24,6 +26,7 @@
 if (!defined('REPLICA_TARGETS')) define('REPLICA_TARGETS', 'replica/targets');
 if (!defined('REPLICA_LOG'))     define('REPLICA_LOG', 'replica/log');
 if (!defined('REPLICA_IDMAP'))   define('REPLICA_IDMAP', 'replica/idmap');
+if (!defined('REPLICA_PROTECTED')) define('REPLICA_PROTECTED', 'replica/protected');
 
 // Helpers: assign to the array - $app->helper('x', 'Class') does not register.
 $this->helpers['replica']        = 'Replica\\Helper\\Replica';

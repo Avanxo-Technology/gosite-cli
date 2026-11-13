@@ -14,10 +14,13 @@ use Replica\Model\Target;
  */
 class Replica extends \Lime\Helper {
 
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
 
     const MODE_MIRROR = 'mirror';
     const MODE_MERGE  = 'merge';
+
+    // Every entry sits in exactly one of these states in diff().
+    const DIFF_STATES = ['only-here', 'newer-here', 'newer-there', 'only-there', 'same'];
 
     // ------------------------------------------------------------- targets
 
@@ -261,6 +264,93 @@ class Replica extends \Lime\Helper {
         $this->app->dataStorage->remove(REPLICA_IDMAP, ['target' => $targetId]);
     }
 
+    // --------------------------------------------------------- protection
+
+    /*
+     * The protected list lives in this instance's own dataStorage, outside
+     * content/*, so no replication path can rewrite it. Each instance keeps
+     * its own list: a production destination protects what production
+     * editors own, whatever a local copy protects.
+     */
+
+    /**
+     * @return string[] sorted model names
+     */
+    public function protectedModels(): array {
+
+        $names = array_keys($this->protectionRecords());
+        sort($names);
+
+        return $names;
+    }
+
+    /**
+     * The stored protection documents, keyed by model name, for screens that
+     * show who protected a model and when.
+     *
+     * @return array<string, array>
+     */
+    public function protectionRecords(): array {
+
+        $records = [];
+
+        foreach ($this->app->dataStorage->find(REPLICA_PROTECTED)->toArray() as $doc) {
+            if (!empty($doc['model'])) $records[(string)$doc['model']] = $doc;
+        }
+
+        return $records;
+    }
+
+    public function isProtected(string $model): bool {
+        return $this->app->dataStorage->count(REPLICA_PROTECTED, ['model' => $model]) > 0;
+    }
+
+    /**
+     * Idempotent, and only a real change is logged: the admin screen saves the
+     * whole list at once, so logging every call would bury the changes that
+     * matter under repeats of the current state.
+     *
+     * @return bool whether the list changed
+     */
+    public function protect(string $model, ?string $by): bool {
+
+        if ($this->isProtected($model)) return false;
+
+        // insert() takes the document by reference, so it needs a variable.
+        $doc = ['model' => $model, 'by' => $by, '_created' => time()];
+        $this->app->dataStorage->insert(REPLICA_PROTECTED, $doc);
+        $this->logProtection($model, 'protected', $by);
+
+        return true;
+    }
+
+    public function unprotect(string $model, ?string $by): bool {
+
+        if (!$this->isProtected($model)) return false;
+
+        $this->app->dataStorage->remove(REPLICA_PROTECTED, ['model' => $model]);
+        $this->logProtection($model, 'unprotected', $by);
+
+        return true;
+    }
+
+    /**
+     * Protection entries have no counts or mode, unlike push and pull entries;
+     * readers of REPLICA_LOG must check `direction` before reading those keys.
+     */
+    protected function logProtection(string $model, string $state, ?string $by): void {
+
+        $doc = [
+            'direction' => 'protect',
+            'model'     => $model,
+            'state'     => $state,
+            'by'        => $by,
+            '_created'  => time(),
+            'messages'  => [],
+        ];
+        $this->app->dataStorage->insert(REPLICA_LOG, $doc);
+    }
+
     // -------------------------------------------------------------- local
 
     /**
@@ -354,11 +444,13 @@ class Replica extends \Lime\Helper {
             ? 'content/singletons'
             : "content/collections/{$model}";
 
+        // A singleton is one document per model, whatever its _id: each
+        // instance creates its own, so the incoming one replaces it rather
+        // than sitting next to it.
         if ($collection === 'content/singletons') {
             $item['_model'] = $model;
-        }
-
-        if ($exists && isset($item['_id'])) {
+            $this->app->dataStorage->remove($collection, ['_model' => $model]);
+        } elseif ($exists && isset($item['_id'])) {
             $this->app->dataStorage->remove($collection, ['_id' => $item['_id']]);
         }
 
@@ -739,6 +831,23 @@ class Replica extends \Lime\Helper {
         $client  = $this->client($target);
         $result  = $this->newResult('push', $target, $mode, $dryRun);
 
+        // A selection names entries of one model. Without a model it would read as a
+        // whole-model push, so refuse before anything is read or written.
+        $selection = isset($options['ids']) ? array_values(array_unique($options['ids'])) : null;
+
+        if ($selection !== null) {
+
+            $problem = empty($options['model'])
+                ? 'error: --ids needs a model'
+                : (count($selection) ? null : 'error: no ids selected');
+
+            if ($problem !== null) {
+                $result['errors']++;
+                $result['messages'][] = $problem;
+                return $result;
+            }
+        }
+
         try {
 
             // transport() throws when the target is unreachable, so this is
@@ -748,6 +857,20 @@ class Replica extends \Lime\Helper {
 
             if (!$peer) {
                 $result['messages'][] = 'Remote does not run Replica: entries only, and the remote will stamp its own _created/_modified.';
+            }
+
+            // Read before any write: a null list means the destination predates protection.
+            $remoteProtected = [];
+
+            if ($peer) {
+                $remoteProtected = $client->remoteProtectedModels();
+
+                if ($remoteProtected === null) {
+                    $remoteProtected = [];
+                    $result['messages'][] = 'Destination Replica '.$client->remoteReplicaVersion().' does not support model protection';
+                }
+            } else {
+                $result['messages'][] = "Model protection is not available on a destination without Replica; only the API key's role permissions restrict writes.";
             }
 
             $models = $target->scope($options['model'] ?? null, $this->localCollections());
@@ -770,6 +893,17 @@ class Replica extends \Lime\Helper {
                 }
             }
 
+            // Protected models leave the run before any definition or entry is read or sent.
+            // Scope gaps were reported above, so a protected model is not listed as missing.
+            $models = array_values(array_filter($models, function($name) use ($remoteProtected, &$result) {
+
+                if (!in_array($name, $remoteProtected, true)) return true;
+
+                $this->markProtected($result, $name, 'protected on the destination');
+
+                return false;
+            }));
+
             // Schema first, so entries land in a model that exists remotely.
             if ($target->syncModels && count($models)) {
 
@@ -788,9 +922,46 @@ class Replica extends \Lime\Helper {
                     if ($dryRun) {
                         $result['messages'][] = 'would push '.count($definitions).' model definition(s)';
                     } elseif (count($definitions)) {
-                        $modelResult = $client->pushModels($definitions, $mode);
-                        $result['models'] = $modelResult;
-                        $result['messages'][] = 'models: '.json_encode($modelResult);
+
+                        $written = null;
+
+                        /*
+                         * The destination may protect a model after the manifest was read, and then
+                         * refuses the whole batch. Drop the refused models and send the rest, so one
+                         * protected model does not leave every other definition unwritten.
+                         */
+                        while (count($definitions)) {
+
+                            $attempt = $client->pushModels($definitions, $mode);
+                            $refused = $attempt['protectedRefused'] ?? [];
+
+                            if (!count($refused)) {
+                                $written = $attempt;
+                                break;
+                            }
+
+                            $before      = count($definitions);
+                            $definitions = array_values(array_filter(
+                                $definitions,
+                                fn($definition) => !in_array($definition['name'] ?? null, $refused, true)
+                            ));
+
+                            // A refusal naming a model that was not sent would loop forever.
+                            if (count($definitions) === $before) {
+                                throw new \Exception('Destination refused models that were not part of the request: '.implode(', ', $refused));
+                            }
+
+                            foreach (array_intersect($models, $refused) as $name) {
+                                $this->markProtected($result, $name, 'protected on the destination');
+                            }
+
+                            $models = array_values(array_diff($models, $refused));
+                        }
+
+                        if ($written !== null) {
+                            $result['models'] = $written;
+                            $result['messages'][] = 'models: '.json_encode($written);
+                        }
                     }
                 }
             }
@@ -799,6 +970,10 @@ class Replica extends \Lime\Helper {
 
                 $items = $this->localItems($name);
                 $type  = $this->localType($name);
+
+                if ($selection !== null) {
+                    $items = $this->selectItems($items, $selection, $result);
+                }
 
                 // Only a core target needs the id map; a peer keeps our ids.
                 $idMap = (!$peer && $target->id) ? $this->idMap($target->id, $name)['forward'] : [];
@@ -814,7 +989,15 @@ class Replica extends \Lime\Helper {
                     continue;
                 }
 
-                $outcome = $client->pushItems($name, $items, $mode, $idMap, $type);
+                $definition = $this->localModel($name);
+                $same       = fn(array $mine, array $theirs) => $this->contentHash($mine, $definition, false) === $this->contentHash($theirs, $definition, false);
+                $outcome    = $client->pushItems($name, $items, $mode, $idMap, $type, $peer ? null : $same);
+
+                // Protection added after the manifest was read: skip this model, keep pushing the rest.
+                if (!empty($outcome['protectedRefused'])) {
+                    $this->markProtected($result, $name, 'protected on the destination');
+                    continue;
+                }
 
                 if (!$peer && $target->id) {
 
@@ -832,7 +1015,9 @@ class Replica extends \Lime\Helper {
 
             // Assets last: their metadata can reference collections and their
             // files are the largest payload, so they should not block entries.
-            if ($target->syncAssets) {
+            if ($target->syncAssets && $selection !== null) {
+                $result['messages'][] = 'assets not sent with a selection';
+            } elseif ($target->syncAssets) {
 
                 if (!$peer) {
                     $result['messages'][] = 'Assets skipped: requires Replica on the remote.';
@@ -868,6 +1053,32 @@ class Replica extends \Lime\Helper {
         }
 
         return $this->finish($result, $target, $dryRun);
+    }
+
+    /**
+     * Keeps the entries a selection names, in selection order. An id that is not held
+     * locally is reported and does not count as an error, so the others still go.
+     */
+    protected function selectItems(array $items, array $ids, array &$result): array {
+
+        $byId = [];
+
+        foreach ($items as $item) {
+            $byId[(string)($item['_id'] ?? '')] = $item;
+        }
+
+        $picked = [];
+
+        foreach ($ids as $id) {
+
+            if (isset($byId[$id])) {
+                $picked[] = $byId[$id];
+            } else {
+                $result['messages'][] = "unknown id {$id}";
+            }
+        }
+
+        return $picked;
     }
 
     /**
@@ -911,6 +1122,17 @@ class Replica extends \Lime\Helper {
                         .' (run replica:targets:sync "'.$target->name.'" to include them)';
                 }
             }
+
+            // A model protected here takes no writes at all, definitions included. Reads from the
+            // remote are not restricted, so the remote's protection is not consulted.
+            $models = array_values(array_filter($models, function($name) use (&$result) {
+
+                if (!$this->isProtected($name)) return true;
+
+                $this->markProtected($result, $name, 'protected here');
+
+                return false;
+            }));
 
             if ($target->syncModels && count($models)) {
 
@@ -1008,8 +1230,10 @@ class Replica extends \Lime\Helper {
      */
     public function applyItems(string $model, array $items, string $mode, bool $dryRun = false): array {
 
-        $result  = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
-        $current = $this->localItemsById($model);
+        $result     = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
+        $current    = $this->localItemsById($model);
+        $singleton  = $this->localType($model) === 'singleton';
+        $definition = $this->localModel($model);
 
         foreach ($items as $item) {
 
@@ -1021,7 +1245,15 @@ class Replica extends \Lime\Helper {
                 continue;
             }
 
-            $existing = $current[$id] ?? null;
+            $existing = $current[$id] ?? ($singleton ? (array_values($current)[0] ?? null) : null);
+
+            // Identical content is not rewritten, in either mode, so a run
+            // reports what its dry run planned. Both sides are peers here.
+            if ($existing && $this->contentHash($item, $definition, true) === $this->contentHash($existing, $definition, true)) {
+                $result['skipped']++;
+                $result['messages'][] = "same {$id}";
+                continue;
+            }
 
             if ($existing && $mode === self::MODE_MERGE) {
 
@@ -1143,12 +1375,74 @@ class Replica extends \Lime\Helper {
     }
 
     /**
+     * Content fingerprint of one entry, used to decide whether two entries are the same.
+     *
+     * Dropped, with the reason each rule exists:
+     *   _id                        identity, matched separately (same _id or the id map)
+     *   _created, _modified        differ per instance and say nothing about content;
+     *                              they decide direction (diff) when the content differs
+     *   _mby, _cby                 authorship, set by each instance
+     *   any other _ key            system bookkeeping (e.g. _model on singletons)
+     * Kept: _state (published or not) and the declared fields of the model. Fields a
+     * remote adds on its own are dropped when the model is known.
+     *
+     * Tree position (_pid, _o) is kept when $withTree is true: moving or reordering
+     * a page is a real change. Only a peer transfers it with our ids; a core remote
+     * strips both keys, so comparing them there would report every tree entry as
+     * different forever.
+     *
+     * Keys are sorted at every level, so key order never matters. Lists keep their order.
+     *
+     * @param array      $item  entry as read locally or remotely
+     * @param array|null $model local model definition, or null to keep every non-system key
+     */
+    public function contentHash(array $item, ?array $model, bool $withTree = false): string {
+
+        $declared = array_values(array_filter(array_column($model['fields'] ?? [], 'name')));
+        $allowed  = $declared ? array_flip($declared) : null;
+        $data     = [];
+
+        foreach ($item as $key => $value) {
+
+            $key = (string)$key;
+
+            $system = $key === '_state' || ($withTree && ($key === '_pid' || $key === '_o'));
+
+            if (!$system && str_starts_with($key, '_')) continue;
+            if (!$system && $allowed !== null && !isset($allowed[$key])) continue;
+
+            $data[$key] = $value;
+        }
+
+        // JSON_THROW_ON_ERROR: a value that cannot be encoded must fail loudly, never hash to a shared value.
+        return hash('sha256', json_encode(
+            $this->canonical($data),
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        ));
+    }
+
+    /**
+     * Sorts associative keys recursively; list order is content and is kept.
+     */
+    protected function canonical($value) {
+
+        if (!is_array($value)) return $value;
+
+        if (!array_is_list($value)) {
+            ksort($value, SORT_STRING);
+        }
+
+        return array_map(fn($child) => $this->canonical($child), $value);
+    }
+
+    /**
      * Dry-run planner for a push: what would the remote do with these items.
      */
     protected function planRemote(Client $client, string $model, array $items, string $mode, array $idMap = [], string $type = ''): array {
 
-        $result = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
-        $remote = [];
+        $result     = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
+        $remote     = [];
+        $definition = $this->localModel($model);
 
         try {
             foreach ($client->fetchItems($model, 200, $type) as $item) {
@@ -1170,11 +1464,29 @@ class Replica extends \Lime\Helper {
 
             if ($id && isset($remote[$id])) {
                 $remoteId = $id;
-            } elseif ($id && isset($idMap[$id]) && isset($remote[$idMap[$id]])) {
+            } elseif ($id && isset($idMap[$id])) {
+                // A mapped entry the core hides (unpublished) is still an
+                // update for pushItems(), never a create.
                 $remoteId = $idMap[$id];
+            } else {
+                $remoteId = $this->singletonPair($type ?: (string)($definition['type'] ?? ''), $remote);
             }
 
-            $existing = $remoteId ? $remote[$remoteId] : null;
+            $existing = $remoteId ? ($remote[$remoteId] ?? null) : null;
+
+            if ($remoteId && !$existing) {
+                $result['updated']++;
+                $result['messages'][] = "would update {$id} (remote {$remoteId}, not visible: unpublished)";
+                continue;
+            }
+
+            // Identical content is not an update, whatever the timestamps say. Checked before
+            // the merge rule so an identical entry is reported as same, not as "destination is newer".
+            if ($existing && $this->contentHash($item, $definition, $client->isPeer()) === $this->contentHash($existing, $definition, $client->isPeer())) {
+                $result['skipped']++;
+                $result['messages'][] = 'same '.$id.($remoteId === $id ? '' : " (remote {$remoteId})");
+                continue;
+            }
 
             if ($existing && $mode === self::MODE_MERGE
                 && (int)($existing['_modified'] ?? 0) > (int)($item['_modified'] ?? 0)) {
@@ -1195,6 +1507,181 @@ class Replica extends \Lime\Helper {
         return $result;
     }
 
+    /**
+     * The remote id a singleton pairs with when the ids differ.
+     *
+     * Each instance creates its own singleton document, so the two sides of
+     * the same singleton rarely share an _id. There is one document per
+     * model, so the only remote one is the match.
+     *
+     * @param array<string,array> $remoteById
+     */
+    protected function singletonPair(string $type, array $remoteById): ?string {
+
+        if ($type !== 'singleton' || count($remoteById) !== 1) return null;
+
+        return (string)array_key_first($remoteById);
+    }
+
+    /**
+     * DIFF - read-only comparison of local and remote entries, per model.
+     *
+     * Writes nothing on either side: no entry, definition, id map pair or target
+     * stamp. It appends one REPLICA_LOG entry with direction 'diff', so the check
+     * shows up in the activity log next to the writes.
+     *
+     * @throws \Exception when the target cannot be reached; nothing is read or logged then
+     * @return array{transport: string, models: array, messages: string[]}
+     */
+    public function diff(Target $target, ?string $model = null): array {
+
+        $client    = $this->client($target);
+        $transport = $client->transport();
+        $peer      = $client->isPeer();
+
+        // A null list (predates protection, or a plain Cockpit) means nothing is protected.
+        $protected = $peer ? ($client->remoteProtectedModels() ?? []) : [];
+
+        $result = ['transport' => $transport, 'models' => [], 'messages' => []];
+        $totals = array_fill_keys(self::DIFF_STATES, 0);
+
+        if (!$peer) {
+            $result['messages'][] = 'Unpublished remote entries cannot be seen on a plain Cockpit target, so they are not listed as only-there.';
+        }
+
+        $names = $target->scope($model, $this->localCollections());
+
+        if (!count($names)) {
+            $result['messages'][] = 'Nothing in scope.';
+        }
+
+        foreach ($names as $name) {
+
+            $definition = $this->localModel($name);
+            $type       = (string)($definition['type'] ?? '');
+            $counts     = array_fill_keys(self::DIFF_STATES, 0);
+            $entries    = [];
+
+            try {
+                $remote = $client->fetchItems($name, 200, $type);
+            } catch (\Throwable $e) {
+                $result['models'][$name] = [
+                    'protected' => in_array($name, $protected, true),
+                    'counts'    => $counts,
+                    'entries'   => [],
+                    'error'     => $e->getMessage(),
+                ];
+                $result['messages'][] = "{$name}: remote read failed (".$e->getMessage().')';
+                continue;
+            }
+
+            $remoteById = [];
+
+            foreach ($remote as $item) {
+                if (isset($item['_id'])) $remoteById[$item['_id']] = $item;
+            }
+
+            // Only a core target needs the id map; a peer keeps our ids.
+            $idMap   = (!$peer && $target->id) ? $this->idMap($target->id, $name)['forward'] : [];
+            $claimed = [];
+
+            foreach ($this->localItems($name) as $item) {
+
+                $id       = $item['_id'] ?? null;
+                $remoteId = null;
+
+                if ($id !== null && isset($remoteById[$id])) {
+                    $remoteId = $id;
+                } elseif ($id !== null && isset($idMap[$id]) && isset($remoteById[$idMap[$id]])) {
+                    $remoteId = $idMap[$id];
+                } else {
+                    $remoteId = $this->singletonPair($type, $remoteById);
+                }
+
+                if ($remoteId === null) {
+                    $state = 'only-here';
+                } else {
+
+                    $claimed[$remoteId] = true;
+                    $theirs = $remoteById[$remoteId];
+
+                    if ($this->contentHash($item, $definition, $peer) === $this->contentHash($theirs, $definition, $peer)) {
+                        $state = 'same';
+                    } elseif (!$peer) {
+                        // The remote stamps its own timestamps, so they cannot say which side is newer.
+                        $state = 'newer-here';
+                    } else {
+                        $state = (int)($theirs['_modified'] ?? 0) > (int)($item['_modified'] ?? 0) ? 'newer-there' : 'newer-here';
+                    }
+                }
+
+                $counts[$state]++;
+                $entries[] = ['id' => $id, 'remoteId' => $remoteId, 'state' => $state, 'title' => $this->entryTitle($item, $definition)];
+            }
+
+            foreach ($remote as $item) {
+
+                $remoteId = $item['_id'] ?? null;
+
+                if ($remoteId !== null && isset($claimed[$remoteId])) continue;
+
+                $counts['only-there']++;
+                $entries[] = ['id' => null, 'remoteId' => $remoteId, 'state' => 'only-there', 'title' => $this->entryTitle($item, $definition)];
+            }
+
+            if (!$peer && $counts['newer-here'] > 0) {
+                $result['messages'][] = "{$name}: the remote stamps its own _created/_modified, so a differing entry is shown as newer-here";
+            }
+
+            $result['models'][$name] = [
+                'protected' => in_array($name, $protected, true),
+                'counts'    => $counts,
+                'entries'   => $entries,
+            ];
+
+            foreach (self::DIFF_STATES as $state) {
+                $totals[$state] += $counts[$state];
+            }
+        }
+
+        // Insert takes the document by reference, so it needs a variable.
+        $logged = [
+            'direction'   => 'diff',
+            'target'      => $target->id,
+            'target_name' => $target->name,
+            'transport'   => $transport,
+            'counts'      => $totals,
+            '_created'    => time(),
+            'messages'    => [],
+        ];
+
+        $this->app->dataStorage->insert(REPLICA_LOG, $logged);
+
+        return $result;
+    }
+
+    /**
+     * First non-empty text field of an entry, in declared field order, for a readable list.
+     * Falls back to the entry _id when no field holds text.
+     */
+    protected function entryTitle(array $entry, ?array $model): string {
+
+        $names = array_column($model['fields'] ?? [], 'name');
+
+        foreach (array_merge($names, array_keys($entry)) as $key) {
+
+            if (!is_string($key) || str_starts_with($key, '_')) continue;
+
+            $value = $entry[$key] ?? null;
+
+            if (is_string($value) && trim($value) !== '') {
+                return mb_substr(trim(preg_replace('/\s+/u', ' ', $value)), 0, 80);
+            }
+        }
+
+        return (string)($entry['_id'] ?? '');
+    }
+
     // ---------------------------------------------------------------- log
 
     protected function newResult(string $direction, Target $target, string $mode, bool $dryRun): array {
@@ -1209,11 +1696,23 @@ class Replica extends \Lime\Helper {
             'updated'   => 0,
             'skipped'   => 0,
             'errors'    => 0,
+            'protected' => 0,
+            'protectedModels' => [],
             'collections' => [],
             'models'    => null,
             'assets'    => null,
             'messages'  => [],
         ];
+    }
+
+    /**
+     * Records a model the run left alone because of protection. It is a skip with a
+     * reason, not an error, so the run still succeeds.
+     */
+    protected function markProtected(array &$result, string $model, string $reason): void {
+        $result['protected']++;
+        $result['protectedModels'][] = $model;
+        $result['messages'][] = "{$model}: {$reason}";
     }
 
     protected function accumulate(array &$result, array $outcome, string $model, bool $verbose): void {
@@ -1267,6 +1766,7 @@ class Replica extends \Lime\Helper {
                 'updated'   => $result['updated'],
                 'skipped'   => $result['skipped'],
                 'errors'    => $result['errors'],
+                'protected' => $result['protected'],
                 'assets'    => [
                     'created' => (int)($result['assets']['created'] ?? 0),
                     'updated' => (int)($result['assets']['updated'] ?? 0),

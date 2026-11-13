@@ -19,11 +19,27 @@ class Push extends Base {
             ->addArgument('model', InputArgument::OPTIONAL, 'Limit to one collection or singleton (default: the target scope)')
             ->addOption('mode', null, InputOption::VALUE_REQUIRED, 'mirror (source wins) or merge (newest _modified wins)', 'merge')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Report what would change without writing')
+            ->addOption('ids', null, InputOption::VALUE_REQUIRED, 'Send only these entry ids, comma separated (needs a model)')
             ->addOption('assets', null, InputOption::VALUE_NONE, 'Also replicate assets, even if the target has them excluded')
             ->addOption('reset-map', null, InputOption::VALUE_NONE, 'Forget remembered remote ids first, re-seeding the target from scratch (core transport only)');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int {
+
+        $ids = null;
+
+        if ($input->getOption('ids') !== null) {
+
+            if (!$input->getArgument('model')) {
+                $output->writeln('<error>[x] --ids needs a model</error>');
+                return Command::FAILURE;
+            }
+
+            $ids = array_values(array_filter(
+                array_map('trim', explode(',', (string)$input->getOption('ids'))),
+                fn($id) => $id !== ''
+            ));
+        }
 
         $target = $this->requireTarget($input->getArgument('target'), $output);
 
@@ -47,6 +63,7 @@ class Push extends Base {
             'verbose' => $output->isVerbose(),
             'model'   => $input->getArgument('model'),
             'assets'  => (bool)$input->getOption('assets'),
+            'ids'     => $ids,
         ]);
 
         return $this->report($result, $output);
