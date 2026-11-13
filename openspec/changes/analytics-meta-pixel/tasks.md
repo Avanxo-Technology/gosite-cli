@@ -8,7 +8,7 @@
 ## 2. Scaffold
 
 - [x] 2.1 Add `'gosite' => ['layout' => 'thin']` to `src/templates-thin/generated/cockpit/config.core.php`
-- [ ] 2.2 Check `gosite generate` on a sandbox copy rewrites it (thin) and that legacy templates are untouched
+- [x] 2.2 Check `gosite generate` on a sandbox copy rewrites it (thin) and that legacy templates are untouched
 
 ## 3. Browser plugin (core)
 
@@ -22,8 +22,8 @@
 - [x] 4.1 PDP: render a `ViewContent` data block (variant id, price, currency)
 - [x] 4.2 Add to cart: set `HX-Trigger` with `AddToCart` on the htmx response; no event on the no-JavaScript redirect path
 - [x] 4.3 Checkout: render an `InitiateCheckout` data block (cart total, currency, variant ids, item count)
-- [ ] 4.4 Confirmation: at cart completion (manual and payment return) put the Purchase payload in the signed `gosite_order` cookie; the thanks page renders it as a `Purchase` data block; drop `content_ids` when the cookie would pass ~4 KB
-- [ ] 4.5 Go tests for each data block and header, including a product title with `"` and `</script>`
+- [x] 4.4 Confirmation: at cart completion (manual and payment return) put the Purchase payload in the signed `gosite_order` cookie; the thanks page renders it as a `Purchase` data block; drop `content_ids` when the cookie would pass ~4 KB
+- [x] 4.5 Go tests for each data block and header, including a product title with `"` and `</script>`
 
 ## 5. Tests (JS)
 
@@ -36,11 +36,11 @@
 
 ## 6. Sandbox verification
 
-- [ ] 6.1 In `~/gosites/analytics-draft-v2`, add a `meta-pixel` entry with a test Pixel ID; check in the browser that nothing loads before consent and that `fbevents.js` and PageView fire after consent
-- [ ] 6.2 With the Commerce addon in a sandbox site, walk product → cart → checkout → confirmation and capture the four events in the network panel
-- [ ] 6.3 Confirm a legacy sandbox CMS does not offer Meta Pixel
+- [x] 6.1 In `~/gosites/analytics-draft-v2`, add a `meta-pixel` entry with a test Pixel ID; check in the browser that nothing loads before consent and that `fbevents.js` and PageView fire after consent
+- [ ] 6.2 With the Commerce addon in a sandbox site, walk product → cart → checkout → confirmation and capture the four events in the network panel (covered by Go handler tests with Redis and the JS tests; the full Medusa walk is still open)
+- [x] 6.3 Confirm a legacy sandbox CMS does not offer Meta Pixel
 
 ## 7. Docs and release
 
-- [ ] 7.1 Update `src/addons/Analytics/README.md` (supported providers, category table, Commerce events) and `src/knowledge/analytics-providers.md` (including the loader queue: replayed only for a load-time grant)
-- [ ] 7.2 Bump `src/VERSION`; CHANGELOG entry: `gosite generate`, CMS rebuild and core update for thin sites
+- [x] 7.1 Update `src/addons/Analytics/README.md` (supported providers, category table, Commerce events) and `src/knowledge/analytics-providers.md` (including the loader queue: replayed only for a load-time grant)
+- [x] 7.2 Bump `src/VERSION`; CHANGELOG entry: `gosite generate`, CMS rebuild and core update for thin sites
