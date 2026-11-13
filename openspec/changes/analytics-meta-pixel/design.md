@@ -74,6 +74,19 @@ The same rule now covers `analytics.track()` calls from page code, for every pro
 2. Per thin site: `go get` the new core, rebuild the CMS image and the app.
 3. Rollback: disable the entry in the CMS; no data migration.
 
-## Open Questions
+## Purchase data reaches the thanks page in the signed cookie
 
-- The confirmation handler's Medusa read for the order total: confirm it is already fetched (to validate the cookie) or add one read.
+The thanks page reads no order: it only checks the signed `gosite_order` cookie against the display id. Completing the cart (manual payment, or the return from Wompi or Stripe) is the one moment that has the order (id, total, currency) and the cart lines. Chosen by the user (option A): the cookie carries the Purchase payload, signed with the same key, and the thanks page renders it as a data block.
+
+- Alternatives: read the order from Medusa on the thanks page (one more request per visit; guest access to the store order route unverified), or a server-side map with a 30-minute TTL (lost on restart, not shared between replicas).
+- Size: a browser keeps a cookie of about 4 KB. When the payload with every variant id would not fit, `content_ids` is dropped and `num_items` stays.
+- Known limit, from before this change: the signing key is random per process, so a restart between payment and the thanks page, or a second replica, gives a 404 there.
+
+## Checked against Meta's documentation (2026-11-13)
+
+- The 17 standard event names match `META_STANDARD_EVENTS`; other names go through `fbq('trackCustom')`, whose names are limited to 50 characters.
+- The deduplication id is the fourth argument, `{eventID: ...}`, and the server side must use the same value as `event_id`.
+- `value` is "a numeric value" that "must represent a monetary amount"; the reference does not say unit price or price times quantity. AddToCart sends the unit price, as the spec says.
+- `num_items` is listed for InitiateCheckout and Purchase, not AddToCart; sending it there is harmless.
+
+## Open Questions

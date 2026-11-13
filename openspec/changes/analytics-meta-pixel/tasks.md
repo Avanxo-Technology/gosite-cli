@@ -19,17 +19,17 @@
 
 ## 4. Commerce events (core)
 
-- [ ] 4.1 PDP: render a `ViewContent` data block (variant id, price, currency)
-- [ ] 4.2 Add to cart: set `HX-Trigger` with `AddToCart` on the htmx response; no event on the no-JavaScript redirect path
-- [ ] 4.3 Checkout: render an `InitiateCheckout` data block (cart total, currency, variant ids, item count)
-- [ ] 4.4 Confirmation: read the order total and lines (reuse the order already read for the cookie check if there is one) and render a `Purchase` data block
+- [x] 4.1 PDP: render a `ViewContent` data block (variant id, price, currency)
+- [x] 4.2 Add to cart: set `HX-Trigger` with `AddToCart` on the htmx response; no event on the no-JavaScript redirect path
+- [x] 4.3 Checkout: render an `InitiateCheckout` data block (cart total, currency, variant ids, item count)
+- [ ] 4.4 Confirmation: at cart completion (manual and payment return) put the Purchase payload in the signed `gosite_order` cookie; the thanks page renders it as a `Purchase` data block; drop `content_ids` when the cookie would pass ~4 KB
 - [ ] 4.5 Go tests for each data block and header, including a product title with `"` and `</script>`
 
 ## 5. Tests (JS)
 
 - [x] 5.1 `tests/js/`: no script before marketing consent, init + PageView after consent, `track` vs `trackCustom`, queued event before load, withdraw clears `_fbp`/`_fbc`
 - [x] 5.2 `tests/js/`: data blocks and `HX-Trigger` reach `analytics.track()` only after consent; no replay after a later accept; `Purchase` once per order id
-- [ ] 5.3 Verify `trackCustom` and `eventID` against Meta's documentation before release
+- [x] 5.3 Verify `trackCustom` and `eventID` against Meta's documentation before release
 - [x] 5.4 Go view test that the rendered HTML has no `facebook.com/tr` request
 - [x] 5.5 Run the JS tests in CI
 - [x] 5.6 Page-code `analytics.track()` before a later accept is not replayed (all providers); a call during the bundle download with consent at load is still sent
