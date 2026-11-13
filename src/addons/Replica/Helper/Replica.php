@@ -19,6 +19,9 @@ class Replica extends \Lime\Helper {
     const MODE_MIRROR = 'mirror';
     const MODE_MERGE  = 'merge';
 
+    // Every entry sits in exactly one of these states in diff().
+    const DIFF_STATES = ['only-here', 'newer-here', 'newer-there', 'only-there', 'same'];
+
     // ------------------------------------------------------------- targets
 
     /**
@@ -275,16 +278,27 @@ class Replica extends \Lime\Helper {
      */
     public function protectedModels(): array {
 
-        $names = [];
-
-        foreach ($this->app->dataStorage->find(REPLICA_PROTECTED)->toArray() as $doc) {
-            if (!empty($doc['model'])) $names[] = (string)$doc['model'];
-        }
-
-        $names = array_values(array_unique($names));
+        $names = array_keys($this->protectionRecords());
         sort($names);
 
         return $names;
+    }
+
+    /**
+     * The stored protection documents, keyed by model name, for screens that
+     * show who protected a model and when.
+     *
+     * @return array<string, array>
+     */
+    public function protectionRecords(): array {
+
+        $records = [];
+
+        foreach ($this->app->dataStorage->find(REPLICA_PROTECTED)->toArray() as $doc) {
+            if (!empty($doc['model'])) $records[(string)$doc['model']] = $doc;
+        }
+
+        return $records;
     }
 
     public function isProtected(string $model): bool {
@@ -815,6 +829,23 @@ class Replica extends \Lime\Helper {
         $client  = $this->client($target);
         $result  = $this->newResult('push', $target, $mode, $dryRun);
 
+        // A selection names entries of one model. Without a model it would read as a
+        // whole-model push, so refuse before anything is read or written.
+        $selection = isset($options['ids']) ? array_values(array_unique($options['ids'])) : null;
+
+        if ($selection !== null) {
+
+            $problem = empty($options['model'])
+                ? 'error: --ids needs a model'
+                : (count($selection) ? null : 'error: no ids selected');
+
+            if ($problem !== null) {
+                $result['errors']++;
+                $result['messages'][] = $problem;
+                return $result;
+            }
+        }
+
         try {
 
             // transport() throws when the target is unreachable, so this is
@@ -938,6 +969,10 @@ class Replica extends \Lime\Helper {
                 $items = $this->localItems($name);
                 $type  = $this->localType($name);
 
+                if ($selection !== null) {
+                    $items = $this->selectItems($items, $selection, $result);
+                }
+
                 // Only a core target needs the id map; a peer keeps our ids.
                 $idMap = (!$peer && $target->id) ? $this->idMap($target->id, $name)['forward'] : [];
 
@@ -976,7 +1011,9 @@ class Replica extends \Lime\Helper {
 
             // Assets last: their metadata can reference collections and their
             // files are the largest payload, so they should not block entries.
-            if ($target->syncAssets) {
+            if ($target->syncAssets && $selection !== null) {
+                $result['messages'][] = 'assets not sent with a selection';
+            } elseif ($target->syncAssets) {
 
                 if (!$peer) {
                     $result['messages'][] = 'Assets skipped: requires Replica on the remote.';
@@ -1012,6 +1049,32 @@ class Replica extends \Lime\Helper {
         }
 
         return $this->finish($result, $target, $dryRun);
+    }
+
+    /**
+     * Keeps the entries a selection names, in selection order. An id that is not held
+     * locally is reported and does not count as an error, so the others still go.
+     */
+    protected function selectItems(array $items, array $ids, array &$result): array {
+
+        $byId = [];
+
+        foreach ($items as $item) {
+            $byId[(string)($item['_id'] ?? '')] = $item;
+        }
+
+        $picked = [];
+
+        foreach ($ids as $id) {
+
+            if (isset($byId[$id])) {
+                $picked[] = $byId[$id];
+            } else {
+                $result['messages'][] = "unknown id {$id}";
+            }
+        }
+
+        return $picked;
     }
 
     /**
@@ -1298,12 +1361,74 @@ class Replica extends \Lime\Helper {
     }
 
     /**
+     * Content fingerprint of one entry, used to decide whether two entries are the same.
+     *
+     * Dropped, with the reason each rule exists:
+     *   _id                        identity, matched separately (same _id or the id map)
+     *   _created, _modified        differ per instance and say nothing about content;
+     *                              they decide direction (diff) when the content differs
+     *   _mby, _cby                 authorship, set by each instance
+     *   any other _ key            system bookkeeping (e.g. _model on singletons)
+     * Kept: _state (published or not) and the declared fields of the model. Fields a
+     * remote adds on its own are dropped when the model is known.
+     *
+     * Tree position (_pid, _o) is kept when $withTree is true: moving or reordering
+     * a page is a real change. Only a peer transfers it with our ids; a core remote
+     * strips both keys, so comparing them there would report every tree entry as
+     * different forever.
+     *
+     * Keys are sorted at every level, so key order never matters. Lists keep their order.
+     *
+     * @param array      $item  entry as read locally or remotely
+     * @param array|null $model local model definition, or null to keep every non-system key
+     */
+    public function contentHash(array $item, ?array $model, bool $withTree = false): string {
+
+        $declared = array_values(array_filter(array_column($model['fields'] ?? [], 'name')));
+        $allowed  = $declared ? array_flip($declared) : null;
+        $data     = [];
+
+        foreach ($item as $key => $value) {
+
+            $key = (string)$key;
+
+            $system = $key === '_state' || ($withTree && ($key === '_pid' || $key === '_o'));
+
+            if (!$system && str_starts_with($key, '_')) continue;
+            if (!$system && $allowed !== null && !isset($allowed[$key])) continue;
+
+            $data[$key] = $value;
+        }
+
+        // JSON_THROW_ON_ERROR: a value that cannot be encoded must fail loudly, never hash to a shared value.
+        return hash('sha256', json_encode(
+            $this->canonical($data),
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        ));
+    }
+
+    /**
+     * Sorts associative keys recursively; list order is content and is kept.
+     */
+    protected function canonical($value) {
+
+        if (!is_array($value)) return $value;
+
+        if (!array_is_list($value)) {
+            ksort($value, SORT_STRING);
+        }
+
+        return array_map(fn($child) => $this->canonical($child), $value);
+    }
+
+    /**
      * Dry-run planner for a push: what would the remote do with these items.
      */
     protected function planRemote(Client $client, string $model, array $items, string $mode, array $idMap = [], string $type = ''): array {
 
-        $result = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
-        $remote = [];
+        $result     = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
+        $remote     = [];
+        $definition = $this->localModel($model);
 
         try {
             foreach ($client->fetchItems($model, 200, $type) as $item) {
@@ -1331,6 +1456,14 @@ class Replica extends \Lime\Helper {
 
             $existing = $remoteId ? $remote[$remoteId] : null;
 
+            // Identical content is not an update, whatever the timestamps say. Checked before
+            // the merge rule so an identical entry is reported as same, not as "destination is newer".
+            if ($existing && $this->contentHash($item, $definition, $client->isPeer()) === $this->contentHash($existing, $definition, $client->isPeer())) {
+                $result['skipped']++;
+                $result['messages'][] = 'same '.$id.($remoteId === $id ? '' : " (remote {$remoteId})");
+                continue;
+            }
+
             if ($existing && $mode === self::MODE_MERGE
                 && (int)($existing['_modified'] ?? 0) > (int)($item['_modified'] ?? 0)) {
                 $result['skipped']++;
@@ -1348,6 +1481,163 @@ class Replica extends \Lime\Helper {
         }
 
         return $result;
+    }
+
+    /**
+     * DIFF - read-only comparison of local and remote entries, per model.
+     *
+     * Writes nothing on either side: no entry, definition, id map pair or target
+     * stamp. It appends one REPLICA_LOG entry with direction 'diff', so the check
+     * shows up in the activity log next to the writes.
+     *
+     * @throws \Exception when the target cannot be reached; nothing is read or logged then
+     * @return array{transport: string, models: array, messages: string[]}
+     */
+    public function diff(Target $target, ?string $model = null): array {
+
+        $client    = $this->client($target);
+        $transport = $client->transport();
+        $peer      = $client->isPeer();
+
+        // A null list (predates protection, or a plain Cockpit) means nothing is protected.
+        $protected = $peer ? ($client->remoteProtectedModels() ?? []) : [];
+
+        $result = ['transport' => $transport, 'models' => [], 'messages' => []];
+        $totals = array_fill_keys(self::DIFF_STATES, 0);
+
+        if (!$peer) {
+            $result['messages'][] = 'Unpublished remote entries cannot be seen on a plain Cockpit target, so they are not listed as only-there.';
+        }
+
+        $names = $target->scope($model, $this->localCollections());
+
+        if (!count($names)) {
+            $result['messages'][] = 'Nothing in scope.';
+        }
+
+        foreach ($names as $name) {
+
+            $definition = $this->localModel($name);
+            $type       = (string)($definition['type'] ?? '');
+            $counts     = array_fill_keys(self::DIFF_STATES, 0);
+            $entries    = [];
+
+            try {
+                $remote = $client->fetchItems($name, 200, $type);
+            } catch (\Throwable $e) {
+                $result['models'][$name] = [
+                    'protected' => in_array($name, $protected, true),
+                    'counts'    => $counts,
+                    'entries'   => [],
+                    'error'     => $e->getMessage(),
+                ];
+                $result['messages'][] = "{$name}: remote read failed (".$e->getMessage().')';
+                continue;
+            }
+
+            $remoteById = [];
+
+            foreach ($remote as $item) {
+                if (isset($item['_id'])) $remoteById[$item['_id']] = $item;
+            }
+
+            // Only a core target needs the id map; a peer keeps our ids.
+            $idMap   = (!$peer && $target->id) ? $this->idMap($target->id, $name)['forward'] : [];
+            $claimed = [];
+
+            foreach ($this->localItems($name) as $item) {
+
+                $id       = $item['_id'] ?? null;
+                $remoteId = null;
+
+                if ($id !== null && isset($remoteById[$id])) {
+                    $remoteId = $id;
+                } elseif ($id !== null && isset($idMap[$id]) && isset($remoteById[$idMap[$id]])) {
+                    $remoteId = $idMap[$id];
+                }
+
+                if ($remoteId === null) {
+                    $state = 'only-here';
+                } else {
+
+                    $claimed[$remoteId] = true;
+                    $theirs = $remoteById[$remoteId];
+
+                    if ($this->contentHash($item, $definition, $peer) === $this->contentHash($theirs, $definition, $peer)) {
+                        $state = 'same';
+                    } elseif (!$peer) {
+                        // The remote stamps its own timestamps, so they cannot say which side is newer.
+                        $state = 'newer-here';
+                    } else {
+                        $state = (int)($theirs['_modified'] ?? 0) > (int)($item['_modified'] ?? 0) ? 'newer-there' : 'newer-here';
+                    }
+                }
+
+                $counts[$state]++;
+                $entries[] = ['id' => $id, 'remoteId' => $remoteId, 'state' => $state, 'title' => $this->entryTitle($item, $definition)];
+            }
+
+            foreach ($remote as $item) {
+
+                $remoteId = $item['_id'] ?? null;
+
+                if ($remoteId !== null && isset($claimed[$remoteId])) continue;
+
+                $counts['only-there']++;
+                $entries[] = ['id' => null, 'remoteId' => $remoteId, 'state' => 'only-there', 'title' => $this->entryTitle($item, $definition)];
+            }
+
+            if (!$peer && $counts['newer-here'] > 0) {
+                $result['messages'][] = "{$name}: the remote stamps its own _created/_modified, so a differing entry is shown as newer-here";
+            }
+
+            $result['models'][$name] = [
+                'protected' => in_array($name, $protected, true),
+                'counts'    => $counts,
+                'entries'   => $entries,
+            ];
+
+            foreach (self::DIFF_STATES as $state) {
+                $totals[$state] += $counts[$state];
+            }
+        }
+
+        // Insert takes the document by reference, so it needs a variable.
+        $logged = [
+            'direction'   => 'diff',
+            'target'      => $target->id,
+            'target_name' => $target->name,
+            'transport'   => $transport,
+            'counts'      => $totals,
+            '_created'    => time(),
+            'messages'    => [],
+        ];
+
+        $this->app->dataStorage->insert(REPLICA_LOG, $logged);
+
+        return $result;
+    }
+
+    /**
+     * First non-empty text field of an entry, in declared field order, for a readable list.
+     * Falls back to the entry _id when no field holds text.
+     */
+    protected function entryTitle(array $entry, ?array $model): string {
+
+        $names = array_column($model['fields'] ?? [], 'name');
+
+        foreach (array_merge($names, array_keys($entry)) as $key) {
+
+            if (!is_string($key) || str_starts_with($key, '_')) continue;
+
+            $value = $entry[$key] ?? null;
+
+            if (is_string($value) && trim($value) !== '') {
+                return mb_substr(trim(preg_replace('/\s+/u', ' ', $value)), 0, 80);
+            }
+        }
+
+        return (string)($entry['_id'] ?? '');
     }
 
     // ---------------------------------------------------------------- log
