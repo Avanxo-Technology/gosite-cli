@@ -2,7 +2,8 @@
 
 Replicate collections, singletons, model/schema definitions and assets between
 Cockpit instances: push, pull, multiple targets, mirror/merge conflict handling,
-dry runs, an activity log, an admin screen and a CLI.
+dry runs, a read-only comparison between instances, per-instance protected
+content, an activity log, an admin screen and a CLI.
 
 Built and verified against `cockpithq/cockpit:core-2.14.0` (PHP 8.4, FrankenPHP).
 No Composer dependencies.
@@ -183,8 +184,9 @@ tower replica:targets:toggle <target> [--on|--off]     # no flag flips the state
 tower replica:targets:sync <target>    # fold every local content model into the scope
 tower replica:targets:remove <target>
 
-tower replica:push <target> [model] [--mode=merge|mirror] [--dry-run] [-v] [--reset-map] [--assets]
+tower replica:push <target> [model] [--mode=merge|mirror] [--dry-run] [-v] [--reset-map] [--assets] [--ids=a,b]
 tower replica:pull <target> [model] [--mode=merge|mirror] [--dry-run] [-v] [--assets]
+tower replica:diff <target> [model] [-v]   # read-only comparison, see below
 
 tower replica:log [--target=<name>] [--limit=20]
 ```
@@ -193,7 +195,10 @@ tower replica:log [--target=<name>] [--limit=20]
 ambiguous. `-v` is Symfony Console's own verbosity flag and logs every entry
 rather than errors only. `--reset-map` forgets the remembered remote ids for a
 core target, re-seeding it from scratch. `--assets` forces asset replication on
-a single run even when the target has them excluded.
+a single run even when the target has them excluded. `--ids` sends only the
+named entries of one model (it needs the `model` argument); an id that does not
+exist here is reported as `unknown id <id>` and the others still go. Assets are
+not sent with a selection.
 
 When a target carries an explicit `models` list that misses a local content
 model, every push/pull prints
@@ -220,7 +225,68 @@ the source is also gone at the destination.
 
 `--dry-run` reports exactly what would change — including the remote lookups
 needed to classify each entry — and writes nothing on either side. It is still
-recorded in the log, flagged `[dry]`.
+recorded in the log, flagged `[dry]`. An entry whose content is identical on
+both sides is reported as `same <id>`, not as an update.
+
+---
+
+## Protected content
+
+Each instance can mark content models as **protected**. A protected model
+refuses every write that arrives through replication — entries and model
+definitions — whoever sends them. Editing it in the instance's own Content
+editor still works, and reading it (a pull *from* this instance) is not
+restricted. Nothing is protected by default.
+
+Mark models in the admin screen, card **Protected content** (one switch per
+model, with who protected it and when). Every change is recorded in the
+activity log. The list lives in this instance's `replica/protected`
+dataStorage collection, outside `content/*`, so no replication run can change
+it; each instance keeps its own list.
+
+What a run does with protection:
+
+- **push**: the destination's manifest lists its protected models. The push
+  leaves them out before anything is read or sent, counts them as `protected`
+  (not as errors), and continues with the other models. If protection is added
+  while a run is under way, the destination answers `423 Locked` and the model
+  is reported the same way.
+- **pull**: a model protected *here* is not written; the result says
+  `<model>: protected here`.
+- **older peers**: a destination running Replica 1.0.0 has no protection, and
+  every push says `Destination Replica 1.0.0 does not support model
+  protection`. A source on 1.0.0 that pushes to a protected model fails the run
+  with the 423 message and writes nothing for that model.
+- **core targets**: a plain Cockpit cannot protect anything through Replica;
+  restrict the API key's role permissions there instead.
+
+Upgrade the destination first: with an empty list nothing changes, so the order
+only matters once you protect something.
+
+## Comparing instances
+
+`replica:diff <target> [model]` and the **Compare** button on a target card
+compare local and remote entries and write nothing (the comparison is recorded
+in the log as `diff`). Each entry gets one state:
+
+| State | Meaning |
+| --- | --- |
+| `only-here` | exists here, not on the target |
+| `newer-here` | differs, and this side is newer (core targets: always this) |
+| `newer-there` | differs, and the target is newer |
+| `only-there` | exists on the target, not here (a push never deletes it) |
+| `same` | identical content |
+
+Content decides sameness: a sha256 of the entry without its ids, timestamps and
+authorship, keeping `_state` and the model's declared fields, with keys sorted.
+Tree position (`_pid`, `_o`) counts on peers; a core target strips it, so it is
+ignored there. On a peer, `_modified` decides the direction when the content
+differs. A core target stamps its own timestamps and hides unpublished entries,
+and the result says so.
+
+In the admin screen, tick entries under **Only here** or **Changed here** and
+use **Push selected** (one model at a time; the card's mode and dry-run apply).
+A model protected on the destination shows a badge and cannot be selected.
 
 ---
 
@@ -271,7 +337,8 @@ removing a target purges its pairs, and `replica:push --reset-map` clears them.
 
 Every operation appends to `replica/log`: timestamp, direction, target, mode,
 dry-run flag, transport, per-collection created/updated/skipped/error counts and
-messages (truncated at 500 lines). Read it with `replica:log`, in the admin
+messages (truncated at 500 lines), plus one entry per protection change
+(`protect`) and per comparison (`diff`). Read it with `replica:log`, in the admin
 screen, or over the admin API at `GET /replica/api/log`.
 
 ---
@@ -287,7 +354,9 @@ Admin API (session + `replica/manage`, CSRF on mutations):
 | `POST` | `/replica/api/toggle/{id}` |
 | `POST` | `/replica/api/remove/{id}` |
 | `GET` | `/replica/api/ping/{id}` |
-| `POST` | `/replica/api/run/{id}` |
+| `POST` | `/replica/api/run/{id}` (`ids` for a selected push) |
+| `GET` | `/replica/api/diff/{id}` (`?model=`) |
+| `GET` `POST` | `/replica/api/protected` |
 | `GET` | `/replica/api/log` |
 
 Peer API (api-key + `replica/manage`), consumed by the other instance:
@@ -299,6 +368,10 @@ Peer API (api-key + `replica/manage`), consumed by the other instance:
 | `GET` `POST` | `/api/replica/items/{model}` |
 | `GET` `POST` | `/api/replica/assets` |
 | `GET` | `/api/replica/assets/file/{id}` |
+
+The manifest carries `protected`, the models this instance protects. `POST`
+to `models` or `items/{model}` answers `423 Locked`, with the refused names in
+`protected`, when it touches a protected model; nothing is written.
 
 ---
 
