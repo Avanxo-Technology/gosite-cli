@@ -6,7 +6,8 @@
  *   1. a registry of official plugins - a pinned bundle URL and the global it
  *      defines. Adding a provider is a line here plus an option in the CMS
  *      select. No integration code of ours, no template change.
- *   2. one plugin we do write, for PostHog, because there is no official one.
+ *   2. two plugins we do write, PostHog and Meta Pixel, because there is no
+ *      official one for either.
  *   3. the bootstrap that reads the page's configuration and mounts them.
  *
  * The configuration arrives as JSON in the page, never as generated
@@ -58,7 +59,7 @@
    * entry. The addon's PROVIDER_CATEGORY holds the same mapping for the admin
    * screen; this copy is the one that gates.
    */
-  var CUSTOM_CATEGORY = { posthog: 'analytics' };
+  var CUSTOM_CATEGORY = { posthog: 'analytics', 'meta-pixel': 'marketing' };
 
   /*
    * The category an entry actually needs.
@@ -142,7 +143,87 @@
     };
   }
 
-  var CUSTOM = { posthog: posthogPlugin };
+  /*
+   * Meta Pixel: the second plugin we write, for the same reason as PostHog.
+   *
+   * Meta's base code is a minified snippet. Copying it would freeze one
+   * release of it here, so the part the snippet exists for is written out
+   * instead: a queue that makes calls before fbevents.js has run wait rather
+   * than throw. fbevents.js drains that queue and then takes over with
+   * callMethod.
+   */
+  var META_STANDARD_EVENTS = [
+    'AddPaymentInfo', 'AddToCart', 'AddToWishlist', 'CompleteRegistration',
+    'Contact', 'CustomizeProduct', 'Donate', 'FindLocation', 'InitiateCheckout',
+    'Lead', 'Purchase', 'Schedule', 'Search', 'StartTrial', 'SubmitApplication',
+    'Subscribe', 'ViewContent',
+  ];
+
+  function metaQueueStub() {
+    // If something else already defined fbq, its queue is the one to use.
+    if (window.fbq) return;
+
+    var fbq = window.fbq = function () {
+      if (fbq.callMethod) {
+        fbq.callMethod.apply(fbq, arguments);
+      } else {
+        fbq.queue.push(arguments);
+      }
+    };
+
+    fbq.queue = [];
+    fbq.loaded = true;
+    fbq.version = '2.0';
+  }
+
+  function metaPixelPlugin(config) {
+    return {
+      name: 'meta-pixel',
+
+      initialize: function () {
+        metaQueueStub();
+
+        // Queued until fbevents.js runs, so init does not wait for the download.
+        window.fbq('init', config.pixelId);
+
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://connect.facebook.net/en_US/fbevents.js';
+        document.head.appendChild(s);
+      },
+
+      page: function () {
+        window.fbq('track', 'PageView');
+      },
+
+      track: function (e) {
+        var name = e.payload.event;
+        var props = e.payload.properties || {};
+        var method = META_STANDARD_EVENTS.indexOf(name) === -1 ? 'trackCustom' : 'track';
+
+        /*
+         * order_id is also sent as Meta's eventID, so an order that reaches
+         * Meta twice (a retry, a reload) is counted once. The properties go
+         * through unchanged.
+         */
+        if (props.order_id !== undefined && props.order_id !== null && props.order_id !== '') {
+          window.fbq(method, name, props, { eventID: String(props.order_id) });
+        } else {
+          window.fbq(method, name, props);
+        }
+      },
+
+      /*
+       * fbevents.js sets callMethod when it has run. Until then the stub only
+       * queues, so this reports ready only once Meta's script has taken over.
+       */
+      loaded: function () {
+        return !!(window.fbq && window.fbq.callMethod);
+      },
+    };
+  }
+
+  var CUSTOM = { posthog: posthogPlugin, 'meta-pixel': metaPixelPlugin };
 
   // ---------------------------------------------------------------- bootstrap
 
@@ -151,8 +232,8 @@
    *
    * Page code can call analytics.track() at any moment, including before the
    * plugin bundles have arrived. Without this those calls would throw, or
-   * worse, be swallowed. Everything recorded here is replayed once the real
-   * object is mounted.
+   * worse, be swallowed. What is recorded here is replayed only to providers
+   * the visitor had allowed when the page loaded; see mount().
    */
   var queue = [];
 
@@ -280,6 +361,34 @@
   // to add a plugin to a live instance.
   var instances = [];
 
+  /*
+   * What the visitor had allowed when this page loaded.
+   *
+   * Page events (the data blocks read at mount, and the htmx events below)
+   * describe what the page showed. A visitor who accepts on the page that
+   * rendered a Purchase never agreed to what that page did, so the block is
+   * not sent to a provider they only allowed afterwards. Copied now, because
+   * the live state changes as soon as they answer the banner.
+   */
+  var grantedAtLoad = (function () {
+    var g = window.consent.get().granted || {};
+    return { analytics: g.analytics === true, marketing: g.marketing === true };
+  })();
+
+  /*
+   * Events the server sends with an htmx response: HX-Trigger with
+   * `analytics:event`. htmx fires each trigger as a DOM event whose detail is
+   * the JSON value, with `elt` added. Only the event and its properties are read.
+   *
+   * With no provider mounted the event is dropped, not queued. A visitor who
+   * has not decided is not tracked, and an answer given later does not replay it.
+   */
+  document.addEventListener('analytics:event', function (evt) {
+    if (instances.length && evt.detail) {
+      sendPageEvent(window.analytics, evt.detail);
+    }
+  });
+
   window.consent.onChange(function (state) {
     var pending = integrations.filter(function (item) {
       return !mounted[item.Provider] && state.granted[categoryOf(item)] === true;
@@ -305,11 +414,82 @@
         return loadScript(CDN + o.path);
       })
     ).then(function () {
+      // Fail closed: page events go only to a batch that was entirely allowed
+      // at load. A mixed batch cannot be, so it gets none.
+      var atLoad = pending.every(function (item) {
+        return grantedAtLoad[categoryOf(item)] === true;
+      });
+
       whenReady(function () {
-        mount(pending);
+        mount(pending, atLoad);
       });
     });
   });
+
+  var PURCHASES_KEY = 'gosite_purchases';
+
+  /*
+   * True the first time an order id is seen in this browser session.
+   *
+   * A reload of the confirmation page renders the same Purchase block again.
+   * When storage is blocked or full the answer is "first time", so a duplicate
+   * can get through; Meta's eventID then deduplicates it.
+   */
+  function firstPurchase(orderId) {
+    try {
+      var id = String(orderId);
+      var seen = JSON.parse(window.sessionStorage.getItem(PURCHASES_KEY) || '[]');
+
+      if (seen.indexOf(id) !== -1) return false;
+
+      seen.push(id);
+      window.sessionStorage.setItem(PURCHASES_KEY, JSON.stringify(seen));
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  /*
+   * Sends one event the page described: { event, properties }.
+   *
+   * `target` is window.analytics (every mounted provider) or one instance.
+   * Nothing is stored for later here: the caller decides whether there is
+   * anyone to send to.
+   */
+  function sendPageEvent(target, data) {
+    if (!data || typeof data.event !== 'string') return;
+
+    var props = data.properties || {};
+    var hasOrder = props.order_id !== undefined && props.order_id !== null;
+
+    if (data.event === 'Purchase' && hasOrder && !firstPurchase(props.order_id)) return;
+
+    try {
+      target.track(data.event, props);
+    } catch (e) {
+      console.warn('[analytics] ' + data.event + ' failed', e);
+    }
+  }
+
+  /*
+   * The events the server rendered into the page, in document order. Read at
+   * a mount that was allowed at load, and never otherwise.
+   */
+  function readPageEvents() {
+    var blocks = document.querySelectorAll('script[type="application/json"][data-analytics-event]');
+    var events = [];
+
+    for (var i = 0; i < blocks.length; i++) {
+      try {
+        events.push(JSON.parse(blocks[i].textContent));
+      } catch (e) {
+        console.warn('[analytics] an event block is not valid JSON; skipping it', e);
+      }
+    }
+
+    return events;
+  }
 
   /*
    * Mounts one batch of providers: everything a single grant made loadable.
@@ -318,7 +498,7 @@
    * now and marketing five minutes later, and the second grant must not
    * re-mount the first grant's plugins.
    */
-  function mount(batch) {
+  function mount(batch, atLoad) {
     var plugins = [];
     var seen = {};
 
@@ -391,15 +571,27 @@
       identify: fanOut('identify'),
     };
 
-    // Replay whatever the page recorded while it was waiting. The queue is
-    // drained on the first mount only; later batches get new events, not the
-    // history of a page they had no permission to see.
-    queue.forEach(function (call) {
-      window.analytics[call[0]].apply(null, call[1]);
-    });
+    // Replay what the page recorded while the bundles were downloading, but
+    // only for a load-time grant. Calls made before a later accept happened
+    // without permission, the same as page events, so they are dropped. The
+    // queue is emptied on the first mount either way; later batches get new
+    // events only.
+    if (atLoad) {
+      queue.forEach(function (call) {
+        window.analytics[call[0]].apply(null, call[1]);
+      });
+    }
     queue.length = 0;
 
     instance.page();
+
+    // Page events only for a load-time grant, and only to this instance: they
+    // describe the page as it rendered, not a later answer to the banner.
+    if (atLoad) {
+      readPageEvents().forEach(function (data) {
+        sendPageEvent(instance, data);
+      });
+    }
 
     /*
      * Say so on the way out.

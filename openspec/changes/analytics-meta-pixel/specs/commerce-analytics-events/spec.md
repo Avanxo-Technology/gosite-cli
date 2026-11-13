@@ -34,8 +34,16 @@ Server-rendered pages SHALL carry events as `<script type="application/json" dat
 - **THEN** no second `Purchase` is sent
 
 ### Requirement: No event without consent
-Events SHALL NOT be sent, and SHALL NOT be queued for later, while the visitor has not consented to the category a provider needs.
+Events SHALL NOT be sent, and SHALL NOT be queued for later, while the visitor has not consented to the category a provider needs. This SHALL apply to every provider and also to `analytics.track()`, `page()` and `identify()` calls made by page code: a call recorded before the plugins mount SHALL be replayed only to providers the visitor had allowed when the page loaded.
 
 #### Scenario: Undecided visitor buys
 - **WHEN** a visitor who has not answered the banner completes an order
 - **THEN** no provider receives `Purchase`, also after the visitor accepts later
+
+#### Scenario: Page code tracks, then the visitor accepts
+- **WHEN** page code calls `analytics.track()` before the visitor answers the banner, and the visitor then accepts on the same page
+- **THEN** no provider receives that call; calls made after the accept are sent
+
+#### Scenario: Page code tracks while the bundles download
+- **WHEN** consent was stored before the page loaded and page code calls `analytics.track()` before the plugins mount
+- **THEN** the call is sent once the plugins mount

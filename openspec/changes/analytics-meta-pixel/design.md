@@ -58,6 +58,8 @@ How they reach the browser, without inline executable script:
 
 Events that happen before consent are not queued for later: a visitor who has not decided is not tracked.
 
+The same rule now covers `analytics.track()` calls from page code, for every provider (decided by the user). Before this change the loader's queue replayed them after a later accept on the same page. The queue still exists for the window between a load-time grant and the mount, when the bundles are still downloading; it is replayed only when the mounted batch was entirely allowed at load, and emptied otherwise.
+
 ## Risks / Trade-offs
 
 - [A thin site not yet regenerated has no marker, so it does not see Meta Pixel] → the upgrade note says `gosite generate` and a CMS rebuild are needed.

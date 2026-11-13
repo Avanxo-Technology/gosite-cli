@@ -31,8 +31,10 @@ const { makeDom } = require('./dom.js');
 // Default to the repo root two levels up, so this runs as
 // `node tests/js/consent_gate.test.js` with no argument.
 const REPO = process.argv[2] || require('path').resolve(__dirname, '..', '..');
-const CONSENT = fs.readFileSync(REPO + '/src/templates/static/js/analytics/consent.js', 'utf8');
-const ANALYTICS = fs.readFileSync(REPO + '/src/templates/static/js/analytics/analytics.js', 'utf8');
+// The thin site's browser code. The legacy copy under src/templates/ is frozen
+// and no longer tested against.
+const CONSENT = fs.readFileSync(REPO + '/core/internal/app/assets/js/analytics/consent.js', 'utf8');
+const ANALYTICS = fs.readFileSync(REPO + '/core/internal/app/assets/js/analytics/analytics.js', 'utf8');
 
 let failures = 0;
 function check(name, ok, detail) {

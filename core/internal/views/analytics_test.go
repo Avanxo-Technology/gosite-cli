@@ -126,3 +126,20 @@ func TestConfigBlockCannotCloseTheScript(t *testing.T) {
 		t.Fatal("a CMS value escaped the data block and became markup")
 	}
 }
+
+// Meta's base code includes a <noscript><img> request to facebook.com/tr.
+// It fires without JavaScript, so the consent gate cannot stop it. The page
+// must never carry it, whatever the entry.
+func TestMetaPixelRendersNoTrackingRequest(t *testing.T) {
+	out := render(t, []Integration{{Provider: "meta-pixel", Config: map[string]any{"pixelId": "1234567890123456"}}})
+
+	if !strings.Contains(out, "/static/js/analytics/analytics.js") {
+		t.Error("the loader was not included")
+	}
+	if strings.Contains(out, "facebook.com/tr") {
+		t.Error("the page requests facebook.com/tr without consent")
+	}
+	if strings.Contains(out, "<noscript>") {
+		t.Error("emitted body markup for a provider that needs none")
+	}
+}

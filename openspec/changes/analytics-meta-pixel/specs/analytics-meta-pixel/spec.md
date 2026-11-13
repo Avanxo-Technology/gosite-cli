@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: The CMS accepts a meta-pixel entry
-The Analytics addon SHALL offer `meta-pixel` (label "Meta Pixel") in the provider select, SHALL require a `pixelId` of 15 to 20 digits, SHALL apply the same character rules as every other provider, and SHALL drop undeclared keys.
+The Analytics addon SHALL offer `meta-pixel` (label "Meta Pixel") in the provider select and SHALL check its config the way it checks every provider: hostile characters are refused on save, while a missing or malformed `pixelId` (15 to 20 digits) and undeclared keys are stored and reported on the Analytics screen, because Cockpit shows a refused save to the editor only as an unexplained error.
 
 #### Scenario: Valid entry
 - **WHEN** an editor saves provider `meta-pixel` with config `{ "pixelId": "1234567890123456" }`
@@ -9,11 +9,11 @@ The Analytics addon SHALL offer `meta-pixel` (label "Meta Pixel") in the provide
 
 #### Scenario: Missing Pixel ID
 - **WHEN** an editor saves provider `meta-pixel` with an empty config
-- **THEN** the save is refused with a message that Meta Pixel expects `pixelId`
+- **THEN** the entry is stored, the Analytics screen reports that Meta Pixel expects `pixelId`, and the site does not load the Pixel
 
 #### Scenario: Ad account id instead of Pixel ID
 - **WHEN** an editor saves `{ "pixelId": "act_1234567890123456" }`
-- **THEN** the save is refused with a message that the Pixel ID is 15 to 20 digits
+- **THEN** the entry is stored and the Analytics screen reports that `pixelId` does not look right
 
 #### Scenario: Unsafe characters
 - **WHEN** the `pixelId` contains a quote, an angle bracket or a backslash
@@ -21,7 +21,7 @@ The Analytics addon SHALL offer `meta-pixel` (label "Meta Pixel") in the provide
 
 #### Scenario: Extra keys
 - **WHEN** the config holds `pixelId` and `foo`
-- **THEN** only `pixelId` is stored
+- **THEN** the Analytics screen reports `foo` as unused
 
 ### Requirement: Meta Pixel is offered only on thin sites
 The Analytics addon SHALL offer and accept `meta-pixel` only when the CMS configuration has `gosite.layout` set to `thin`, which the generated `cockpit/config.core.php` of a thin site provides. Without that value the provider SHALL NOT appear in the select and a save SHALL be refused.
@@ -72,8 +72,8 @@ The site SHALL NOT render the Pixel's `<noscript><img>` fallback, because it wou
 - **THEN** the HTML contains no request to `facebook.com/tr`
 
 ### Requirement: Withdrawing marketing consent clears Pixel cookies
-Withdrawing marketing consent SHALL clear the `_fbp` and `_fbc` cookies that a script can reach, and SHALL reload the page.
+Withdrawing marketing consent SHALL reload the page, and the reloaded page SHALL clear the `_fbp` and `_fbc` cookies that a script can reach before any provider loads.
 
 #### Scenario: Withdraw
 - **WHEN** a visitor who accepted marketing withdraws it
-- **THEN** `_fbp` and `_fbc` are cleared and the page reloads without the Pixel
+- **THEN** the page reloads, `_fbp` and `_fbc` are cleared, and the Pixel does not load
