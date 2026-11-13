@@ -1,7 +1,7 @@
 # Analytics
 
 Third-party tracking integrations for gosite sites — Google Tag Manager,
-PostHog, and whatever comes next.
+PostHog, Meta Pixel, and whatever comes next.
 
 One collection holds one entry per integration. The application reads it
 through Cockpit's core REST API and loads the matching browser plugin. This
@@ -9,7 +9,8 @@ addon serves nothing to visitors.
 
 ## These keys are public
 
-A GTM container id and a PostHog project key are in the HTML of every page,
+A GTM container id, a PostHog project key and a Meta Pixel ID are in the HTML
+of every page,
 where anyone can read them. That is precisely what makes it safe to keep them
 in the CMS and let a client edit them.
 
@@ -33,9 +34,50 @@ in the CMS and let a client edit them.
 ### Supported providers
 
 ```json
-gtm      { "id": "GTM-ABC1234" }
-posthog  { "key": "phc_...", "host": "https://us.i.posthog.com" }
+gtm         { "containerId": "GTM-ABC1234" }
+posthog     { "key": "phc_...", "host": "https://us.i.posthog.com" }
+meta-pixel  { "pixelId": "1234567890123456" }
 ```
+
+### Meta Pixel
+
+The Pixel ID is the number in Events Manager > Data sources, 15 to 20 digits.
+It needs `marketing` consent: before it, `fbevents.js` is not requested and no
+`_fbp`/`_fbc` cookie is written. After it, the page sends `PageView`; Meta's 17
+standard events go through `fbq('track')` and any other name through
+`fbq('trackCustom')`. An `order_id` property becomes Meta's `eventID`, so a
+later server-side copy of the same purchase can be deduplicated.
+
+Meta Pixel is offered only on thin sites (the CMS reads `gosite.layout` from
+`config.core.php`). A legacy CMS does not list it and refuses a save with it,
+because the legacy application has no plugin for it.
+
+There is no `<noscript>` image fallback: it would send a request before any
+consent.
+
+### E-commerce events
+
+With the Commerce addon, the storefront sends these through
+`analytics.track()`, so every enabled provider receives them under its own
+consent:
+
+| event | when | properties |
+| --- | --- | --- |
+| `ViewContent` | product page | `value`, `currency`, `content_ids`, `content_type`, `num_items` |
+| `AddToCart` | add to cart (htmx) | the same, `value` is the unit price, `num_items` the quantity |
+| `InitiateCheckout` | checkout page | the cart total, its variant ids and item count |
+| `Purchase` | order confirmation | the order total, variant ids, item count and `order_id` |
+
+`value` is in the currency's major unit (40.5, not 4050). Pages carry the
+events as `<script type="application/json" data-analytics-event>` blocks and
+htmx responses as an `HX-Trigger` header, so no store value is ever placed in
+executable JavaScript.
+
+An event is sent only to providers the visitor had allowed when the page
+loaded. A visitor who accepts the banner on the confirmation page does not
+send that `Purchase`, and `Purchase` goes once per order in a browser session,
+also when the confirmation is reloaded. A theme that replaces the product,
+checkout or confirmation page must keep the data block to keep the event.
 
 ### PostHog session recording
 
@@ -103,7 +145,7 @@ Each provider has a default:
 | provider | needs |
 | --- | --- |
 | Google Tag Manager | `marketing` |
-| HubSpot, Customer.io | `marketing` |
+| Meta Pixel, HubSpot, Customer.io | `marketing` |
 | PostHog, GA4, Universal Analytics, Mixpanel, Segment, Amplitude, FullStory | `analytics` |
 
 **GTM defaults to marketing, and that is a judgement rather than a fact.** A
@@ -173,16 +215,19 @@ in the select cannot be saved at all, instead of saving and never appearing.
 
 ## Validation
 
-Configuration is checked when it is saved, not when it is rendered:
+Configuration is checked when it is saved, not when it is rendered. Only an
+unsafe value or a provider the site cannot render stops the save; a missing or
+malformed key is stored and shown as a problem on the Analytics screen, because
+Cockpit hides the message of a refused save:
 
 - the provider must be one the site can render
 - required keys must be present, and text
 - keys with a well-documented shape are matched against it — a GTM id must look
-  like `GTM-ABC1234`
+  like `GTM-ABC1234`, a Meta Pixel ID is 15 to 20 digits
 - quotes, angle brackets and backslashes are refused in every value, for every
   provider
-- keys the provider does not declare are dropped rather than stored, so nobody
-  believes an extra field does something
+- keys the provider does not declare are kept, and the Analytics screen names
+  them ("Unused here") so nobody believes an extra field does something
 
 That is one of **two independent defences**. The other is that the application
 never interpolates these values into JavaScript: they travel to the browser in
@@ -202,10 +247,10 @@ cannot show: whether an integration is actually running.
 
 ## What is not here
 
-- **Consent.** No cookie banner, no consent mode, no deferred loading. A
-  separate task — and one worth doing, because tags load unconditionally today.
-- **Server-side events.** PostHog has a backend SDK, which is more reliable than
-  anything in a browser. Different mechanism, different data path.
+- **Server-side events.** PostHog has a backend SDK and Meta has the Conversions
+  API, both more reliable than anything in a browser. Different mechanism,
+  different data path; `Purchase` already carries the `eventID` a server-side
+  copy needs for deduplication.
 - **A first-party proxy** to survive ad blockers. Worth doing later; this stack
   already proxies `/storage/uploads`, so the pattern exists.
 

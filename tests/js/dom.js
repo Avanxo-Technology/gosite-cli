@@ -37,6 +37,10 @@ function makeNode(tag) {
         if (w.startsWith('button')) return n.tagName === 'BUTTON';
         if (w.startsWith('a[href]')) return n.tagName === 'A' && n.attrs.href;
         if (w.startsWith('input')) return n.tagName === 'INPUT' && !n.disabled;
+        // The server's event blocks, as analytics.js selects them.
+        if (w.startsWith('script[type="application/json"][data-analytics-event]')) {
+          return n.tagName === 'SCRIPT' && n.attrs.type === 'application/json' && 'data-analytics-event' in n.attrs;
+        }
         return false;
       }));
     },
@@ -88,6 +92,10 @@ function makeDom(opts) {
       doc.handlers[type] = (doc.handlers[type] || []).filter(f => f !== fn);
     },
     contains() { return true; },
+    querySelectorAll(sel) { return body.querySelectorAll(sel); },
+    // htmx dispatches its HX-Trigger events on the element with a CustomEvent,
+    // and a listener on document receives them. The stub delivers the same way.
+    dispatchEvent(evt) { (doc.handlers[evt.type] || []).forEach(fn => fn(evt)); return true; },
   };
 
   /*
@@ -131,13 +139,34 @@ function makeDom(opts) {
       loaded.push(src);
       // The global appears when the bundle arrives, not before - so a mount
       // that runs too early fails here the way it would in a browser.
-      setTimeout(() => publish(src), 0);
+      setTimeout(() => (src.includes(FBEVENTS) ? loadMetaPixel() : publish(src)), 0);
     }
 
     makeNode('x').appendChild.call(this, c);
-    if (c.onload) setTimeout(c.onload, 0);
+    // A throwing onload is an error on the page, not a crash of the test
+    // runner, which is what a browser does with it too.
+    if (c.onload) setTimeout(() => { try { c.onload(); } catch (e) { win.pageErrors.push(e); } }, 0);
     return c;
   };
+
+  const FBEVENTS = 'connect.facebook.net/en_US/fbevents.js';
+
+  /*
+   * What fbevents.js does on arrival, from the contract the base code relies on:
+   * it takes over the queue the stub collected, in order, and from then on
+   * routes calls through callMethod. The stub's queue holds the arguments of
+   * each call before that.
+   *
+   * The stub that defines window.fbq and its queue is the plugin's own
+   * (analytics.js, metaQueueStub), so this stub only has to honour it.
+   */
+  function loadMetaPixel() {
+    const stub = win.fbq;
+    const pending = stub && stub.queue ? stub.queue.splice(0) : [];
+
+    stub.callMethod = function () { win.fbCalls.push(Array.from(arguments)); };
+    pending.forEach(args => stub.callMethod(...Array.from(args)));
+  }
 
   const store = () => {
     const m = new Map();
@@ -166,19 +195,39 @@ function makeDom(opts) {
    * factory, not a bare function.
    */
   const mounts = [];
+  /*
+   * Calls one plugin method. The payload shape is the one analytics.js's own
+   * plugins read (`e.payload.event`, `e.payload.properties`). A throw is a page
+   * error, as it would be in a browser.
+   */
+  function callPlugin(plugin, method, e) {
+    if (typeof plugin[method] !== 'function') return;
+    try { plugin[method](e); } catch (err) { win.pageErrors.push(err); }
+  }
+
   const _analytics = {
     init(cfg) {
       mounts.push(cfg);
       const sent = [];
+      const plugins = cfg.plugins || [];
+      // A plugin installs itself on init (its script, its queue stub).
+      plugins.forEach(p => callPlugin(p, 'initialize', {}));
       return {
         plugins: {},
         sent,
-        page(...a) { sent.push(['page', a]); },
-        track(...a) { sent.push(['track', a]); },
+        page(...a) { sent.push(['page', a]); plugins.forEach(p => callPlugin(p, 'page', { payload: {} })); },
+        track(event, properties) {
+          sent.push(['track', [event, properties]]);
+          plugins.forEach(p => callPlugin(p, 'track', { payload: { event, properties } }));
+        },
         identify(...a) { sent.push(['identify', a]); },
       };
     },
   };
+  // The DOM event class htmx uses for its triggers.
+  class CustomEvent {
+    constructor(type, init) { this.type = type; this.detail = init ? init.detail : null; }
+  }
   const win = {
     document: doc,
     location: { protocol: 'https:', hostname: 'analytics-draft.test', reload() { reloads.count++; } },
@@ -187,8 +236,14 @@ function makeDom(opts) {
     console,
     setTimeout,
     Promise,
+    CustomEvent,
     _analytics,
     loaded, reloads, mounts,
+    // Meta's calls as fbevents.js received them, in order: [method, ...args].
+    fbCalls: [],
+    // Errors thrown by plugins or onload handlers, which a browser reports on
+    // the console and carries on past.
+    pageErrors: [],
   };
   win.window = win;
   return win;

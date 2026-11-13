@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.68.0
+
+### Analytics: Meta Pixel and store events
+
+- **Added: Meta Pixel** (`meta-pixel`, `{ "pixelId": "..." }`, 15 to 20 digits),
+  in the `marketing` category. Nothing from Meta loads, and no `_fbp`/`_fbc`
+  cookie is written, before marketing consent; withdrawing it clears them. No
+  `<noscript>` image. Offered on thin sites only: a legacy CMS does not list it.
+- **Added: store events.** With Commerce, the product page, add to cart,
+  checkout and confirmation send `ViewContent`, `AddToCart`,
+  `InitiateCheckout` and `Purchase` (value, currency, variant ids, item count,
+  order id) through `analytics.track()`, so every enabled provider gets them
+  under its own consent. `Purchase` goes once per order in a browser session,
+  with the order id as Meta's `eventID`.
+- **Changed: no replay after a late accept.** An event raised before the
+  visitor answered the banner is dropped, also when they accept later on the
+  same page. Before, page-code `analytics.track()` calls were replayed. This
+  applies to every provider.
+- **Changed: the GTM key in the README is `containerId`**, as the code always
+  had it, and an extra config key is kept and named on the Analytics screen,
+  as the code did.
+- **Upgrade (thin sites):** `gosite generate` (adds the `gosite.layout` marker
+  to `cockpit/config.core.php`), rebuild the CMS image, and update the core
+  module (`go get github.com/Avanxo-Technology/gosite-cli/core@v0.68.0`).
+  A theme that replaces the product, checkout or confirmation page must keep
+  the new `data-analytics-event` block.
+
 ## 0.67.0
 
 ### Replica: protected content and comparison between instances

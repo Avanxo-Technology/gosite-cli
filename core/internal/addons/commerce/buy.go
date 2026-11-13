@@ -12,4 +12,6 @@ type buyData struct {
 	InStock    bool
 	// Error is shown when an add was refused, e.g. out of stock.
 	Error string
+	// unitPrice is the variant's calculated amount, the AddToCart value.
+	unitPrice Amount
 }

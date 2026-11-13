@@ -177,8 +177,9 @@ func (s *Commerce) completeFromReturn(c *echo.Context, ctx context.Context, cart
 		return s.h.Reply(c).Fail(http.StatusBadGateway, "could not complete the order", err)
 	}
 	if result.IsOrder() {
+		purchase := purchaseEvent(result.Order, cart)
 		s.clearCartCookie(c)
-		s.setConfirmationCookie(c, result.Order.DisplayID)
+		s.setConfirmationCookie(c, result.Order.DisplayID, purchase)
 		return c.Redirect(http.StatusSeeOther, cfgCheckoutPath+"/gracias/"+strconv.Itoa(result.Order.DisplayID))
 	}
 	// Already completed by the webhook: treat as success.

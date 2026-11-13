@@ -48,6 +48,11 @@ jobs:
       - name: Run test suite
         run: bats tests/
 
+      # Browser-side analytics, run in Node against the thin site's own files.
+      # Node is preinstalled on ubuntu-latest, so no setup step is needed.
+      - name: JS tests (consent gate, Meta Pixel)
+        run: node tests/js/consent_gate.test.js && node tests/js/meta_pixel.test.js
+
   templates:
     name: Template fixture (gofmt, vet, YAML, php -l)
     runs-on: ubuntu-latest

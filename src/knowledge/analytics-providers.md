@@ -68,7 +68,10 @@ its tag straight to `document.body`. Mounting there throws
 and nothing is ever sent.
 
 Only the mount waits for `DOMContentLoaded`; the downloads still start
-immediately, and the loader's queue holds any event raised meanwhile.
+immediately, and the loader's queue holds any event raised meanwhile. The queue
+is replayed only when the mounted batch was allowed when the page loaded. A
+call made before a later accept on the same page is dropped, for every
+provider: the visitor had not agreed to it yet.
 
 ### Two expose an ESM interop object, not the factory
 
@@ -99,7 +102,10 @@ bundle itself, before any DOM is involved:
 | `snowplow` | `require$$0 is not defined` — CommonJS leaked into the browser build |
 | `simple-analytics` | no `dist/` at all; only `lib/` CJS and ESM |
 
-### Only PostHog is ours
+### Only PostHog and Meta Pixel are ours
+
+Meta Pixel has no maintained `@analytics` plugin either, so `metaPixelPlugin`
+sits next to `posthogPlugin`.
 
 `@analytics/posthog` does not exist, and the third-party ones
 (`analytics-plugin-posthog` v0.0.3, `@metro-fs/...` v1.14.0) were both last
@@ -197,9 +203,50 @@ sites configure PostHog for, and it ships in the core bundle, so turning it off
 saves nothing. The other three are inverted (`disable_x: config.x !== true`) so
 an absent key means off, which is what an untouched CMS config produces.
 
+## Meta Pixel
+
+**Stores:** `pixelId`, 15 to 20 digits. **Needs:** `marketing`. **Thin sites
+only** (the CMS checks `gosite.layout = thin` in `config.core.php`).
+
+`initialize` installs Meta's `fbq` queue stub and then requests
+`connect.facebook.net/en_US/fbevents.js`; calls made before the script runs
+wait in `fbq.queue`, which the script drains. `loaded()` is true only once
+`fbq.callMethod` exists, that is, once Meta's script has taken over. If a
+blocker stops `fbevents.js`, it never becomes true and the library keeps the
+Pixel's events queued; the other plugins of the same instance still receive
+theirs (checked in Chrome with analytics@0.8.19 and a plugin whose `loaded()`
+stays false).
+
+Checked against Meta's reference (2026-11-13): 17 standard events go through
+`fbq('track')` (`PageView` is sent separately by the plugin's `page`), other
+names through `fbq('trackCustom')`, limited to 50 characters. The dedup id is
+the fourth argument, `{eventID: ...}`; the plugin takes it from `order_id`. A
+Conversions API copy must send the same value as `event_id`.
+
+No `<noscript>` image: it would request `facebook.com/tr` before consent.
+
+Withdrawing marketing reloads the page, and consent.js deletes `_fbp` and
+`_fbc` at the next boot.
+
+## Commerce events
+
+The Commerce addon renders `ViewContent` (product page), `InitiateCheckout`
+(checkout page) and `Purchase` (confirmation) as
+`<script type="application/json" data-analytics-event>` blocks, and sends
+`AddToCart` as the htmx trigger `analytics:event`. analytics.js reads them only
+for providers allowed when the page loaded, and records sent `Purchase` order
+ids in `sessionStorage` (`gosite_purchases`) so a reload does not count twice.
+
+The product page is cached and shared, so its block holds store data only. The
+confirmation page has no order read of its own: the Purchase payload is signed
+into the `gosite_order` cookie when the cart completes, and `content_ids` is
+dropped when it would push the cookie past about 4 KB. htmx adds `elt` to the
+event detail, so a payload must not use the key `target`.
+
 ## Rules that apply to every provider
 
-**Keys are public.** A GTM container id and a PostHog project key are served in
+**Keys are public.** A GTM container id, a PostHog project key and a Meta Pixel
+ID are served in
 the HTML to every visitor. They are not secrets, which is why they can live in
 the CMS and be edited by the client. Do not treat them as credentials, and do
 not put anything that *is* a credential in this collection.

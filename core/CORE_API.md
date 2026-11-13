@@ -151,6 +151,13 @@ shipping `pages/<name>.html` (`commerce-plp.html`, `commerce-pdp.html`,
 `commerce-step-payment.html`, `commerce-address.html`, `commerce-address-co.html`,
 `commerce-address-us.html`).
 
+Analytics events (since 0.68.0): `commerce-pdp.html`, `commerce-checkout.html`
+and `commerce-confirmation.html` receive `.Analytics`, a JSON event ready for a
+data block. A theme that overrides one of them keeps the event by rendering
+`{{with .Analytics}}<script type="application/json" data-analytics-event>{{.}}</script>{{end}}`.
+The htmx add-to-cart response carries the event in `HX-Trigger` as
+`analytics:event`, merged with any other trigger.
+
 Routes: the listing at `commerce_plp_path` (`/tienda`), the product at
 `commerce_pdp_path/:handle` (`/producto`), the cart at `/carrito` and the
 checkout at `commerce_checkout_path` (`/checkout`). The Store API is called only
