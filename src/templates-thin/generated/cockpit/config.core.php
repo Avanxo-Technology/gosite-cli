@@ -54,6 +54,11 @@ $config = [
     // the CMS image; Cockpit skips loading any module named here.
     'modules.disabled' => __DISABLED_ADDONS__,
 
+    // Marks this CMS as a thin site. The Analytics addon offers providers that
+    // need browser code only thin sites carry (Meta Pixel). Legacy sites have
+    // no such key, so they are never offered them.
+    'gosite' => ['layout' => 'thin'],
+
     // Content storage. MongoDB: models and entries live on the shared infra
     // (gosite-mongo in dev, own Mongo in prod), never in local files. Local:
     // mongolite sqlite under storage/data, fully self-contained.

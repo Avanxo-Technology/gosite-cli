@@ -71,16 +71,18 @@ class Analytics extends \Lime\Helper {
         'hubspot'             => 'marketing',
         'fullstory'           => 'analytics',
         'customerio'          => 'marketing',
+        'meta-pixel'          => 'marketing',
     ];
 
     /**
      * Providers the application can actually load.
      *
-     * All but PostHog are official `analytics` plugins with a browser bundle,
-     * loaded from a pinned CDN URL by static/js/analytics/analytics.js. This
-     * list and that file's registry are the two halves of the same fact: a
-     * provider here with no entry there saves and never renders, which is the
-     * failure this list exists to prevent.
+     * All but PostHog and Meta Pixel are official `analytics` plugins with a
+     * browser bundle, loaded from a pinned CDN URL by
+     * static/js/analytics/analytics.js. This list and that file's registry are
+     * the two halves of the same fact: a provider here with no entry there
+     * saves and never renders, which is the failure this list exists to
+     * prevent.
      *
      * Four published plugins are deliberately absent because their bundles do
      * not work standalone - aws-pinpoint, intercom and snowplow reference
@@ -98,7 +100,22 @@ class Analytics extends \Lime\Helper {
         'hubspot'             => 'HubSpot',
         'fullstory'           => 'FullStory',
         'customerio'          => 'Customer.io',
+        'meta-pixel'          => 'Meta Pixel',
     ];
+
+    /**
+     * Providers whose plugin is written in the site's own browser code, not
+     * loaded as an official bundle. The admin reference table marks them.
+     */
+    const CUSTOM_PROVIDERS = ['posthog', 'meta-pixel'];
+
+    /**
+     * Providers that need browser code only a thin site has (core/). The
+     * legacy browser file is frozen, so on a legacy site these are neither
+     * offered in the select nor accepted on save. See providerOptions() and
+     * beforeSave().
+     */
+    const THIN_ONLY_PROVIDERS = ['meta-pixel'];
 
     /**
      * Where an integration applies.
@@ -136,6 +153,7 @@ class Analytics extends \Lime\Helper {
         'hubspot'             => 'https://getanalytics.io/plugins/hubspot/',
         'fullstory'           => 'https://getanalytics.io/plugins/fullstory/',
         'customerio'          => 'https://getanalytics.io/plugins/customerio/',
+        'meta-pixel'          => 'https://developers.facebook.com/docs/meta-pixel/get-started',
     ];
 
     /**
@@ -177,6 +195,13 @@ class Analytics extends \Lime\Helper {
         'hubspot'    => ['fields' => ['portalId' => true]],
         'fullstory'  => ['fields' => ['org' => true]],
         'customerio' => ['fields' => ['siteId' => true]],
+        // Meta's documentation does not state the Pixel ID format. Digits only,
+        // 15 to 20, per third-party setup guides. The ad account id ("act_...")
+        // is the usual mistake and fails this rule.
+        'meta-pixel' => [
+            'fields'  => ['pixelId' => true],
+            'pattern' => ['pixelId' => '/^[0-9]{15,20}$/'],
+        ],
     ];
 
     protected bool $modelsChecked = false;
@@ -227,7 +252,7 @@ class Analytics extends \Lime\Helper {
                     'info' => 'Only providers this site has a plugin for.',
                 ]),
                 $this->field('config', 'object', 'Configuration', true, [
-                    'info' => 'The keys the provider documents, stored verbatim. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."}. Full options per provider: '.self::DOCS_INDEX,
+                    'info' => 'The keys the provider documents, stored verbatim. GTM: {"containerId":"GTM-XXXXXX"} · PostHog: {"key":"phc_...","host":"https://us.i.posthog.com"} · Mixpanel: {"token":"..."} · Segment: {"writeKey":"..."} · Meta Pixel: {"pixelId":"1234567890123456"}. Full options per provider: '.self::DOCS_INDEX,
                 ]),
                 $this->field('category', 'select', 'Consent category', false, [
                     'opts' => ['options' => ['', 'analytics', 'marketing']],
@@ -434,15 +459,35 @@ class Analytics extends \Lime\Helper {
 
     /**
      * The select's options, from the providers the application can load.
+     *
+     * A thin-only provider is left out on a legacy site, so the select never
+     * offers something the site cannot run.
      */
     protected function providerOptions(): array {
         $options = [];
 
         foreach (self::PROVIDERS as $value => $label) {
+
+            if (in_array($value, self::THIN_ONLY_PROVIDERS, true) && !$this->isThinSite()) {
+                continue;
+            }
+
             $options[] = ['value' => $value, 'label' => $label];
         }
 
         return $options;
+    }
+
+    /**
+     * Does this CMS belong to a thin site?
+     *
+     * The generated cockpit/config.core.php of a thin site sets
+     * `gosite.layout` to `thin`. A legacy config has no such key, so absence
+     * reads as legacy: the fail-closed direction for a provider that needs
+     * browser code only thin sites carry.
+     */
+    protected function isThinSite(): bool {
+        return $this->app->retrieve('config/gosite/layout', null) === 'thin';
     }
 
     /**
@@ -577,6 +622,18 @@ class Analytics extends \Lime\Helper {
          */
         $provider    = $this->selectValue($item['provider'] ?? null);
         $environment = $this->selectValue($item['environments'] ?? null) ?: 'all';
+
+        /*
+         * The one refusal in this method, and it is a message the editor can
+         * act on: the provider's browser code is not on a legacy site, so
+         * storing it would promise tracking that never runs. The same exception
+         * type sanitize() uses for hostile input.
+         */
+        if (in_array($provider, self::THIN_ONLY_PROVIDERS, true) && !$this->isThinSite()) {
+            throw new \App\Exception\AppNotification(
+                self::PROVIDERS[$provider].' needs an updated site. Ask your developer to update it.'
+            );
+        }
 
         $item['provider']     = $provider;
         $item['environments'] = in_array($environment, self::ENVIRONMENTS, true) ? $environment : 'all';
@@ -843,6 +900,9 @@ class Analytics extends \Lime\Helper {
         if ($provider === 'posthog' && $key === 'key') {
             return 'a project API key, usually starting with phc_.';
         }
+        if ($provider === 'meta-pixel' && $key === 'pixelId') {
+            return 'a Pixel ID of 15 to 20 digits, from Meta Events Manager. Not the ad account id (act_...).';
+        }
         return 'see the addon README.';
     }
 
@@ -902,7 +962,7 @@ class Analytics extends \Lime\Helper {
                 'label'    => $label,
                 'keys'     => $fields,
                 'docs'     => $this->providerDocs($value),
-                'custom'   => $value === 'posthog',
+                'custom'   => in_array($value, self::CUSTOM_PROVIDERS, true),
             ];
         }
 
