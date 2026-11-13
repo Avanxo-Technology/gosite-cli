@@ -444,11 +444,13 @@ class Replica extends \Lime\Helper {
             ? 'content/singletons'
             : "content/collections/{$model}";
 
+        // A singleton is one document per model, whatever its _id: each
+        // instance creates its own, so the incoming one replaces it rather
+        // than sitting next to it.
         if ($collection === 'content/singletons') {
             $item['_model'] = $model;
-        }
-
-        if ($exists && isset($item['_id'])) {
+            $this->app->dataStorage->remove($collection, ['_model' => $model]);
+        } elseif ($exists && isset($item['_id'])) {
             $this->app->dataStorage->remove($collection, ['_id' => $item['_id']]);
         }
 
@@ -987,7 +989,9 @@ class Replica extends \Lime\Helper {
                     continue;
                 }
 
-                $outcome = $client->pushItems($name, $items, $mode, $idMap, $type);
+                $definition = $this->localModel($name);
+                $same       = fn(array $mine, array $theirs) => $this->contentHash($mine, $definition, false) === $this->contentHash($theirs, $definition, false);
+                $outcome    = $client->pushItems($name, $items, $mode, $idMap, $type, $peer ? null : $same);
 
                 // Protection added after the manifest was read: skip this model, keep pushing the rest.
                 if (!empty($outcome['protectedRefused'])) {
@@ -1226,8 +1230,10 @@ class Replica extends \Lime\Helper {
      */
     public function applyItems(string $model, array $items, string $mode, bool $dryRun = false): array {
 
-        $result  = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
-        $current = $this->localItemsById($model);
+        $result     = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'errors' => 0, 'messages' => []];
+        $current    = $this->localItemsById($model);
+        $singleton  = $this->localType($model) === 'singleton';
+        $definition = $this->localModel($model);
 
         foreach ($items as $item) {
 
@@ -1239,7 +1245,15 @@ class Replica extends \Lime\Helper {
                 continue;
             }
 
-            $existing = $current[$id] ?? null;
+            $existing = $current[$id] ?? ($singleton ? (array_values($current)[0] ?? null) : null);
+
+            // Identical content is not rewritten, in either mode, so a run
+            // reports what its dry run planned. Both sides are peers here.
+            if ($existing && $this->contentHash($item, $definition, true) === $this->contentHash($existing, $definition, true)) {
+                $result['skipped']++;
+                $result['messages'][] = "same {$id}";
+                continue;
+            }
 
             if ($existing && $mode === self::MODE_MERGE) {
 
@@ -1450,11 +1464,21 @@ class Replica extends \Lime\Helper {
 
             if ($id && isset($remote[$id])) {
                 $remoteId = $id;
-            } elseif ($id && isset($idMap[$id]) && isset($remote[$idMap[$id]])) {
+            } elseif ($id && isset($idMap[$id])) {
+                // A mapped entry the core hides (unpublished) is still an
+                // update for pushItems(), never a create.
                 $remoteId = $idMap[$id];
+            } else {
+                $remoteId = $this->singletonPair($type ?: (string)($definition['type'] ?? ''), $remote);
             }
 
-            $existing = $remoteId ? $remote[$remoteId] : null;
+            $existing = $remoteId ? ($remote[$remoteId] ?? null) : null;
+
+            if ($remoteId && !$existing) {
+                $result['updated']++;
+                $result['messages'][] = "would update {$id} (remote {$remoteId}, not visible: unpublished)";
+                continue;
+            }
 
             // Identical content is not an update, whatever the timestamps say. Checked before
             // the merge rule so an identical entry is reported as same, not as "destination is newer".
@@ -1481,6 +1505,22 @@ class Replica extends \Lime\Helper {
         }
 
         return $result;
+    }
+
+    /**
+     * The remote id a singleton pairs with when the ids differ.
+     *
+     * Each instance creates its own singleton document, so the two sides of
+     * the same singleton rarely share an _id. There is one document per
+     * model, so the only remote one is the match.
+     *
+     * @param array<string,array> $remoteById
+     */
+    protected function singletonPair(string $type, array $remoteById): ?string {
+
+        if ($type !== 'singleton' || count($remoteById) !== 1) return null;
+
+        return (string)array_key_first($remoteById);
     }
 
     /**
@@ -1554,6 +1594,8 @@ class Replica extends \Lime\Helper {
                     $remoteId = $id;
                 } elseif ($id !== null && isset($idMap[$id]) && isset($remoteById[$idMap[$id]])) {
                     $remoteId = $idMap[$id];
+                } else {
+                    $remoteId = $this->singletonPair($type, $remoteById);
                 }
 
                 if ($remoteId === null) {

@@ -226,7 +226,8 @@ the source is also gone at the destination.
 `--dry-run` reports exactly what would change — including the remote lookups
 needed to classify each entry — and writes nothing on either side. It is still
 recorded in the log, flagged `[dry]`. An entry whose content is identical on
-both sides is reported as `same <id>`, not as an update.
+both sides is reported as `same <id>`, not as an update, and the real run skips
+it too (a 1.0.0 destination still rewrites it).
 
 ---
 
@@ -283,6 +284,11 @@ Tree position (`_pid`, `_o`) counts on peers; a core target strips it, so it is
 ignored there. On a peer, `_modified` decides the direction when the content
 differs. A core target stamps its own timestamps and hides unpublished entries,
 and the result says so.
+
+A singleton is one document per model, and each instance creates its own, so
+the two sides usually have different ids. Replica pairs them by model: the
+comparison treats them as one entry, and a push or pull replaces the
+destination's document instead of adding a second one.
 
 In the admin screen, tick entries under **Only here** or **Changed here** and
 use **Push selected** (one model at a time; the card's mode and dry-run apply).

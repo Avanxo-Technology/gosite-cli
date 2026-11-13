@@ -207,12 +207,18 @@ class Client extends \Lime\Helper {
                 // remote replies 404 when the model has no content yet, which
                 // simply means there is nothing to copy.
                 $response = $this->request('GET', "/api/content/item/{$model}");
-                $doc      = is_array($response['body'] ?? null) ? $response['body'] : null;
-                $batch    = $doc ? [$doc] : [];
 
-                if ($response['status'] !== 200 && $response['status'] !== 404) {
+                if ($response['status'] === 404) {
+                    break;
+                }
+
+                if ($response['status'] !== 200) {
                     throw new \Exception("Remote read of '{$model}' failed: ".($response['error'] ?: 'HTTP '.$response['status']));
                 }
+
+                $doc = is_array($response['body'] ?? null) ? $response['body'] : null;
+
+                return $doc ? [$doc] : [];
             } else {
 
                 $response = $this->request('GET', "/api/content/items/{$model}", [
@@ -287,7 +293,7 @@ class Client extends \Lime\Helper {
      * Peer: one batched call, timestamps preserved, merge resolved remotely.
      * Core: one POST per item, and _created/_modified are lost (see class doc).
      */
-    public function pushItems(string $model, array $items, string $mode, array $idMap = [], string $type = ''): array {
+    public function pushItems(string $model, array $items, string $mode, array $idMap = [], string $type = '', ?callable $same = null): array {
 
         if ($this->isPeer()) {
 
@@ -365,6 +371,13 @@ class Client extends \Lime\Helper {
                  * that truly no longer exists makes the core POST a no-op.
                  */
                 $unverifiable = !isset($remote[$remoteId]);
+            }
+
+            // Identical content is not rewritten, so the run matches its dry run.
+            if ($remoteId && $same && isset($remote[$remoteId]) && $same($item, $remote[$remoteId])) {
+                $result['skipped']++;
+                $result['messages'][] = 'same '.$id.($remoteId === $id ? '' : " (remote {$remoteId})");
+                continue;
             }
 
             if ($remoteId && $mode === 'merge') {

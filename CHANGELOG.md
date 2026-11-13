@@ -17,8 +17,16 @@
   the content, so a re-save without changes is `same`.
 - **Added: push a selection.** `replica:push <target> <model> --ids=a,b`, or
   tick entries in the Compare view.
-- **Changed: the dry run reports identical entries as `same`** instead of
-  `would update`.
+- **Changed: identical entries are skipped as `same`**, in the dry run and in
+  the real run, so a run reports what its dry run planned. Against a 1.0.0
+  destination the real run still rewrites them.
+- **Fixed: singletons pair by model.** Each instance creates its own singleton
+  (for example `analyticsConsent`), so the two sides had different ids: a push
+  left two documents on the destination and the site read either one. A push
+  or pull now replaces the destination's singleton, and the next push merges a
+  duplicate left by 1.0.0.
+- **Fixed: a push to a plain Cockpit no longer fails on an empty singleton.**
+  Its 404 stopped the whole run.
 - **Upgrade:** Replica goes to 1.1.0 and is baked into the CMS image, so rebuild
   the CMS of each site that uses it. Upgrade the destination before the source:
   a 1.0.0 source that pushes to a protected model fails that run with a

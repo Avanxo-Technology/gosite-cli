@@ -39,7 +39,7 @@
 ## 7. Verification in the sandbox
 
 - [x] 7.1 Every scenario in `specs/replica-model-protection/spec.md` against a peer, including a 1.0.0 source against a 1.1.0 destination and the reverse
-- [ ] 7.2 Every scenario in `specs/replica-diff/spec.md` against a peer and a core target, with entries from Blog, Webapp, Forms and Analytics models
+- [x] 7.2 Every scenario in `specs/replica-diff/spec.md` against a peer and a core target, with entries from Blog, Webapp, Forms and Analytics models
 - [x] 7.3 Test the Compare and Protected views in a browser; capture screenshots for the PR
 
 ## 8. Docs and release
