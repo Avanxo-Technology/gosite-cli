@@ -487,7 +487,8 @@ class Analytics extends \Lime\Helper {
      * browser code only thin sites carry.
      */
     protected function isThinSite(): bool {
-        return $this->app->retrieve('config/gosite/layout', null) === 'thin';
+        // Keys from config.php are read without a 'config/' prefix.
+        return $this->app->retrieve('gosite/layout', null) === 'thin';
     }
 
     /**
