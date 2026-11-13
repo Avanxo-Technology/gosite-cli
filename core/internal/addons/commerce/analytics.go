@@ -13,6 +13,7 @@ const (
 	eventViewContent      = "ViewContent"
 	eventAddToCart        = "AddToCart"
 	eventInitiateCheckout = "InitiateCheckout"
+	eventPurchase         = "Purchase"
 )
 
 // analyticsTrigger is the htmx trigger name analytics.js listens for.
@@ -25,13 +26,14 @@ type analyticsEvent struct {
 }
 
 // eventProperties is a fixed struct, not a map, so no other key can reach the
-// payload.
+// payload. order_id is set only on Purchase.
 type eventProperties struct {
 	Value       Amount   `json:"value"`
 	Currency    string   `json:"currency"`
 	ContentIDs  []string `json:"content_ids"`
 	ContentType string   `json:"content_type"`
 	NumItems    int      `json:"num_items"`
+	OrderID     string   `json:"order_id,omitempty"`
 }
 
 // productEvent builds an event about products. Medusa amounts are already in
@@ -76,13 +78,36 @@ func addToCartEvent(data buyData, variantID string, quantity int) *analyticsEven
 
 // checkoutEvent is InitiateCheckout for the cart's lines and total.
 func checkoutEvent(cart *Cart, currency string) *analyticsEvent {
+	ids, items := cartLines(cart)
+	return productEvent(eventInitiateCheckout, cart.Total, currency, ids, items)
+}
+
+// purchaseEvent is Purchase for a completed order. The order response has no
+// lines, so the variant ids and quantities come from the cart as it was before
+// completion. The currency is the order's, or the region's when Medusa sends none.
+func purchaseEvent(order *Order, cart *Cart) *analyticsEvent {
+	currency := order.CurrencyCode
+	if currency == "" {
+		def, _ := regionDefForCurrent()
+		currency = def.currency
+	}
+	ids, items := cartLines(cart)
+	ev := productEvent(eventPurchase, order.Total, currency, ids, items)
+	if ev != nil {
+		ev.Properties.OrderID = order.ID
+	}
+	return ev
+}
+
+// cartLines returns the variant ids of a cart's lines and the total quantity.
+func cartLines(cart *Cart) ([]string, int) {
 	ids := make([]string, 0, len(cart.Items))
 	items := 0
 	for _, item := range cart.Items {
 		ids = append(ids, item.VariantID)
 		items += item.Quantity
 	}
-	return productEvent(eventInitiateCheckout, cart.Total, currency, ids, items)
+	return ids, items
 }
 
 // eventBlock renders an event as the body of a data block. json.Marshal escapes

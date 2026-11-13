@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -179,32 +180,45 @@ func (s *Commerce) CheckoutComplete(c *echo.Context) error {
 		return s.h.Reply(c).Fail(http.StatusBadGateway, "could not complete the order", err)
 	}
 	if result.IsOrder() {
+		purchase := purchaseEvent(result.Order, cart)
 		s.clearCartCookie(c)
-		s.setConfirmationCookie(c, result.Order.DisplayID)
+		s.setConfirmationCookie(c, result.Order.DisplayID, purchase)
 		return c.Redirect(http.StatusSeeOther, cfgCheckoutPath+"/gracias/"+strconv.Itoa(result.Order.DisplayID))
 	}
 	return s.completeFailed(c, ctx, cart, completeErrorMessage(result))
 }
 
-// Confirmation shows the thanks page, only for the browser that completed.
+// Confirmation shows the thanks page, only for the browser that completed. The
+// page is not cached (Page with false, and no-store) because it carries the
+// order's Purchase data.
 func (s *Commerce) Confirmation(c *echo.Context) error {
 	if !s.ready(c) {
 		return nil
 	}
 	displayID, err := strconv.Atoi(c.Param("id"))
-	if err != nil || !s.confirmationValid(c, displayID) {
+	if err != nil {
 		return echo.ErrNotFound
+	}
+	purchase, ok := s.confirmationPurchase(c, displayID)
+	if !ok {
+		return echo.ErrNotFound
+	}
+	analytics, err := eventBlock(purchase)
+	if err != nil {
+		return s.h.Reply(c).Fail(http.StatusInternalServerError, "could not render the confirmation", err)
 	}
 	data := map[string]any{
 		"Title":     "Order placed",
 		"Path":      cfgCheckoutPath,
 		"DisplayID": displayID,
 		"IsDev":     s.Config.IsDev(),
+		"Analytics": analytics,
 	}
 	var buf strings.Builder
 	if err := s.Renderer.Page(&buf, "commerce-confirmation", data); err != nil {
 		return s.h.Reply(c).Fail(http.StatusInternalServerError, "could not render the confirmation", err)
 	}
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return s.h.Reply(c).Page([]byte(buf.String()), false)
 }
 
@@ -345,10 +359,19 @@ func (s *Commerce) ensureManualPayment(ctx context.Context, cart *Cart) (*Cart, 
 
 // --------------------------------------------------------------- confirmation
 
-func (s *Commerce) setConfirmationCookie(c *echo.Context, displayID int) {
+// maxConfirmationCookie keeps the cookie value well under the 4 KB that browsers
+// keep per cookie.
+const maxConfirmationCookie = 3800
+
+func (s *Commerce) setConfirmationCookie(c *echo.Context, displayID int, purchase *analyticsEvent) {
+	value, err := confirmationCookieValue(displayID, purchase)
+	if err != nil {
+		s.Log.Warn("commerce: could not encode the purchase event", "err", err)
+		value, _ = confirmationCookieValue(displayID, nil)
+	}
 	c.SetCookie(&http.Cookie{
 		Name:     confirmationCookie,
-		Value:    signConfirmation(displayID),
+		Value:    value,
 		Path:     cfgCheckoutPath,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -357,19 +380,67 @@ func (s *Commerce) setConfirmationCookie(c *echo.Context, displayID int) {
 	})
 }
 
-func (s *Commerce) confirmationValid(c *echo.Context, displayID int) bool {
-	cookie, err := c.Cookie(confirmationCookie)
-	if err != nil {
-		return false
+// confirmationCookieValue is base64url(payload) "." base64url(HMAC-SHA256), where
+// the payload is the Purchase event as JSON ("null" when there is none) and the
+// MAC covers the display id and the payload. A value over the size limit loses
+// its content_ids and is signed again; the other properties are kept.
+func confirmationCookieValue(displayID int, purchase *analyticsEvent) (string, error) {
+	value, err := signedConfirmation(displayID, purchase)
+	if err != nil || len(value) <= maxConfirmationCookie || purchase == nil {
+		return value, err
 	}
-	expected := signConfirmation(displayID)
-	return hmac.Equal([]byte(cookie.Value), []byte(expected))
+	trimmed := *purchase
+	trimmed.Properties.ContentIDs = []string{}
+	return signedConfirmation(displayID, &trimmed)
 }
 
-func signConfirmation(displayID int) string {
+func signedConfirmation(displayID int, purchase *analyticsEvent) (string, error) {
+	payload, err := json.Marshal(purchase)
+	if err != nil {
+		return "", err
+	}
+	mac := signPayload(displayID, payload)
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac), nil
+}
+
+func signPayload(displayID int, payload []byte) []byte {
 	mac := hmac.New(sha256.New, confirmationKey)
-	mac.Write([]byte(strconv.Itoa(displayID)))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	mac.Write([]byte(strconv.Itoa(displayID) + "."))
+	mac.Write(payload)
+	return mac.Sum(nil)
+}
+
+// confirmationPurchase reads the signed cookie for this display id. The purchase
+// is nil when the order had no price; ok is false when the cookie does not
+// authorise the page.
+func (s *Commerce) confirmationPurchase(c *echo.Context, displayID int) (*analyticsEvent, bool) {
+	cookie, err := c.Cookie(confirmationCookie)
+	if err != nil {
+		return nil, false
+	}
+	return parseConfirmation(cookie.Value, displayID)
+}
+
+// parseConfirmation checks a cookie value against a display id and decodes its
+// payload. A value in any other format fails the check.
+func parseConfirmation(value string, displayID int) (*analyticsEvent, bool) {
+	encodedPayload, encodedMAC, ok := strings.Cut(value, ".")
+	if !ok {
+		return nil, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(encodedPayload)
+	if err != nil {
+		return nil, false
+	}
+	mac, err := base64.RawURLEncoding.DecodeString(encodedMAC)
+	if err != nil || !hmac.Equal(mac, signPayload(displayID, payload)) {
+		return nil, false
+	}
+	var purchase *analyticsEvent
+	if err := json.Unmarshal(payload, &purchase); err != nil {
+		return nil, false
+	}
+	return purchase, true
 }
 
 // --------------------------------------------------------------- view models

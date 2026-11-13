@@ -2,6 +2,7 @@ package commerce
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -304,5 +305,200 @@ func TestCheckoutFullPageSendsInitiateCheckoutOnly(t *testing.T) {
 	step := post(t, e, "/_commerce/checkout/email", "email=ada@example.com", true, cookie)
 	if strings.Contains(step.Body.String(), "data-analytics-event") {
 		t.Fatal("a checkout step fragment carries an event block")
+	}
+}
+
+// purchaseFixture is the Purchase for a one-line order of 59900 COP.
+func purchaseFixture(t *testing.T) *analyticsEvent {
+	t.Helper()
+	order := &Order{ID: "order_01", DisplayID: 42, CurrencyCode: "cop", Total: "59900"}
+	cart := &Cart{Items: []LineItem{{VariantID: "prod_1_v1", Quantity: 1}}}
+	ev := purchaseEvent(order, cart)
+	if ev == nil {
+		t.Fatal("purchaseEvent returned nil for a priced order")
+	}
+	return ev
+}
+
+func TestPurchaseEventCarriesTheOrder(t *testing.T) {
+	got := wireEvent(t, purchaseFixture(t))
+	p := got.Properties
+	if got.Event != eventPurchase || p.Value.String() != "59900" || p.Currency != "COP" ||
+		p.OrderID != "order_01" || p.NumItems != 1 || p.ContentType != "product" ||
+		len(p.ContentIDs) != 1 || p.ContentIDs[0] != "prod_1_v1" {
+		t.Fatalf("Purchase = %+v", got)
+	}
+	// Only Purchase carries order_id: the other events omit it.
+	block, err := eventBlock(checkoutEvent(&Cart{Total: "1", Items: []LineItem{{VariantID: "v"}}}, "cop"))
+	if err != nil || strings.Contains(string(block), "order_id") {
+		t.Fatalf("InitiateCheckout carries order_id: %s %v", block, err)
+	}
+	if purchaseEvent(&Order{ID: "order_02", CurrencyCode: "cop"}, &Cart{}) != nil {
+		t.Error("a Purchase was built for an order with no total")
+	}
+}
+
+func TestConfirmationCookieRoundTrip(t *testing.T) {
+	value, err := confirmationCookieValue(42, purchaseFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := parseConfirmation(value, 42)
+	if !ok || got == nil || got.Properties.OrderID != "order_01" || got.Properties.Value.String() != "59900" {
+		t.Fatalf("round trip = %+v, %v", got, ok)
+	}
+
+	// An order without a price keeps the thanks page, with no event.
+	none, err := confirmationCookieValue(42, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := parseConfirmation(none, 42); !ok || got != nil {
+		t.Fatalf("nil purchase = %+v, %v; want no event and ok", got, ok)
+	}
+}
+
+func TestConfirmationCookieRejectsWrongOrTamperedValues(t *testing.T) {
+	value, err := confirmationCookieValue(42, purchaseFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, sig, _ := strings.Cut(value, ".")
+
+	other, err := confirmationCookieValue(42, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPayload, otherSig, _ := strings.Cut(other, ".")
+
+	cases := []struct {
+		name  string
+		value string
+		id    int
+	}{
+		{name: "wrong display id", value: value, id: 43},
+		{name: "payload replaced, signature kept", value: otherPayload + "." + sig, id: 42},
+		{name: "signature of another payload", value: payload + "." + otherSig, id: 42},
+		{name: "signature removed", value: payload + ".", id: 42},
+		{name: "old format, signature only", value: sig, id: 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := parseConfirmation(tc.value, tc.id); ok {
+				t.Fatalf("accepted the cookie: %+v", got)
+			}
+		})
+	}
+}
+
+func TestOversizeCookieDropsContentIDsOnly(t *testing.T) {
+	ids := make([]string, 300)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("variant_%04d_%s", i, strings.Repeat("x", 20))
+	}
+	purchase := productEvent(eventPurchase, "149700", "cop", ids, 300)
+	purchase.Properties.OrderID = "order_01"
+
+	full, err := signedConfirmation(42, purchase)
+	if err != nil || len(full) <= maxConfirmationCookie {
+		t.Fatalf("fixture is not oversize: %d bytes, %v", len(full), err)
+	}
+	value, err := confirmationCookieValue(42, purchase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(value) > maxConfirmationCookie {
+		t.Fatalf("cookie is %d bytes, limit %d", len(value), maxConfirmationCookie)
+	}
+	got, ok := parseConfirmation(value, 42)
+	if !ok || got == nil {
+		t.Fatal("trimmed cookie failed its check")
+	}
+	p := got.Properties
+	if len(p.ContentIDs) != 0 || p.NumItems != 300 || p.Value.String() != "149700" ||
+		p.Currency != "COP" || p.OrderID != "order_01" || got.Event != eventPurchase {
+		t.Fatalf("trimmed purchase = %+v", got)
+	}
+}
+
+func TestConfirmationPageRendersOnePurchaseBlock(t *testing.T) {
+	block, err := eventBlock(purchaseFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := renderFragment("commerce-confirmation.html", map[string]any{
+		"Title": "Order placed", "DisplayID": 42, "Analytics": block,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(html)
+	if n := strings.Count(body, "<script"); n != 1 {
+		t.Fatalf("page has %d <script> elements, want exactly the event block", n)
+	}
+	events := parseEventBlocks(t, body)
+	if len(events) != 1 || events[0].Event != eventPurchase || events[0].Properties.OrderID != "order_01" {
+		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestConfirmationPageSurvivesHostileIDs(t *testing.T) {
+	hostileVariant := `prod_"x</script><b>`
+	hostileOrder := `order_"1</script>`
+	purchase := productEvent(eventPurchase, "59900", "cop", []string{hostileVariant}, 1)
+	purchase.Properties.OrderID = hostileOrder
+	block, err := eventBlock(purchase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := renderFragment("commerce-confirmation.html", map[string]any{
+		"Title": "Order placed", "DisplayID": 42, "Analytics": block,
+	})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := string(html)
+	if n := strings.Count(body, "<script"); n != 1 {
+		t.Fatalf("page has %d <script> elements, want exactly the event block", n)
+	}
+	events := parseEventBlocks(t, body)
+	if len(events) != 1 || events[0].Properties.OrderID != hostileOrder ||
+		len(events[0].Properties.ContentIDs) != 1 || events[0].Properties.ContentIDs[0] != hostileVariant {
+		t.Fatalf("hostile ids did not round trip: %+v", events)
+	}
+}
+
+func TestThanksPageCarriesPurchaseAndRefusesOtherOrders(t *testing.T) {
+	fake := newCartFake(t)
+	e := newCartApp(t, fake)
+	cookie := checkoutCookie(t, e, fake)
+	advanceToPayment(t, e, cookie)
+
+	rec := post(t, e, "/_commerce/checkout/complete", "", true, cookie)
+	orderCookie := responseCookie(t, rec, confirmationCookie)
+	if orderCookie == nil {
+		t.Fatal("complete did not set the confirmation cookie")
+	}
+
+	thanks := getWithCookie(t, e, "/checkout/gracias/1", orderCookie)
+	events := parseEventBlocks(t, thanks.Body.String())
+	if len(events) != 1 || events[0].Event != eventPurchase || events[0].Properties.OrderID != "order_1" ||
+		events[0].Properties.Value.String() != "59900" || events[0].Properties.Currency != "COP" {
+		t.Fatalf("thanks page events = %+v", events)
+	}
+	if cc := thanks.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("thanks page Cache-Control = %q, want no-store", cc)
+	}
+
+	if other := getWithCookie(t, e, "/checkout/gracias/2", orderCookie); other.Code != http.StatusNotFound ||
+		strings.Contains(other.Body.String(), "data-analytics-event") {
+		t.Fatalf("other order = %d, want 404 with no block", other.Code)
+	}
+
+	tampered := *orderCookie
+	tampered.Value = "x" + orderCookie.Value
+	if bad := getWithCookie(t, e, "/checkout/gracias/1", &tampered); bad.Code != http.StatusNotFound ||
+		strings.Contains(bad.Body.String(), "data-analytics-event") {
+		t.Fatalf("tampered cookie = %d, want 404 with no block", bad.Code)
 	}
 }
