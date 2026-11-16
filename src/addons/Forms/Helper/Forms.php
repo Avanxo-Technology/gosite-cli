@@ -766,6 +766,12 @@ class Forms extends \Lime\Helper {
      * second system with its own retention, this addon already prunes
      * ip/userAgent from its own store after personal_data_retention, and a
      * duplicate of that data in a chat history is not covered by that policy.
+     *
+     * The wording comes from the site's `forms` config, so a message never
+     * carries another site's name: `webhookHeading` ({form} is replaced by the
+     * form's label), `webhookSiteName` (shown before the date in the footer)
+     * and `webhookColor` (the attachment bar; Mattermost's neutral colour when
+     * unset).
      */
     protected function mattermostBody(array $settings, array $entry): string {
 
@@ -788,14 +794,26 @@ class Forms extends \Lime\Helper {
             ];
         }
 
+        $form    = (string)(($settings['label'] ?? '') ?: $entry['form']);
+        $heading = trim((string)$this->config('webhookHeading', '')) ?: 'New **{form}** submission';
+        $site    = trim((string)$this->config('webhookSiteName', ''));
+        $date    = date('Y-m-d H:i', (int)($entry['_created'] ?? time()));
+
+        $attachment = [
+            'title'  => (string)$entry['form'],
+            'fields' => $lines,
+            'footer' => $site !== '' ? $site.' · '.$date : $date,
+        ];
+
+        $color = trim((string)$this->config('webhookColor', ''));
+
+        if ($color !== '') {
+            $attachment['color'] = $color;
+        }
+
         return json_encode([
-            'text'        => 'New **'.($settings['label'] ?: $entry['form']).'** submission',
-            'attachments' => [[
-                'color'  => '#F26A2E',
-                'title'  => (string)$entry['form'],
-                'fields' => $lines,
-                'footer' => 'BA-POW! · '.date('Y-m-d H:i', (int)($entry['_created'] ?? time())),
-            ]],
+            'text'        => str_replace('{form}', $form, $heading),
+            'attachments' => [$attachment],
         ]);
     }
 

@@ -648,3 +648,33 @@ old prefix, so nothing breaks, but production and QA still share keys. Use
 Thin sites: the change comes from the core upgrade; `gosite generate` is not
 needed. Legacy sites: the cache keys follow `config.CacheKeyPrefix()` after
 upgrading the core module.
+
+## → 0.68.1 — Forms: the Mattermost wording is the site's
+
+Only for sites that send forms to Mattermost (`webhookFormat: mattermost`).
+Before, every message was signed `BA-POW!` with an orange bar. After the
+upgrade the footer is the date only and the bar is neutral, until you set:
+
+```php
+'forms' => [
+    'webhookSiteName' => 'Aldu Dotaciones',      // footer: "Aldu Dotaciones · 2026-11-16 10:20"
+    'webhookHeading'  => 'Nuevo envío: **{form}**', // default: New **{form}** submission
+    'webhookColor'    => '#0055AA',              // optional
+],
+```
+
+These are wording, not secrets, and are the same in every environment, so they
+live in the config file, not in `.env`.
+
+**Thin sites.** Set them in `cockpit/config.local.php` (never rewritten by
+`gosite generate`). Move `core:` in `gosite.yml` and the core in `go.mod` to
+0.68.1, `go mod tidy`, `gosite generate`, and rebuild the CMS image: the
+addons come from `core/v0.68.1`.
+
+**Legacy sites.** Copy `src/addons/Forms/` over `cockpit/addons/Forms/` (a
+site that patched the footer by hand, such as lnequipos-v2, drops its patch),
+add the keys to the `forms` block of `cockpit/config.php`, and rebuild the CMS
+image.
+
+**Then.** Submit a form and check the message in the channel.
+
