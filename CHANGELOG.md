@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.68.1
+
+### Forms: Mattermost messages carry the site's own wording
+
+- **Fixed:** the Mattermost message footer said `BA-POW!` and the attachment
+  bar used that site's orange on every site (#46). The footer is now the date,
+  preceded by `forms.webhookSiteName` when it is set, and the bar uses
+  Mattermost's neutral colour unless `forms.webhookColor` is set.
+- **Added:** `forms.webhookHeading` sets the message heading; `{form}` is
+  replaced by the form's label. The default stays `New **{form}** submission`.
+- **Upgrade:** see MIGRATIONS (→ 0.68.1). Nothing to change for sites that do
+  not send forms to Mattermost.
+
 ## 0.68.0
 
 ### Analytics: Meta Pixel and store events

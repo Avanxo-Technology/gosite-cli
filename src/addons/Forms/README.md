@@ -232,6 +232,16 @@ format sends the submitted fields as one attachment field per field, and
 **only** those fields - no IP and no user agent, since the chat is a second
 system that does not inherit this addon's `personal_data_retention`.
 
+The message wording comes from the site's `forms` config (`cockpit/config.php`
+in legacy sites, `cockpit/config.local.php` in thin ones). All three keys are
+optional and are the same in every environment:
+
+| Key | Effect | Unset |
+| --- | --- | --- |
+| `webhookHeading` | message text; `{form}` becomes the form's label | `New **{form}** submission` |
+| `webhookSiteName` | shown before the date in the footer | the date only |
+| `webhookColor` | colour of the attachment bar, e.g. `#0055AA` | Mattermost's neutral colour |
+
 E-mail goes through `$app->mailer`. Sites scaffolded by gosite 0.55.0 or later
 configure it from the CMS environment: set `SMTP_HOST` (plus `SMTP_PORT`,
 `SMTP_ENCRYPTION`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_FROM_NAME`)
