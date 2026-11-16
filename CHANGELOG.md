@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.69.0
+
+### Thin sites: own environment variables and the store's database name
+
+- **Added: `app_env:` in `gosite.yml`.** A list of variable names the site's
+  own code reads. `gosite generate` writes `- NAME=${NAME:-}` into the app
+  service of the QA and production compose, so Coolify passes them. Before,
+  sites added these lines to the generated compose by hand, and the next
+  `gosite generate` deleted them. A name that is not a variable name, or that
+  the app service already sets (`REDIS_URL`, `APP_ENV`, ...), stops generate.
+- **Added: `MEDUSA_DB_NAME` and `MEDUSA_DB_USER`** for Commerce, in every
+  environment. Both default to `medusa`, so an existing store keeps its data.
+- **Upgrade:** see MIGRATIONS (→ 0.69.0).
+
 ## 0.68.1
 
 ### Forms: Mattermost messages carry the site's own wording

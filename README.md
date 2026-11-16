@@ -359,6 +359,19 @@ load. The module's contract — what a site may rely on across versions — is
 [`core/CORE_API.md`](core/CORE_API.md). Existing projects are unaffected: without
 `gosite.yml` every command behaves as before.
 
+A variable the site's own code reads in QA or production goes in `gosite.yml`,
+not in the generated compose. Coolify only passes a variable the compose names:
+
+```yaml
+app_env:
+  - UPSTASH_SEARCH_INDEX
+  - WRAP_WEB_FORM_SECRET
+```
+
+`gosite generate` adds `- NAME=${NAME:-}` to the app service of the QA and
+production compose. The values stay in `.env` and in Coolify. In dev the app
+already reads all of `.env`.
+
 ### Addons in an existing project
 
 Adding an addon to a project made months ago has its own command:

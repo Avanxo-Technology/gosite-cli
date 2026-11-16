@@ -61,6 +61,11 @@
 #                           webhooks) are routed; the Store API stays internal.
 #   Medusa's uploads (product images) use the S3_* variables above, in a
 #   medusa/ folder under S3_PREFIX.
+#   MEDUSA_DB_NAME, MEDUSA_DB_USER  optional, the store's Postgres database
+#                           and user (both default to medusa). Postgres creates
+#                           them only on the first start with an empty volume:
+#                           changing them later leaves Medusa without its data
+#                           until the database is renamed or restored.
 # gosite:end
 #
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
@@ -92,6 +97,7 @@ services:
       # gosite:addon Commerce
       - COMMERCE_URL=http://__PROJECT__-prod-medusa:9000
       # gosite:end
+      # gosite:app-env
     # gosite:addon Commerce
     volumes:
       - __PROJECT__-prod-commerce-key:/run/gosite-commerce:ro
@@ -211,7 +217,7 @@ services:
     image: ghcr.io/avanxo-technology/gosite-medusa:__CORE_VERSION__
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://medusa:${MEDUSA_DB_PASSWORD}@__PROJECT__-prod-medusa-db:5432/medusa?sslmode=disable
+      - DATABASE_URL=postgres://${MEDUSA_DB_USER:-medusa}:${MEDUSA_DB_PASSWORD}@__PROJECT__-prod-medusa-db:5432/${MEDUSA_DB_NAME:-medusa}?sslmode=disable
       - REDIS_URL=redis://:${MEDUSA_REDIS_PASSWORD}@__PROJECT__-prod-medusa-redis:6379/0
       - JWT_SECRET=${JWT_SECRET}
       - COOKIE_SECRET=${COOKIE_SECRET}
@@ -278,13 +284,13 @@ services:
     image: postgres:16.15-alpine
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=medusa
+      - POSTGRES_USER=${MEDUSA_DB_USER:-medusa}
       - POSTGRES_PASSWORD=${MEDUSA_DB_PASSWORD}
-      - POSTGRES_DB=medusa
+      - POSTGRES_DB=${MEDUSA_DB_NAME:-medusa}
     volumes:
       - __PROJECT__-prod-medusa-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 12

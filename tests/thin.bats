@@ -189,6 +189,7 @@ EOF
   for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
     cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
     _thin_filter_addon_blocks "${F}"
+    _thin_render_app_env "${F}"
     diff -u "${BATS_TEST_DIRNAME}/fixtures/compose-without-addons/${f}" "${F}"
   done
 }
@@ -227,6 +228,66 @@ EOF
   done
   # QA's and production's routers must differ (one Traefik).
   ! grep -q '__PROJECT__-shop\.' "${GOSITE_ROOT}/templates-thin/generated/docker-compose.qa.yml"
+}
+
+@test "app_env names reach the app service of QA and production, at its indent" {
+  local env
+  for env in qa prod; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.${env}.yml" "${F}"
+    _thin_filter_addon_blocks "${F}"
+    _thin_render_app_env "${F}" EELZAP_API_KEY WRAP_WEB_FORM_SECRET
+    ! grep -q 'gosite:app-env' "${F}"
+    grep -qx '      - EELZAP_API_KEY=${EELZAP_API_KEY:-}' "${F}"
+    grep -qx '      - WRAP_WEB_FORM_SECRET=${WRAP_WEB_FORM_SECRET:-}' "${F}"
+    # In the app service, before the CMS service starts.
+    [ "$(grep -n 'EELZAP_API_KEY' "${F}" | cut -d: -f1)" -lt "$(grep -n "^  __PROJECT__-${env}-cms:" "${F}" | cut -d: -f1)" ]
+    [ "$(grep -n 'EELZAP_API_KEY' "${F}" | cut -d: -f1)" -gt "$(grep -n "^  __PROJECT__-${env}-app:" "${F}" | cut -d: -f1)" ]
+  done
+}
+
+@test "app_env keeps working with Commerce enabled" {
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.prod.yml" "${F}"
+  _thin_filter_addon_blocks "${F}" Commerce
+  _thin_render_app_env "${F}" UPSTASH_SEARCH_INDEX
+  grep -A1 'COMMERCE_URL=' "${F}" | grep -q "app_env in gosite.yml"
+  grep -qx '      - UPSTASH_SEARCH_INDEX=${UPSTASH_SEARCH_INDEX:-}' "${F}"
+}
+
+@test "app_env rejects a name that is not a variable name" {
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.prod.yml" "${F}"
+  run _thin_render_app_env "${F}" 'BAD-NAME'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a variable name"* ]]
+  run _thin_render_app_env "${F}" 'X=1'
+  [ "$status" -ne 0 ]
+}
+
+@test "app_env rejects a name the app service already sets" {
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.prod.yml" "${F}"
+  _thin_filter_addon_blocks "${F}"
+  run _thin_render_app_env "${F}" REDIS_URL
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REDIS_URL is already set"* ]]
+}
+
+@test "app_env may repeat a name another service sets" {
+  # SMTP_HOST is the CMS's; the app can read its own.
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.prod.yml" "${F}"
+  _thin_filter_addon_blocks "${F}"
+  _thin_render_app_env "${F}" SMTP_HOST
+  [ "$(grep -c -- '- SMTP_HOST=' "${F}")" -eq 2 ]
+}
+
+@test "the store's Postgres user and database default to medusa in every environment" {
+  local f
+  for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    grep -q 'postgres://${MEDUSA_DB_USER:-medusa}:${MEDUSA_DB_PASSWORD}@' "${F}"
+    grep -q '5432/${MEDUSA_DB_NAME:-medusa}?sslmode=disable' "${F}"
+    grep -q 'POSTGRES_USER.*${MEDUSA_DB_USER:-medusa}' "${F}"
+    grep -q 'POSTGRES_DB.*${MEDUSA_DB_NAME:-medusa}' "${F}"
+  done
 }
 
 @test "gosite_env_flag: true-ish values enable, false-ish and unknown values fall back to the default" {
