@@ -16,6 +16,7 @@ repository.
 | change a Cockpit setting | `cockpit/config.local.php` |
 | change the dev stack | `docker-compose.override.yml` |
 | change ports, domains, storage | `gosite.yml`, then `gosite generate` |
+| read a new environment variable in QA/production | list it under `app_env:` in `gosite.yml`, then `gosite generate` |
 | load products into the store (Commerce) | Medusa's Admin API: `gosite docs medusa-admin-api` |
 
 ## Rules

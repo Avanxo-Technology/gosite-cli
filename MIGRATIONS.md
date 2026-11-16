@@ -678,3 +678,31 @@ image.
 
 **Then.** Submit a form and check the message in the channel.
 
+## → 0.69.0 — Thin sites declare their own environment variables
+
+Thin sites only. Legacy sites keep editing their compose files.
+
+**Before you regenerate, list what the site added by hand.** `gosite generate`
+rewrites the compose files: any line a site added to them is deleted, also in
+production. Compare the variable names in each compose with what the template
+gives, for example:
+
+```bash
+names(){ grep -oE '^ +(- )?[A-Z_][A-Z0-9_]*[=:]' | sed -E 's/^ +(- )?//; s/[=:]$//' | sort -u; }
+cp -R my-site /tmp/regen && (cd /tmp/regen && gosite generate)
+comm -23 <(names < my-site/docker-compose.prod.yml) <(names < /tmp/regen/docker-compose.prod.yml)
+```
+
+Every name that comes out is lost on regenerate. Then:
+
+1. Variables the app reads: list them under `app_env:` in `gosite.yml`.
+2. `MEDUSA_DB_NAME` / `MEDUSA_DB_USER` (Commerce): nothing to do, the template
+   has them now, with the same `medusa` default.
+3. Anything else (another service, a label, an image): it belongs in gosite.
+   Open an issue before regenerating.
+
+Move `core:` in `gosite.yml` and the core in `go.mod` to 0.69.0,
+`go mod tidy`, `gosite generate`, run the comparison again (it must print
+nothing), and rebuild. In Coolify, check that each `app_env` variable is still
+set: it is the same value as before, now named by the generated file.
+

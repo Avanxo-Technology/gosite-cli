@@ -144,10 +144,57 @@ _thin_filter_addon_blocks() {
   mv "${tmp}" "${file}"
 }
 
+# _thin_render_app_env <file> <name...> -> replaces each `# gosite:app-env`
+# line with one `- NAME=${NAME:-}` entry per name, at the marker's indent, or
+# drops the line when no name is given. These are the variables a site's own
+# code reads: Coolify passes a variable to a container only when the compose
+# names it, and the compose is generated, so gosite.yml's app_env list is
+# where a site declares them. A name that is not a plain variable name, or
+# that the service already sets, fails the render instead of producing a
+# compose with a broken or duplicated entry.
+_thin_render_app_env() {
+  local file="$1"; shift
+  local name
+  for name in "$@"; do
+    [[ "${name}" =~ ^[A-Z_][A-Z0-9_]*$ ]] || fatal "gosite.yml app_env: '${name}' is not a variable name (A-Z, 0-9 and _, not starting with a digit)."
+  done
+  local tmp; tmp="$(mktemp)"
+  if ! THIN_APP_ENV="$*" awk '
+    BEGIN { n = split(ENVIRON["THIN_APP_ENV"], names, " ") }
+    # A service starts at a two-space key; what it already sets is collected
+    # from its "- NAME=" entries up to the marker.
+    /^  [^ #]/ { delete seen }
+    /^[[:space:]]*- [A-Z_][A-Z0-9_]*=/ {
+      entry = $0
+      sub(/^[[:space:]]*- /, "", entry)
+      sub(/=.*/, "", entry)
+      seen[entry] = 1
+    }
+    /^[[:space:]]*# gosite:app-env[[:space:]]*$/ {
+      if (n == 0) next
+      indent = $0
+      sub(/#.*/, "", indent)
+      print indent "# Read by this site'"'"'s own code; listed under app_env in gosite.yml."
+      for (i = 1; i <= n; i++) {
+        if (names[i] in seen) { err = names[i] " is already set by this service"; exit 1 }
+        print indent "- " names[i] "=${" names[i] ":-}"
+      }
+      next
+    }
+    { print }
+    END { if (err != "") { print err > "/dev/stderr"; exit 1 } }
+  ' "${file}" > "${tmp}"; then
+    rm -f "${tmp}"
+    fatal "${file}: gosite.yml app_env cannot be rendered (see above)."
+  fi
+  mv "${tmp}" "${file}"
+}
+
 # _thin_render <file> <dir> -> thin-only placeholders, then the shared ones.
 _thin_render() {
-  local file="$1" dir="$2" tmp addons=() a
+  local file="$1" dir="$2" tmp addons=() app_env=() a
   while IFS= read -r a; do addons+=("${a}"); done < <(siteyml_list "${dir}/gosite.yml" addons)
+  while IFS= read -r a; do app_env+=("${a}"); done < <(siteyml_list "${dir}/gosite.yml" app_env)
   local version="${THIN_CORE_VERSION:-$(thin_core_version)}"
   tmp="$(mktemp)"
   sed \
@@ -160,6 +207,7 @@ _thin_render() {
   # Drop addon blocks before the shared placeholders run, so a dropped block's
   # placeholders never reach assert_no_placeholders.
   _thin_filter_addon_blocks "${file}" "${addons[@]+"${addons[@]}"}"
+  _thin_render_app_env "${file}" "${app_env[@]+"${app_env[@]}"}"
   render_placeholders "${file}"
 }
 

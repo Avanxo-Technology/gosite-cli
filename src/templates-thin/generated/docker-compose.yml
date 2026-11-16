@@ -128,7 +128,7 @@ services:
     container_name: __PROJECT__-medusa
     restart: unless-stopped
     environment:
-      DATABASE_URL: "postgres://medusa:${MEDUSA_DB_PASSWORD}@__PROJECT__-medusa-db:5432/medusa?sslmode=disable"
+      DATABASE_URL: "postgres://${MEDUSA_DB_USER:-medusa}:${MEDUSA_DB_PASSWORD}@__PROJECT__-medusa-db:5432/${MEDUSA_DB_NAME:-medusa}?sslmode=disable"
       REDIS_URL: "redis://:${MEDUSA_REDIS_PASSWORD}@__PROJECT__-medusa-redis:6379/0"
       JWT_SECRET: "${JWT_SECRET}"
       COOKIE_SECRET: "${COOKIE_SECRET}"
@@ -192,13 +192,13 @@ services:
     container_name: __PROJECT__-medusa-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: medusa
+      POSTGRES_USER: "${MEDUSA_DB_USER:-medusa}"
       POSTGRES_PASSWORD: "${MEDUSA_DB_PASSWORD}"
-      POSTGRES_DB: medusa
+      POSTGRES_DB: "${MEDUSA_DB_NAME:-medusa}"
     volumes:
       - __PROJECT__-medusa-db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 12
