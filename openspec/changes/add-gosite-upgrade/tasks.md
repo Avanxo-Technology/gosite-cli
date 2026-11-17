@@ -28,7 +28,7 @@
 
 - [x] 4.1 `tests/upgrade.bats` (no Docker, no network): legacy refused; same version refused; site newer refused; lost variable stops with the site unchanged and no temporary copy left; `--force` continues past the check (stub `go`/`docker`/`curl` on `PATH`)
 - [x] 4.2 MIGRATIONS section selection from a fixture file (0.69.0 → 0.71.0 prints 0.70.0, 0.70.1, 0.71.0 and nothing else)
-- [ ] 4.3 shellcheck clean; full `bats tests/` green on macOS; CI green on Linux
+- [x] 4.3 shellcheck clean; full `bats tests/` green on macOS; CI green on Linux
 
 ## 5. Prove on a sandbox site (no real site)
 
