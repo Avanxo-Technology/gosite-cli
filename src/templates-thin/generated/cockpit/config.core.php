@@ -170,6 +170,10 @@ $config = [
         // Only meaningful for the json format, where the body is signed as
         // X-Forms-Signature. Mattermost ignores it.
         'webhookSecret' => getenv('FORMS_WEBHOOK_SECRET') ?: null,
+        // reCAPTCHA v3 secret. Forms verifies a submission's token only for a
+        // form whose formSettings sets recaptchaMinScore. Unset means not
+        // verified (logged when a form asks for it).
+        'recaptchaSecret' => getenv('RECAPTCHA_SECRET_KEY') ?: null,
     ],
 ];
 

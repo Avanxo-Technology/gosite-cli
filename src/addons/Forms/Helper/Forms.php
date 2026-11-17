@@ -39,6 +39,14 @@ class Forms extends \Lime\Helper {
     // because the memory backend is down.
     const RATE_LIMIT_RETRY_AFTER = 30;
 
+    // reCAPTCHA v3, verified on submit for a form whose formSettings sets
+    // recaptchaMinScore. The secret is forms.recaptchaSecret in the CMS config
+    // (RECAPTCHA_SECRET_KEY), never a Cockpit entry.
+    const RECAPTCHA_VERIFY_URL     = 'https://www.google.com/recaptcha/api/siteverify';
+    const RECAPTCHA_TIMEOUT_SECONDS = 5;
+    const RECAPTCHA_TOKEN_FIELD    = 'g-recaptcha-response';
+    const RECAPTCHA_ACTION_FIELD   = 'recaptcha_action';
+
     // Personal data (ip/userAgent) retention defaults, overridable per project
     // in cockpit/config.php under 'forms':
     //   collect_personal_data   false = never store ip/userAgent (the rate
@@ -68,7 +76,7 @@ class Forms extends \Lime\Helper {
     // the first request that ran the creates, so every later migration was
     // skipped for the life of the install - the model kept its old field list
     // and Content silently dropped the new field on save.
-    const MODELS_VERSION = 2;
+    const MODELS_VERSION = 3;
 
     protected bool $modelsChecked = false;
 
@@ -139,6 +147,9 @@ class Forms extends \Lime\Helper {
                     $this->field('webhookSecret', 'text', 'Webhook secret'),
                     $this->field('throttle', 'number', 'Seconds between submissions per IP'),
                     $this->field('dailyLimit', 'number', 'Max submissions per IP per day'),
+                    $this->field('fieldOptions', 'object', 'Choices per field'),
+                    $this->field('recaptchaMinScore', 'number', 'reCAPTCHA minimum score'),
+                    $this->field('recaptchaActions', 'tags', 'reCAPTCHA actions'),
                 ],
             ]);
         }
@@ -190,13 +201,18 @@ class Forms extends \Lime\Helper {
 
         $added = false;
 
+        // fieldOptions and the reCAPTCHA fields arrived with the site API
+        // (0.75.0); they go at the end, after the anti-spam limits.
         foreach ([
-            'webhookFormat' => $this->field('webhookFormat', 'text', 'Webhook format'),
+            'webhookFormat'     => $this->field('webhookFormat', 'text', 'Webhook format'),
+            'fieldOptions'      => $this->field('fieldOptions', 'object', 'Choices per field'),
+            'recaptchaMinScore' => $this->field('recaptchaMinScore', 'number', 'reCAPTCHA minimum score'),
+            'recaptchaActions'  => $this->field('recaptchaActions', 'tags', 'reCAPTCHA actions'),
         ] as $name => $definition) {
 
             if (isset($have[$name])) continue;
 
-            if ($insert !== null) {
+            if ($name === 'webhookFormat' && $insert !== null) {
                 array_splice($order, $insert, 0, [$definition]);
                 $insert++;
             } else {
@@ -277,6 +293,9 @@ class Forms extends \Lime\Helper {
             'webhookSecret' => null,
             'throttle'      => self::DEFAULT_THROTTLE_SECONDS,
             'dailyLimit'    => self::DEFAULT_DAILY_LIMIT,
+            'fieldOptions'      => [],
+            'recaptchaMinScore' => null,
+            'recaptchaActions'  => [],
         ], $doc);
 
         $settings['webhook']       = $settings['webhook']       ?: $this->config('webhook', null);
@@ -284,6 +303,31 @@ class Forms extends \Lime\Helper {
         $settings['webhookSecret'] = $settings['webhookSecret'] ?: $this->config('webhookSecret', null);
 
         return $settings;
+    }
+
+    /**
+     * The part of a form's settings a site may read: its label and the choices
+     * of its fields. Everything else in formSettings (addresses, webhooks,
+     * secrets, limits) stays in the CMS.
+     */
+    public function publicSettings(string $form): array {
+
+        $settings = $this->settings($form);
+        $options  = [];
+
+        foreach ((array)$settings['fieldOptions'] as $field => $choices) {
+            if (!is_string($field) || !is_array($choices)) continue;
+            $options[$field] = array_values(array_filter(array_map(
+                fn($c) => is_scalar($c) ? trim((string)$c) : '',
+                $choices
+            ), fn($c) => $c !== ''));
+        }
+
+        return [
+            'form'         => $form,
+            'label'        => (string)$settings['label'],
+            'fieldOptions' => (object)$options,
+        ];
     }
 
     /**
@@ -417,10 +461,20 @@ class Forms extends \Lime\Helper {
 
         unset($data[self::HONEYPOT_FIELD]);
 
+        // The token travels as {recaptcha: {token, action}} in a JSON body or
+        // as two fields of a form post; it is never stored with the data.
+        $recaptcha = $this->recaptchaFrom($payload, $data);
+
         $this->ensureModels();
 
         $settings = $this->settings($form);
         $ip       = $this->clientIp();
+
+        // Before the rate limit counts the request: a bot must not spend the
+        // allowance of a visitor behind the same address.
+        if (!$this->verifyRecaptcha($settings, $recaptcha)) {
+            return ['status' => 403, 'success' => false, 'error' => 'recaptcha'];
+        }
 
         $throttle   = (int)$settings['throttle'];
         $dailyLimit = (int)$settings['dailyLimit'];
@@ -471,7 +525,152 @@ class Forms extends \Lime\Helper {
 
         $this->dispatch($settings, $saved ?: $entry);
 
-        return ['status' => 200, 'success' => true];
+        // The ID lets the site update this submission later (updateData), for
+        // example to record how a multi-step form ended.
+        return ['status' => 200, 'success' => true, '_id' => (string)($saved['_id'] ?? '')];
+    }
+
+    /**
+     * Merges fields into the data of a stored submission, for a site that
+     * completes a submission in steps. Sanitized like a new submission, and it
+     * never notifies: e-mail and webhooks go out once, on submit. When the
+     * caller passes the visitor's reCAPTCHA token, it is verified with the
+     * form's settings.
+     *
+     * Returns ['status' => 200|400|403|404, ...].
+     */
+    public function updateData(string $id, $fields, ?array $recaptcha = null): array {
+
+        if (!is_array($fields) || !count($fields)) {
+            return ['status' => 400, 'success' => false, 'error' => 'Missing data.'];
+        }
+
+        $this->ensureModels();
+
+        $content = $this->app->module('content');
+
+        if (!$this->app->dataStorage->isValidId($id)) {
+            return ['status' => 404, 'success' => false, 'error' => 'Submission not found.'];
+        }
+
+        $item = $content->item(self::MODEL_SUBMISSIONS, ['_id' => $id]);
+
+        if (!$item) {
+            return ['status' => 404, 'success' => false, 'error' => 'Submission not found.'];
+        }
+
+        if ($recaptcha !== null && !$this->verifyRecaptcha($this->settings((string)$item['form']), $recaptcha)) {
+            return ['status' => 403, 'success' => false, 'error' => 'recaptcha'];
+        }
+
+        unset($fields[self::HONEYPOT_FIELD], $fields[self::RECAPTCHA_TOKEN_FIELD], $fields[self::RECAPTCHA_ACTION_FIELD]);
+
+        $data = is_array($item['data'] ?? null) ? $item['data'] : [];
+
+        foreach ($this->sanitize($fields) as $key => $value) {
+            $data[$key] = $value;
+        }
+
+        $content->saveItem(self::MODEL_SUBMISSIONS, ['_id' => $id, 'data' => $data], ['user' => null]);
+
+        return ['status' => 200, 'success' => true, '_id' => $id];
+    }
+
+    /**
+     * The reCAPTCHA token and action of a request, removed from $data. Null
+     * when the request carries none.
+     */
+    protected function recaptchaFrom(array $payload, array &$data): ?array {
+
+        $token  = $data[self::RECAPTCHA_TOKEN_FIELD] ?? null;
+        $action = $data[self::RECAPTCHA_ACTION_FIELD] ?? null;
+        unset($data[self::RECAPTCHA_TOKEN_FIELD], $data[self::RECAPTCHA_ACTION_FIELD]);
+
+        if (is_array($payload['recaptcha'] ?? null)) {
+            $token  = $payload['recaptcha']['token'] ?? $token;
+            $action = $payload['recaptcha']['action'] ?? $action;
+        }
+
+        if ($token === null && $action === null) {
+            return null;
+        }
+
+        return ['token' => is_string($token) ? trim($token) : '', 'action' => is_string($action) ? trim($action) : ''];
+    }
+
+    /**
+     * True when the request may go on. A form without recaptchaMinScore
+     * always passes. A missing token, a failed verification, an action outside
+     * recaptchaActions or a low score refuse it. When Google cannot be reached
+     * or answers something unreadable, or no secret is configured, the request
+     * passes and the log says so: an outage on Google's side must not take the
+     * site's forms down, and the honeypot and rate limit still apply.
+     */
+    public function verifyRecaptcha(array $settings, ?array $recaptcha): bool {
+
+        $min = $settings['recaptchaMinScore'] ?? null;
+
+        if ($min === null || $min === '') {
+            return true;
+        }
+
+        $form   = (string)($settings['form'] ?? '');
+        $secret = trim((string)$this->config('recaptchaSecret', ''));
+
+        if ($secret === '') {
+            $this->log("recaptcha: enabled for form {$form} but forms.recaptchaSecret is empty; not verified");
+            return true;
+        }
+
+        $token  = (string)($recaptcha['token'] ?? '');
+        $action = (string)($recaptcha['action'] ?? '');
+
+        if ($token === '') {
+            $this->log("recaptcha: missing token for form {$form}");
+            return false;
+        }
+
+        $context = stream_context_create(['http' => [
+            'method'        => 'POST',
+            'header'        => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content'       => http_build_query(['secret' => $secret, 'response' => $token]),
+            'timeout'       => self::RECAPTCHA_TIMEOUT_SECONDS,
+            'ignore_errors' => true,
+        ]]);
+
+        $url = (string)$this->config('recaptchaVerifyUrl', self::RECAPTCHA_VERIFY_URL);
+        $raw = @file_get_contents($url, false, $context);
+
+        if ($raw === false) {
+            $this->log("recaptcha: verify unreachable for form {$form}; allowed");
+            return true;
+        }
+
+        $result = json_decode($raw, true);
+
+        if (!is_array($result) || !array_key_exists('success', $result)) {
+            $this->log("recaptcha: unreadable verify answer for form {$form}; allowed");
+            return true;
+        }
+
+        $actions = array_map('strval', (array)($settings['recaptchaActions'] ?? []));
+        $score   = (float)($result['score'] ?? 0);
+        $got     = (string)($result['action'] ?? '');
+
+        $ok = !empty($result['success'])
+            && $got !== '' && in_array($got, $actions, true)
+            && ($action === '' || $action === $got)
+            && $score >= (float)$min;
+
+        if (!$ok) {
+            $codes = implode(',', array_map('strval', (array)($result['error-codes'] ?? [])));
+            $this->log("recaptcha: rejected for form {$form} (score {$score}, action '{$got}', errors '{$codes}')");
+        } else {
+            // Google's admin console lags by hours; this line is the proof.
+            $this->log("recaptcha: verified for form {$form} (score {$score}, action '{$got}')");
+        }
+
+        return $ok;
     }
 
     /**
