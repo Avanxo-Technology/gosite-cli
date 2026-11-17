@@ -14,6 +14,7 @@ repository.
 | add Redis data that is not cache | `r.State()` — never raw keys under the project prefix |
 | enable an addon | `gosite addons add <Name>` (edits `gosite.yml`) |
 | change a Cockpit setting | `cockpit/config.local.php` |
+| add Cockpit models only this site uses | an addon in `cockpit/site-addons/<Name>/`, then `gosite generate`; its name must not be a gosite addon's |
 | change the dev stack | `docker-compose.override.yml` |
 | change ports, domains, storage | `gosite.yml`, then `gosite generate` |
 | read a new environment variable in QA/production | list it under `app_env:` in `gosite.yml`, then `gosite generate` |

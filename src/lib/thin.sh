@@ -190,6 +190,62 @@ _thin_render_app_env() {
   mv "${tmp}" "${file}"
 }
 
+# thin_site_addons <dir> -> the site's own Cockpit addons, the folder names
+# under cockpit/site-addons/, one per line and sorted. They are the site's
+# code: generate copies them into the CMS image and never writes in them.
+thin_site_addons() {
+  local d
+  [[ -d "$1/cockpit/site-addons" ]] || return 0
+  for d in "$1/cockpit/site-addons"/*/; do
+    [[ -d "${d}" ]] && basename "${d}"
+  done | LC_ALL=C sort
+}
+
+# thin_check_site_addons <dir> -> stops when a site addon has the name of a
+# gosite addon. Both are copied into the same addons folder of the image, so
+# the second copy would replace the first without a word. The comparison
+# ignores case: macOS treats Forms and forms as one folder.
+thin_check_site_addons() {
+  local site lib
+  while IFS= read -r site; do
+    while IFS= read -r lib; do
+      if [[ "$(printf '%s' "${site}" | tr '[:upper:]' '[:lower:]')" == "$(printf '%s' "${lib}" | tr '[:upper:]' '[:lower:]')" ]]; then
+        fatal "cockpit/site-addons/${site} has the name of the gosite addon ${lib}. Rename the site addon; nothing was generated."
+      fi
+    done < <(thin_addon_library)
+  done < <(thin_site_addons "$1")
+}
+
+# _thin_render_site_addons <file> <dir> -> replaces the `# gosite:site-addons`
+# line with the COPY of cockpit/site-addons/ when the site has an addon there,
+# or drops the line. Docker fails a COPY of a missing folder, so the line is
+# only written when there is something to copy.
+_thin_render_site_addons() {
+  local file="$1" dir="$2" has=0 tmp
+  grep -q '^# gosite:site-addons$' "${file}" || return 0
+  [[ -n "$(thin_site_addons "${dir}")" ]] && has=1
+  tmp="$(mktemp)"
+  THIN_HAS_SITE_ADDONS="${has}" awk '
+    /^# gosite:site-addons$/ {
+      if (ENVIRON["THIN_HAS_SITE_ADDONS"] == "1") {
+        print "# The site'"'"'s own addons, from cockpit/site-addons/. generate refuses a"
+        print "# name that a gosite addon already uses."
+        print "COPY cockpit/site-addons/ /var/www/html/addons/"
+        print ""
+      }
+      next
+    }
+    { print }
+  ' "${file}" > "${tmp}"
+  # awk ends the last line with a newline; keep the template's ending.
+  if [[ -n "$(tail -c 1 "${file}")" ]]; then
+    printf '%s' "$(cat "${tmp}")" > "${file}"
+    rm -f "${tmp}"
+  else
+    mv "${tmp}" "${file}"
+  fi
+}
+
 # _thin_render <file> <dir> -> thin-only placeholders, then the shared ones.
 _thin_render() {
   local file="$1" dir="$2" tmp addons=() app_env=() a
@@ -207,6 +263,7 @@ _thin_render() {
   # placeholders never reach assert_no_placeholders.
   _thin_filter_addon_blocks "${file}" "${addons[@]+"${addons[@]}"}"
   _thin_render_app_env "${file}" "${app_env[@]+"${app_env[@]}"}"
+  _thin_render_site_addons "${file}" "${dir}"
   render_placeholders "${file}"
 }
 
@@ -297,6 +354,7 @@ thin_generate() {
   root="$(thin_template_root)"
   thin_is_project "${dir}" || fatal "$(basename "${dir}") has no gosite.yml: 'gosite generate' only manages thin sites. Upgrade other projects with MIGRATIONS.md."
   thin_check_commerce "${dir}"
+  thin_check_site_addons "${dir}"
   thin_load_render_vars "${dir}"
   thin_ensure_commerce_secrets "${dir}"
 

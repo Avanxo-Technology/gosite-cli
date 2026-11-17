@@ -342,6 +342,7 @@ my-site/
 ├── static/
 ├── gosite.yml         # project, ports, domains, storage, database, addons
 ├── cockpit/config.php + config.local.php       # yours
+├── cockpit/site-addons/<Name>/                 # yours (optional): the site's own Cockpit addons
 ├── docker-compose.override.yml                 # yours
 └── docker-compose*.yml, deploy/, cockpit/config.core.php   # generated
 ```

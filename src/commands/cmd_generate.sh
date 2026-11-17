@@ -38,10 +38,19 @@ cmd_generate() {
   thin_is_project "${dir}" || fatal "$(basename "${dir}") has no gosite.yml: 'gosite generate' only manages thin sites. Upgrade other projects with MIGRATIONS.md."
   info "Generating $(basename "${dir}") from gosite.yml"
 
-  local rel
+  # A subshell, so the render variables thin_generate exports stay inside it,
+  # and its status is checked: a fatal inside it (a check of gosite.yml, a
+  # site addon with a gosite addon's name) ends only the subshell.
+  local rel written
+  written="$(mktemp)"
+  if ! ( thin_generate "${dir}" ) > "${written}"; then
+    rm -f "${written}"
+    return 1
+  fi
   while IFS= read -r rel; do
     ok "Wrote ${rel}"
-  done < <(thin_generate "${dir}")
+  done < "${written}"
+  rm -f "${written}"
 
   # thin_generate ran in a subshell above, so count the skipped files here.
   local f skipped=0

@@ -152,6 +152,12 @@ _upgrade_check_copy() {
   mkdir -p "${copy}"
   cp "${dir}/gosite.yml" "${copy}/"
   [[ -f "${dir}/.env" ]] && cp "${dir}/.env" "${copy}/"
+  # The site's own addons: generate reads them, and refuses a name that a
+  # gosite addon of the new version uses, before the site is changed.
+  if [[ -d "${dir}/cockpit/site-addons" ]]; then
+    mkdir -p "${copy}/cockpit"
+    cp -R "${dir}/cockpit/site-addons" "${copy}/cockpit/"
+  fi
   # The current generated files, so a file without the generated header is
   # skipped in the copy exactly as generate skips it in the site.
   while IFS= read -r -d '' rel; do
