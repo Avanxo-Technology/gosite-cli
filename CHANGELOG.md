@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.73.0
+
+### The site's own Cockpit addons
+
+- **Added: thin sites can have their own Cockpit addons** in
+  `cockpit/site-addons/<Name>/`. When the folder has an addon, the generated
+  `deploy/Dockerfile.cms` copies it into the CMS image next to gosite's
+  addons. `gosite generate` never writes there, and stops when a site addon
+  has the name of a gosite addon (case ignored); `gosite upgrade` checks this
+  in its temporary copy, before it changes the site. Site addons are always
+  enabled. A site without the folder generates the same files as before.
+- **Fixed: `gosite generate` exited 0 when a check failed.** A failed check of
+  `gosite.yml` (for example Commerce without `commerce_region`) printed its
+  error, but the command still exited 0 and printed "Rebuild for the changes
+  to take effect". It now exits non-zero and prints nothing more.
+- **Upgrade:** see MIGRATIONS (→ 0.73.0).
+
 ## 0.72.0
 
 ### gosite upgrade

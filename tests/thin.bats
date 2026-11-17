@@ -324,3 +324,59 @@ PHP
   [ "$status" -eq 0 ]
   [ "$output" = "1=T true=T YES=T  on =T 0=F off=F maybe=F =F default-true=T unset=F" ]
 }
+
+# Site-owned Cockpit addons (cockpit/site-addons/): copied into the CMS image
+# when present, never written by generate, never allowed to shadow a gosite
+# addon.
+make_site_addon() {
+  mkdir -p "$1/cockpit/site-addons/$2"
+  printf '<?php\n' > "$1/cockpit/site-addons/$2/bootstrap.php"
+}
+
+@test "Dockerfile.cms without site addons is byte-identical to the template without the marker" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}" tpl="${GOSITE_ROOT}/templates-thin/generated/deploy/Dockerfile.cms"
+  mkdir -p "${dir}/cockpit/site-addons"
+  cp "${tpl}" "${F}"
+  _thin_render_site_addons "${F}" "${dir}"
+  grep -v '^# gosite:site-addons$' "${tpl}" > "${F}.want"
+  # grep adds a final newline the template does not have.
+  printf '%s' "$(cat "${F}.want")" > "${F}.want"
+  cmp "${F}.want" "${F}"
+}
+
+@test "Dockerfile.cms copies cockpit/site-addons when the site has one" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_site_addon "${dir}" Casos
+  cp "${GOSITE_ROOT}/templates-thin/generated/deploy/Dockerfile.cms" "${F}"
+  _thin_render_site_addons "${F}" "${dir}"
+  ! grep -q 'gosite:site-addons' "${F}"
+  grep -qx 'COPY cockpit/site-addons/ /var/www/html/addons/' "${F}"
+  # The template's last line keeps its ending.
+  [ -n "$(tail -c 1 "${F}")" ]
+}
+
+@test "site addons are listed sorted and only folders count" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_site_addon "${dir}" Nosotros
+  make_site_addon "${dir}" Casos
+  : > "${dir}/cockpit/site-addons/README.md"
+  run thin_site_addons "${dir}"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'Casos\nNosotros')" ]
+}
+
+@test "a site addon with a gosite addon's name stops generate, whatever its case" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_site_addon "${dir}" forms
+  run thin_check_site_addons "${dir}"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cockpit/site-addons/forms"* ]]
+  [[ "$output" == *"gosite addon Forms"* ]]
+}
+
+@test "site addons with their own names pass the check" {
+  local dir="${GOSITE_TEST_ROOT}/proj-${RANDOM}"
+  make_site_addon "${dir}" Casos
+  run thin_check_site_addons "${dir}"
+  [ "$status" -eq 0 ]
+}

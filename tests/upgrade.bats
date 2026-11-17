@@ -199,3 +199,33 @@ EOF
   run thin_set_core_version "${BATS_TEST_TMPDIR}/h.yml" 0.2.0
   [ "${status}" -ne 0 ]
 }
+
+@test "generate: a site addon with a gosite addon's name exits non-zero and writes nothing" {
+  mkdir -p "${SITE}/cockpit/site-addons/Forms"
+  local before; before="$(tree_sum "${SITE}")"
+  run bash "${GOSITE_ROOT}/main.sh" generate "${SITE}"
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"cockpit/site-addons/Forms"* ]]
+  [[ "${output}" != *"Rebuild for the changes"* ]]
+  [ "$(tree_sum "${SITE}")" = "${before}" ]
+}
+
+@test "generate: a site addon reaches the CMS Dockerfile and is left untouched" {
+  mkdir -p "${SITE}/cockpit/site-addons/Casos"
+  printf '<?php\n' > "${SITE}/cockpit/site-addons/Casos/bootstrap.php"
+  run bash "${GOSITE_ROOT}/main.sh" generate "${SITE}"
+  [ "${status}" -eq 0 ]
+  grep -qx 'COPY cockpit/site-addons/ /var/www/html/addons/' "${SITE}/deploy/Dockerfile.cms"
+  [ "$(cat "${SITE}/cockpit/site-addons/Casos/bootstrap.php")" = "<?php" ]
+}
+
+@test "upgrade: a site addon with a gosite addon's name stops it before any change" {
+  mkdir -p "${SITE}/cockpit/site-addons/Blog"
+  local before; before="$(tree_sum "${SITE}")"
+  upgrade "${SITE}" --no-images
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"cockpit/site-addons/Blog"* ]]
+  [ "$(tree_sum "${SITE}")" = "${before}" ]
+  [ ! -e "${STUBS}/go.log" ]
+  [ -z "$(ls -A "${TMPDIR}")" ]
+}

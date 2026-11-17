@@ -138,6 +138,15 @@ A strict subset of YAML: `key: value` lines and `- item` lists. Core reads
 `addons`; an unknown addon name stops startup. `GOSITE_CONFIG` names another
 file.
 
+## Cockpit addons of the site
+
+gosite's addons come from the `gosite-addons` build context at the core
+version. A site's own addons live in `cockpit/site-addons/<Name>/`. When that
+folder has an addon, the generated `deploy/Dockerfile.cms` copies it into the
+CMS image next to gosite's. `gosite generate` never writes there, and stops
+when a site addon has the name of a gosite addon (case ignored). Site addons
+are always enabled: `modules.disabled` names only gosite addons.
+
 ## Testing a site
 
 ```go

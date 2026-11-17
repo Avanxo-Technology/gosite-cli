@@ -869,3 +869,19 @@ with a message that names the variable. QA and production composes are not
 affected.
 
 Legacy sites: nothing changes.
+
+## → 0.73.0 — the site's own Cockpit addons
+
+A thin site can keep Cockpit addons of its own in `cockpit/site-addons/<Name>/`
+(for example, addons that only install content models). `gosite generate`
+copies that folder into the CMS image and never writes in it. A site addon
+with the name of a gosite addon stops `generate` and `upgrade`.
+
+**Thin sites:** `gosite upgrade <site>`. A site without `cockpit/site-addons/`
+generates the same files as with 0.72.0.
+
+`gosite generate` now exits non-zero when one of its checks of `gosite.yml`
+fails (for example Commerce without `commerce_region`). Before, it printed the
+error and exited 0. A script that runs `generate` sees the failure now.
+
+Legacy sites: nothing changes.
