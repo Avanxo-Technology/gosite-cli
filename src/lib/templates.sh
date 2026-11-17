@@ -69,8 +69,8 @@ load_project_render_vars() {
   DATABASE="${GOSITE_DATABASE:-mongodb}"
   STORAGE_ADAPTER="${STORAGE_ADAPTER:-s3}"
   # CMS_TOKEN/COCKPIT_SEC_KEY live in the project's .env - read them from
-  # there so a re-render reproduces exactly what create wrote (config.php
-  # bakes the sec-key fallback into the file). When .env is unavailable the
+  # there so a re-render of the env templates reproduces exactly what create
+  # wrote. No config file carries them. When .env is unavailable the
   # placeholder fallback keeps a render from clobbering secrets with blanks.
   CMS_TOKEN="$(_env_value "$1" COCKPIT_API_TOKEN)"
   COCKPIT_SEC_KEY="$(_env_value "$1" COCKPIT_SEC_KEY)"

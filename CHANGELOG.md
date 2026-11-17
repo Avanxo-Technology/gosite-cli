@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.70.0
+
+### Cockpit: no sec-key fallback
+
+- **Changed: the CMS does not start without `COCKPIT_SEC_KEY`** (#48). The
+  config read `getenv('COCKPIT_SEC_KEY') ?: '<fallback>'`, and the fallback was
+  either the public template placeholder or the site's real key, written into
+  `cockpit/config.php` (legacy) or `cockpit/config.core.php` (thin), files that
+  sites commit. A deployment without the variable then signed sessions with a
+  known key. Now the key comes only from the environment. When it is empty or
+  still the placeholder, the CMS answers 503 and writes the reason to its log;
+  a CLI command stops with exit code 1.
+- **Added: `gosite doctor` reports a sec-key fallback in the config** (without
+  its value) and a `.env` with no `COCKPIT_SEC_KEY`.
+- **Upgrade:** see MIGRATIONS (→ 0.70.0). Set `COCKPIT_SEC_KEY` in every
+  deployment **before** the new config reaches it.
+
 ## 0.69.0
 
 ### Thin sites: own environment variables and the store's database name

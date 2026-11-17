@@ -770,3 +770,40 @@ Move `core:` in `gosite.yml` and the core in `go.mod` to 0.69.0,
 nothing), and rebuild. In Coolify, check that each `app_env` variable is still
 set: it is the same value as before, now named by the generated file.
 
+## → 0.70.0 — Cockpit has no sec-key fallback
+
+The CMS config no longer has a fallback for `COCKPIT_SEC_KEY`. Before, the
+line was `'sec-key' => getenv('COCKPIT_SEC_KEY') ?: '<fallback>'`, and the
+fallback was the public template placeholder or the site's real key written
+into a committed file. A deployment without the variable silently used it.
+Now a CMS without the variable answers 503 to every request, and its log says
+`gosite: COCKPIT_SEC_KEY is not set`.
+
+**Order matters: set the variable first, then deploy.**
+
+1. Run `gosite doctor`. Each project with a fallback shows a `sec-key
+   fallback` finding: either "the public template placeholder" or "a key
+   written in the file". The value is never printed.
+2. In every deployment (Coolify production and QA) check that
+   `COCKPIT_SEC_KEY` is set and is not empty. A site that ran without it was
+   using the fallback. If the fallback was a key written in the file, you may
+   use that value to keep the current sessions; then change it soon, because
+   it is in the site's repository history.
+3. Locally, check that `.env` has `COCKPIT_SEC_KEY`. `gosite doctor` reports a
+   `.env` without it. To create one: `openssl rand -hex 32`.
+4. Change the config:
+   - **Thin sites:** update gosite to 0.70.0 and run `gosite generate`. The
+     new `cockpit/config.core.php` has no key in it. The core module did not
+     change.
+   - **Legacy sites:** copy the `gosite_sec_key()` function from
+     `src/templates/cockpit/config.php` into the site's `cockpit/config.php`,
+     next to `gosite_env_flag()`, and replace the sec-key line with
+     `'sec-key' => gosite_sec_key(),`. Copy the function as it is: the
+     placeholder inside it is split on purpose, so a template render does not
+     replace it.
+5. Commit the config change. The old key stays in the repository history;
+   step 2 is what makes it harmless.
+
+A `sec-key` in a thin site's `config.local.php` does not help: the core
+config stops before `config.local.php` is read. The key comes only from the
+environment.
