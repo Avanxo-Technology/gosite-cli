@@ -696,7 +696,9 @@ project name in string literals under `internal/`.
    option (for example `WithCachePrefix(cfg.CacheKeyPrefix() + "seo:")`) and
    make the blog's `keyPrefix()` a method that reads the same prefix. Both
    must stay under the prefix `PurgeAll` sweeps, or a site-wide purge leaves
-   them stale.
+   them stale. `internal/seo/seo_test.go` reads the old `cacheKeyPrefix`
+   constant (`TestCacheKeysArePrefixedPerProject`); point it at the
+   resolver's prefix, or `go vet` fails.
 
 4. **Look for Redis state with no project prefix.** Search for
    `Redis.(Set|Incr|SetNX|HSet)` outside `internal/cache` and `internal/seo`.
