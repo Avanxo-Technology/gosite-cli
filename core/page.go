@@ -47,15 +47,22 @@ func (s *Server) render(c *Context, status int, name string, p Page) error {
 
 // cachedRender serves a page from the page cache, building it on a miss.
 //
-// The key is the request path and query under "<project>:cache:page:", which
-// every purge clears, so an editor publishing reaches these pages without the
-// site naming its keys. build runs with its own context, detached from the
+// The key is the request path and its normalized query (see pageCacheKey)
+// under "<project>:<env>:cache:page:", which every purge clears, so an editor
+// publishing reaches these pages without the site naming its keys. Only a URL
+// without a query keeps a stale copy: query variants are what a crawler
+// multiplies (issue #55). build runs with its own context, detached from the
 // request: a cold render is shared by every visitor waiting on it, and one of
 // them disconnecting must not cancel it for the rest. A failed build is never
 // cached; a stale copy is served instead when there is one.
 func (s *Server) cachedRender(c *Context, name string, build func(ctx context.Context) (Page, error)) error {
-	key := s.core.Config.CacheKeyPrefix() + "page:" + c.Request().URL.RequestURI()
-	html, cached, err := s.core.Handlers.Cache.HTML(c.Request().Context(), key, func() ([]byte, error) {
+	urlKey, hasQuery := pageCacheKey(c.Request().URL)
+	key := s.core.Config.CacheKeyPrefix() + "page:" + urlKey
+	store := s.core.Handlers.Cache.HTML
+	if hasQuery {
+		store = s.core.Handlers.Cache.HTMLWithoutStale
+	}
+	html, cached, err := store(c.Request().Context(), key, func() ([]byte, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		p, err := build(ctx)

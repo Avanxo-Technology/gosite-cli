@@ -83,7 +83,9 @@ services:
     image: redis:${GOSITE_REDIS_VERSION}-alpine
     container_name: ${GOSITE_REDIS_HOST}
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    # A limit, or the eviction policy never applies. volatile-lru evicts only
+    # keys with a TTL (the page cache), never app state, which has none.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${GOSITE_REDIS_MAXMEMORY}", "--maxmemory-policy", "volatile-lru"]
     ports:
       # Loopback only (see GOSITE_BIND_ADDRESS): this Redis runs without auth.
       - "${GOSITE_BIND_ADDRESS}:${GOSITE_REDIS_PORT}:6379"

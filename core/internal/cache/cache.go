@@ -74,6 +74,18 @@ func staleKey(key string) string { return key + staleSuffix }
 // In development mode (dev=true) the cache is bypassed entirely — every
 // request renders fresh, which makes iteration faster and avoids stale pages.
 func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, error)) ([]byte, bool, error) {
+	return c.html(ctx, key, render, true)
+}
+
+// HTMLWithoutStale is HTML without writing the 24-hour stale copy. It is for
+// keys a visitor or a crawler can multiply, such as a page with a query string:
+// one stale copy per variant fills a shared Redis (issue #55). A failed render
+// still serves a stale copy that is already there.
+func (c *Cache) HTMLWithoutStale(ctx context.Context, key string, render func() ([]byte, error)) ([]byte, bool, error) {
+	return c.html(ctx, key, render, false)
+}
+
+func (c *Cache) html(ctx context.Context, key string, render func() ([]byte, error), writeStale bool) ([]byte, bool, error) {
 	start := time.Now()
 
 	// Bypass cache entirely in development — always render fresh.
@@ -117,6 +129,9 @@ func (c *Cache) HTML(ctx context.Context, key string, render func() ([]byte, err
 				bg := context.Background()
 				if setErr := c.rdb.Set(bg, key, fresh, ttl).Err(); setErr != nil {
 					c.log.Warn("cache write failed", "key", key, "err", setErr)
+				}
+				if !writeStale {
+					return fresh, nil
 				}
 				if setErr := c.rdb.Set(bg, staleKey(key), fresh, staleTTL).Err(); setErr != nil {
 					c.log.Warn("stale cache write failed", "key", key, "err", setErr)

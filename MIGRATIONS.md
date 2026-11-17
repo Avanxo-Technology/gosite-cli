@@ -819,3 +819,32 @@ files as before.
 - A store that already has its admin: nothing changes. The seed never resets
   an existing admin, so the variable does not recover a lost password. See
   `gosite docs medusa-admin-api` (The first admin login).
+
+## → 0.71.0 — Page cache keys normalize the query
+
+Core now builds the page cache key from the path and a normalized query, and
+writes the 24-hour stale copy only for a URL with no query left. See
+`gosite docs redis-page-cache-memory` for the key table.
+
+**Thin sites:** move `core:` in `gosite.yml` and the core in `go.mod` to
+0.71.0, `go mod tidy`, rebuild. `gosite generate` is not needed for this
+change. After the deploy:
+
+- Keys of URLs without a query keep their names. Query keys get new names; the
+  old ones expire on their own (10 minutes fresh, 24 hours stale). To free the
+  memory sooner, see "See what fills it" in the note.
+- If the site's own `build` function reads a tracking parameter (`utm_*`,
+  `gclid`, ...), that value is no longer part of the key: the first visitor's
+  page is served to the rest. Read it in the browser instead.
+
+**Production Redis:** gosite does not configure it. Check that it has
+`maxmemory` and `volatile-lru`, as the note says. Without `maxmemory`, the
+eviction policy never applies.
+
+**Local:** run `gosite infra up` once to apply the memory limit. The data
+volume is kept. To change the limit: `GOSITE_REDIS_MAXMEMORY=2gb gosite infra
+up`.
+
+**Legacy sites** do not get this change: their cache code is a copy in the
+site. Until they move to the core module (#49), port it by hand or limit query
+caching in the site.
