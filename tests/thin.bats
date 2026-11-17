@@ -206,6 +206,16 @@ EOF
   done
 }
 
+@test "Commerce passes the first admin's password to Medusa in every environment" {
+  local f
+  for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/${f}" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    # Empty by default: the seed then makes a password and prints it once.
+    grep -qE 'COMMERCE_ADMIN_PASSWORD(=|: ")\$\{COMMERCE_ADMIN_PASSWORD:-\}' "${F}"
+  done
+}
+
 @test "Commerce stores upload to S3 and QA/prod route only the Admin on shop" {
   local f env router
   for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
