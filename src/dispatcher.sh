@@ -34,6 +34,8 @@ $(printf "${C_BOLD}PROJECT COMMANDS${C_NC}")
                      list | add <name>... | remove <name>...
   generate [name]    Rewrite a thin site's compose, Dockerfiles and CMS config
                      from gosite.yml (thin sites only)
+  upgrade [name]     Take a thin site to this gosite version: core, go.mod,
+                     generated files, tests, images (--force, --no-images)
   list               List gosite projects and their container status
 
 $(printf "${C_BOLD}INFRASTRUCTURE${C_NC}")
@@ -89,6 +91,7 @@ dispatch() {
     remove|rm)       load_command remove; cmd_remove "$@" ;;
     addons)          load_command addons; cmd_addons "$@" ;;
     generate)        load_command generate; cmd_generate "$@" ;;
+    upgrade)         load_command upgrade; cmd_upgrade "$@" ;;
     update)          load_command update; cmd_update "$@" ;;
     doctor)          load_command doctor; cmd_doctor "$@" ;;
     versions)        load_command versions; cmd_versions "$@" ;;

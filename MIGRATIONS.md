@@ -5,8 +5,13 @@ one. There is no `sync` command to do it for you — it was removed in 0.49.0
 because deciding file by file produced upgrades that compiled and were still
 wrong, silently. This is the procedure that replaced it.
 
+**Thin sites** (a `gosite.yml`): run `gosite update`, then `gosite upgrade
+<site>`. It does every local step and prints the sections below for the
+versions it crosses; do what they say for Coolify (variables, image pulls).
+The rest of this file is for legacy sites and for reading those sections.
+
 Read the section for every version between the project's and the target one.
-Find the project's version per file:
+Find a legacy project's version per file:
 
 ```bash
 cut -f3 <project>/.gosite/manifest.tsv | sort -u   # a project is usually a mix
@@ -848,3 +853,19 @@ up`.
 **Legacy sites** do not get this change: their cache code is a copy in the
 site. Until they move to the core module (#49), port it by hand or limit query
 caching in the site.
+
+## → 0.72.0 — gosite upgrade
+
+From this version on, a thin site is upgraded with `gosite upgrade <site>`
+(after `gosite update`). See the top of this file.
+
+The upgrade to 0.72.0 itself changes one line in the local
+`docker-compose.yml`: the CMS `gosite-addons` context becomes
+`${GOSITE_ADDONS_DIR}` instead of the path of your gosite installation.
+Nothing to do when you use `gosite start`, `restart` or `logs`. A `docker
+compose` command run by hand on that file needs
+`export GOSITE_ADDONS_DIR=<gosite installation>/src/addons` first, or it stops
+with a message that names the variable. QA and production composes are not
+affected.
+
+Legacy sites: nothing changes.
