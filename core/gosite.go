@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -92,6 +93,8 @@ type options struct {
 	theme    fs.FS
 	addons   []string
 	setAdd   bool
+	funcs    template.FuncMap
+	dupFuncs []string
 }
 
 // WithLogger replaces the default text logger on stdout.
@@ -104,6 +107,24 @@ func WithLogger(log *slog.Logger) Option {
 // it. Without this option core renders its default demo theme.
 func WithTheme(theme fs.FS) Option {
 	return func(o *options) { o.theme = theme }
+}
+
+// WithFuncs adds the site's template functions to every theme template. A
+// name that core or text/template already defines, or that an earlier
+// WithFuncs passed, makes New and Run return an error before the site
+// listens: a site must not silently change what assetURL or index means.
+func WithFuncs(funcs template.FuncMap) Option {
+	return func(o *options) {
+		if o.funcs == nil {
+			o.funcs = template.FuncMap{}
+		}
+		for name, fn := range funcs {
+			if _, seen := o.funcs[name]; seen {
+				o.dupFuncs = append(o.dupFuncs, name)
+			}
+			o.funcs[name] = fn
+		}
+	}
 }
 
 // WithAddons enables addons by name instead of reading the addons list from
@@ -178,7 +199,17 @@ func New(site App, opts ...Option) (*Server, error) {
 		}
 	}
 
+	if len(o.dupFuncs) > 0 {
+		return nil, fmt.Errorf("template functions passed twice to WithFuncs: %v", o.dupFuncs)
+	}
+	if err := views.CheckFuncs(o.funcs); err != nil {
+		return nil, err
+	}
+
 	var viewOpts []views.Option
+	if len(o.funcs) > 0 {
+		viewOpts = append(viewOpts, views.WithFuncs(o.funcs))
+	}
 	if o.theme != nil {
 		viewOpts = append(viewOpts, views.WithTheme(o.theme))
 	}

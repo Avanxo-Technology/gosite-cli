@@ -12,6 +12,7 @@ package gositetest
 import (
 	"bytes"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -21,17 +22,39 @@ import (
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/views"
 )
 
+// Option configures CheckTheme and ThemeProblems.
+type Option func(*themeOptions)
+
+type themeOptions struct {
+	funcs template.FuncMap
+}
+
+// WithFuncs gives the theme the site's template functions, the same map the
+// site passes to gosite.WithFuncs. Without it a template that calls one of
+// them fails to parse.
+func WithFuncs(funcs template.FuncMap) Option {
+	return func(o *themeOptions) { o.funcs = funcs }
+}
+
 // CheckTheme fails t when the theme's layout misses a slot or calls one more
-// than once, or when any page fails to parse or to execute with empty data.
-func CheckTheme(t testing.TB, theme fs.FS) {
+// than once, when any page fails to parse or to execute with empty data, or
+// when a site function has the name of a core one.
+func CheckTheme(t testing.TB, theme fs.FS, opts ...Option) {
 	t.Helper()
-	for _, problem := range ThemeProblems(theme) {
+	for _, problem := range ThemeProblems(theme, opts...) {
 		t.Error(problem)
 	}
 }
 
 // ThemeProblems is CheckTheme without a testing.TB, for tools.
-func ThemeProblems(theme fs.FS) (problems []string) {
+func ThemeProblems(theme fs.FS, opts ...Option) (problems []string) {
+	var o themeOptions
+	for _, apply := range opts {
+		apply(&o)
+	}
+	if err := views.CheckFuncs(o.funcs); err != nil {
+		return []string{err.Error()}
+	}
 	layout, err := fs.ReadFile(theme, "layout.html")
 	if err != nil {
 		return []string{"layout.html: " + err.Error()}
@@ -57,6 +80,7 @@ func ThemeProblems(theme fs.FS) (problems []string) {
 		}()
 		r = views.NewRenderer("/storage/uploads",
 			views.WithTheme(theme),
+			views.WithFuncs(o.funcs),
 			views.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		)
 	}()

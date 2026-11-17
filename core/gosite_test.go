@@ -2,6 +2,7 @@ package gosite
 
 import (
 	"context"
+	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -342,5 +343,50 @@ func TestCachedRenderBuildsOnceUntilPurge(t *testing.T) {
 
 	if body := do(t, s, http.MethodGet, "/news", "").Body.String(); builds != 2 || !strings.Contains(body, "build 2") {
 		t.Fatalf("after purge: builds = %d, body %q", builds, body)
+	}
+}
+
+func TestSiteFuncsReachTheTheme(t *testing.T) {
+	theme := fstest.MapFS{
+		"layout.html": {Data: []byte(`{{define "layout"}}<head>{{template "gosite:head" .}}</head>` +
+			`<body>{{template "gosite:body-start" .}}{{template "content" .}}{{template "gosite:body-end" .}}</body>{{end}}`)},
+		"pages/about.html": {Data: []byte(`{{define "content"}}[{{shout "hi"}}|{{add 2 3}}]{{end}}`)},
+	}
+	site := &testSite{}
+	site.routes = func(r Router) {
+		r.GET("/about", func(c *Context) error {
+			return r.Render(c, http.StatusOK, "about", Page{Title: "About"})
+		})
+	}
+	s, _ := newTestServer(t, site, WithTheme(theme),
+		WithFuncs(template.FuncMap{"shout": strings.ToUpper}),
+		WithFuncs(template.FuncMap{"add": func(a, b int) int { return a + b }}))
+
+	rec := do(t, s, http.MethodGet, "/about", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "[HI|5]") {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSiteFuncNamedLikeCoreFailsStartup(t *testing.T) {
+	mr := miniredis.RunT(t)
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/0")
+	t.Setenv("GOSITE_CONFIG", filepath.Join(t.TempDir(), "none.yml"))
+	quiet := WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want string
+	}{
+		{"core function", []Option{WithFuncs(template.FuncMap{"safeHTML": strings.ToUpper, "year": strings.ToUpper})}, "safeHTML"},
+		{"text/template builtin", []Option{WithFuncs(template.FuncMap{"index": strings.ToUpper})}, "index"},
+		{"passed twice", []Option{WithFuncs(template.FuncMap{"year": strings.ToUpper}), WithFuncs(template.FuncMap{"year": strings.ToLower})}, "year"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(&testSite{}, append([]Option{quiet}, tc.opts...)...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want an error naming %q", err, tc.want)
+			}
+		})
 	}
 }

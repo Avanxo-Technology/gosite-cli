@@ -30,6 +30,7 @@ Options:
 | `WithAddons(names...)` | Enable addons by name instead of reading `gosite.yml`. |
 | `WithoutRoutes(names...)` | Switch off core routes: `RouteHome`, `RouteRobots`, `RouteFavicon`, `RouteLLMs`, `RouteSitemap`. |
 | `WithLogger(*slog.Logger)` | Replace the default text logger. |
+| `WithFuncs(template.FuncMap)` | The site's template functions, for every theme template (since 0.74.0). A name core or `text/template` defines, or one passed twice, makes `New`/`Run` return an error. |
 
 ## The App
 
@@ -131,6 +132,8 @@ type Page struct {
 
 `assetURL`, `safeHTML`, `toJSON`, `jsonData`, `seoData`, `htmlLang`,
 `faviconUrl`, `robotsTxtContent`, `analyticsIntegrations`, `consentSettings`.
+A site adds its own with `WithFuncs`; these names and `text/template`'s
+builtins (`index`, `len`, `eq`, ...) cannot be replaced.
 
 ## gosite.yml
 
@@ -150,8 +153,9 @@ are always enabled: `modules.disabled` names only gosite addons.
 ## Testing a site
 
 ```go
-gositetest.CheckTheme(t, theme)      // slots present once, every page renders
-gositetest.ThemeProblems(theme)      // the same, as a list
+gositetest.CheckTheme(t, theme, opts...) // slots present once, every page renders
+gositetest.ThemeProblems(theme, opts...) // the same, as a list
+gositetest.WithFuncs(funcs)              // the map the site passes to gosite.WithFuncs
 gositetest.CheckCommercePages(t, theme) // the Commerce addon's pages render
 ```
 

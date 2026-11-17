@@ -885,3 +885,14 @@ fails (for example Commerce without `commerce_region`). Before, it printed the
 error and exited 0. A script that runs `generate` sees the failure now.
 
 Legacy sites: nothing changes.
+
+## → 0.74.0 — site template functions
+
+Core gains `gosite.WithFuncs(template.FuncMap)`. Nothing changes for a site
+that does not use it.
+
+**Thin sites:** `gosite upgrade <site>`. A site that calls its own template
+functions passes the same map to `gositetest.CheckTheme(t, theme(),
+gositetest.WithFuncs(funcs))` in its theme test.
+
+Legacy sites: nothing changes.

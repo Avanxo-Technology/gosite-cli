@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -157,6 +158,7 @@ type options struct {
 	pages        []fs.FS
 	slotPartials map[string][]string
 	log          *slog.Logger
+	siteFuncs    template.FuncMap
 
 	integrations func() []Integration
 	consent      func() *Consent
@@ -214,6 +216,50 @@ func WithSlotPartial(slot, name string) Option {
 	}
 }
 
+// WithFuncs adds the site's template functions. Call CheckFuncs first: a name
+// that core or text/template already defines makes NewRenderer panic.
+func WithFuncs(funcs template.FuncMap) Option {
+	return func(o *options) {
+		if o.siteFuncs == nil {
+			o.siteFuncs = template.FuncMap{}
+		}
+		for name, fn := range funcs {
+			o.siteFuncs[name] = fn
+		}
+	}
+}
+
+// builtinFuncs are text/template's own functions. A site function with one of
+// these names would silently change what every template means (index, len,
+// eq...), so it is refused like a core function.
+var builtinFuncs = []string{
+	"and", "call", "eq", "ge", "gt", "html", "index", "js", "le", "len", "lt",
+	"ne", "not", "or", "print", "printf", "println", "slice", "urlquery",
+}
+
+// CheckFuncs returns an error naming every function in funcs that core or
+// text/template already defines, sorted. Nil when there is none.
+func CheckFuncs(funcs template.FuncMap) error {
+	taken := map[string]bool{}
+	for name := range coreFuncs("", &options{}) {
+		taken[name] = true
+	}
+	for _, name := range builtinFuncs {
+		taken[name] = true
+	}
+	var clash []string
+	for name := range funcs {
+		if taken[name] {
+			clash = append(clash, name)
+		}
+	}
+	if len(clash) == 0 {
+		return nil
+	}
+	sort.Strings(clash)
+	return fmt.Errorf("template functions already defined by core: %s", strings.Join(clash, ", "))
+}
+
 // WithLogger is where deprecation warnings go.
 func WithLogger(log *slog.Logger) Option {
 	return func(o *options) { o.log = log }
@@ -245,6 +291,95 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 	if o.slotPartials == nil {
 		o.slotPartials = defaultSlotPartials()
 	}
+	funcs := coreFuncs(assetBase, &o)
+	if err := CheckFuncs(o.siteFuncs); err != nil {
+		panic(err.Error())
+	}
+	for name, fn := range o.siteFuncs {
+		funcs[name] = fn
+	}
+
+	slots := slotTemplates(o.slotPartials)
+	warnLegacyNames(o.theme, o.log)
+
+	// Every page is parsed as core partials, then addon partials, then the
+	// theme's layout, components and that page. Later definitions replace
+	// earlier ones with the same name, which is how a theme overrides a core
+	// partial. A page can use any component without declaring anything.
+	pageSource := map[string]fs.FS{} // page name -> where its file lives
+	page := func(name string) *template.Template {
+		t := template.New(name).Funcs(funcs)
+		template.Must(t.ParseFS(corePartials, "partials/*.html"))
+		template.Must(t.Parse(slots))
+		for _, fsys := range o.partials {
+			parseGlob(t, fsys, "*.html")
+		}
+		parseGlob(t, o.theme, "layout.html")
+		parseGlob(t, o.theme, "components/*.html")
+		parseGlob(t, pageSource[name], "pages/"+name+".html")
+		return t
+	}
+
+	// Every file under pages/ becomes a page, named after the file. Adding a
+	// page is dropping a file in - nothing to register here, and a feature that
+	// brings its own pages (the blog) does not have to edit this file to
+	// install or to be removed again.
+	if _, err := fs.ReadDir(o.theme, "pages"); err != nil {
+		panic("views: the theme has no pages directory: " + err.Error())
+	}
+
+	// Addon pages first, theme pages last: a theme page of the same name wins.
+	for _, fsys := range append(append([]fs.FS{}, o.pages...), o.theme) {
+		matches, _ := fs.Glob(fsys, "pages/*.html")
+		for _, m := range matches {
+			pageSource[strings.TrimSuffix(path.Base(m), ".html")] = fsys
+		}
+	}
+
+	pages := map[string]*template.Template{}
+	for name := range pageSource {
+		pages[name] = page(name)
+	}
+
+	// Force the contextual-escaping pass now so a broken template panics
+	// at boot instead of silently failing every request. probeData must
+	// include every top-level key the handler passes to Page(); missing
+	// keys cause "index of untyped nil" — add them here.
+	// The union of what every page reads. Keys a page does not use cost
+	// nothing, so this stays a superset rather than something per page.
+	probeData := map[string]any{
+		"Title":   "",
+		"Content": map[string]any{},
+		"IsDev":   true,
+		// SEO keys
+		"Path":    "",
+		"SEOData": map[string]any{},
+		"Data":    map[string]any{},
+		// Blog pages, present whether or not the blog is installed.
+		"Blog":    map[string]any{},
+		"Post":    map[string]any{},
+		"Posts":   []map[string]any{},
+		"Author":  map[string]any{},
+		"Meta":    map[string]any{},
+		"Page":    1,
+		"HasMore": false,
+		"PrevURL": "",
+		"NextURL": "",
+		"Total":   0,
+	}
+	for name, t := range pages {
+		if err := t.ExecuteTemplate(io.Discard, "layout", probeData); err != nil {
+			panic(fmt.Sprintf("views: page %q failed at startup: %v\n"+
+				"If this is a data error, add the missing key to probeData in render.go.", name, err))
+		}
+	}
+
+	return &Renderer{pages: pages}
+}
+
+// coreFuncs is core's template function map. CheckFuncs builds it with empty
+// options only to read its names; the functions are never called there.
+func coreFuncs(assetBase string, o *options) template.FuncMap {
 	integrations := o.integrations
 	consent := o.consent
 
@@ -269,7 +404,7 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		consent = func() *Consent { return nil }
 	}
 
-	funcs := template.FuncMap{
+	return template.FuncMap{
 		"assetURL": assetURL,
 		// analyticsIntegrations is what the analytics component reads.
 		//
@@ -372,82 +507,6 @@ func NewRenderer(assetBase string, opts ...Option) *Renderer {
 		},
 	}
 
-	slots := slotTemplates(o.slotPartials)
-	warnLegacyNames(o.theme, o.log)
-
-	// Every page is parsed as core partials, then addon partials, then the
-	// theme's layout, components and that page. Later definitions replace
-	// earlier ones with the same name, which is how a theme overrides a core
-	// partial. A page can use any component without declaring anything.
-	pageSource := map[string]fs.FS{} // page name -> where its file lives
-	page := func(name string) *template.Template {
-		t := template.New(name).Funcs(funcs)
-		template.Must(t.ParseFS(corePartials, "partials/*.html"))
-		template.Must(t.Parse(slots))
-		for _, fsys := range o.partials {
-			parseGlob(t, fsys, "*.html")
-		}
-		parseGlob(t, o.theme, "layout.html")
-		parseGlob(t, o.theme, "components/*.html")
-		parseGlob(t, pageSource[name], "pages/"+name+".html")
-		return t
-	}
-
-	// Every file under pages/ becomes a page, named after the file. Adding a
-	// page is dropping a file in - nothing to register here, and a feature that
-	// brings its own pages (the blog) does not have to edit this file to
-	// install or to be removed again.
-	if _, err := fs.ReadDir(o.theme, "pages"); err != nil {
-		panic("views: the theme has no pages directory: " + err.Error())
-	}
-
-	// Addon pages first, theme pages last: a theme page of the same name wins.
-	for _, fsys := range append(append([]fs.FS{}, o.pages...), o.theme) {
-		matches, _ := fs.Glob(fsys, "pages/*.html")
-		for _, m := range matches {
-			pageSource[strings.TrimSuffix(path.Base(m), ".html")] = fsys
-		}
-	}
-
-	pages := map[string]*template.Template{}
-	for name := range pageSource {
-		pages[name] = page(name)
-	}
-
-	// Force the contextual-escaping pass now so a broken template panics
-	// at boot instead of silently failing every request. probeData must
-	// include every top-level key the handler passes to Page(); missing
-	// keys cause "index of untyped nil" — add them here.
-	// The union of what every page reads. Keys a page does not use cost
-	// nothing, so this stays a superset rather than something per page.
-	probeData := map[string]any{
-		"Title":   "",
-		"Content": map[string]any{},
-		"IsDev":   true,
-		// SEO keys
-		"Path":    "",
-		"SEOData": map[string]any{},
-		"Data":    map[string]any{},
-		// Blog pages, present whether or not the blog is installed.
-		"Blog":    map[string]any{},
-		"Post":    map[string]any{},
-		"Posts":   []map[string]any{},
-		"Author":  map[string]any{},
-		"Meta":    map[string]any{},
-		"Page":    1,
-		"HasMore": false,
-		"PrevURL": "",
-		"NextURL": "",
-		"Total":   0,
-	}
-	for name, t := range pages {
-		if err := t.ExecuteTemplate(io.Discard, "layout", probeData); err != nil {
-			panic(fmt.Sprintf("views: page %q failed at startup: %v\n"+
-				"If this is a data error, add the missing key to probeData in render.go.", name, err))
-		}
-	}
-
-	return &Renderer{pages: pages}
 }
 
 // slotTemplates defines each slot as the ordered calls of its partials.
