@@ -1,6 +1,7 @@
 package gositetest
 
 import (
+	"html/template"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -49,5 +50,23 @@ func TestPageExecutionFailure(t *testing.T) {
 	p := strings.Join(ThemeProblems(fsys(okLayout, `{{define "content"}}{{index .Content.items 3}}{{end}}`)), "\n")
 	if !strings.Contains(p, "home") {
 		t.Fatalf("a page that fails to execute was not reported: %s", p)
+	}
+}
+
+func TestThemeWithSiteFuncs(t *testing.T) {
+	theme := fsys(okLayout, `{{define "content"}}{{year}}{{end}}`)
+	if p := ThemeProblems(theme); len(p) == 0 {
+		t.Fatal("a theme calling an unknown function passed without WithFuncs")
+	}
+	if p := ThemeProblems(theme, WithFuncs(template.FuncMap{"year": func() int { return 2026 }})); len(p) != 0 {
+		t.Fatalf("problems = %v", p)
+	}
+}
+
+func TestSiteFuncNamedLikeCoreIsAProblem(t *testing.T) {
+	p := strings.Join(ThemeProblems(fsys(okLayout, `{{define "content"}}hi{{end}}`),
+		WithFuncs(template.FuncMap{"assetURL": strings.ToUpper})), "\n")
+	if !strings.Contains(p, "assetURL") {
+		t.Fatalf("problems = %q, want the clash named", p)
 	}
 }

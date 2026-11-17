@@ -10,9 +10,9 @@
 
 ## 2. WithFuncs (gosite-cli PR)
 
-- [ ] 2.1 `core/gosite.go`: `WithFuncs(template.FuncMap)` option; `core/internal/views`: merge after core's functions; a name collision returns an error from `New`/`Run`
-- [ ] 2.2 Go tests: a theme uses a site function; a collision fails with the name; `gositetest.CheckTheme` accepts the extra functions
-- [ ] 2.3 `core/CORE_API.md` (Options table, Template functions)
+- [x] 2.1 `core/gosite.go`: `WithFuncs(template.FuncMap)` option; `core/internal/views`: merge after core's functions; a name collision returns an error from `New`/`Run`
+- [x] 2.2 Go tests: a theme uses a site function; a collision fails with the name; `gositetest.CheckTheme` accepts the extra functions
+- [x] 2.3 `core/CORE_API.md` (Options table, Template functions)
 
 ## 3. Forms addon: update, field options, reCAPTCHA (gosite-cli PR)
 

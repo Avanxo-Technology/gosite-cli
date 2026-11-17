@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.74.0
+
+### Site template functions
+
+- **Added: `gosite.WithFuncs(template.FuncMap)`** (core). A site gives its
+  theme its own template functions. A name that core or `text/template`
+  already defines (`assetURL`, `safeHTML`, `index`, `len`...), or one passed
+  twice, makes `New` and `Run` return an error before the site listens.
+- **Added: `gositetest.WithFuncs`** for `CheckTheme` and `ThemeProblems`, so
+  a theme that calls site functions passes the contract check.
+- **Upgrade:** see MIGRATIONS (→ 0.74.0).
+
 ## 0.73.0
 
 ### The site's own Cockpit addons
