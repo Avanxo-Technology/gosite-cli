@@ -646,8 +646,72 @@ old prefix, so nothing breaks, but production and QA still share keys. Use
 `production` and `qa` (or `development` locally).
 
 Thin sites: the change comes from the core upgrade; `gosite generate` is not
-needed. Legacy sites: the cache keys follow `config.CacheKeyPrefix()` after
-upgrading the core module.
+needed.
+
+### Legacy sites: port the prefix by hand
+
+A legacy site has no core module in `go.mod`, and `src/templates/internal/`
+did not change in this release, so a merge brings nothing. `CacheKeyPrefix()`
+exists only in `core/internal/config`. The legacy template also writes its
+prefixes in several places, so the port is more than one line:
+
+| Key | Where the legacy template builds it |
+| --- | --- |
+| site-wide purge | `internal/handlers/handlers.go` (`cacheKeyPrefix = "<project>:"`), used by `internal/handlers/purge.go` |
+| home page | `internal/handlers/home.go` (`homeCacheKey`); other pages have their own constants |
+| SEO | `internal/seo/seo.go` (`cacheKeyPrefix = "<project>:seo:"`) |
+| blog | `internal/blog/blog.go` (`keyPrefix()` returns `"<project>:blog:"`) |
+
+Sites often have more call sites than these (one site had 14). Search for the
+project name in string literals under `internal/`.
+
+1. **Add the prefix to `internal/config`.** `Environment` already reads
+   `APP_ENV`. The legacy `Config` has no project field; the scaffold wrote the
+   project name as a literal, so use the same literal the constants have:
+
+   ```go
+   // project is the name every Redis key of this site starts with.
+   const project = "my-site"
+
+   // CacheKeyPrefix namespaces every cache key by project and environment.
+   // With APP_ENV empty it is the project-only prefix, so keys keep their
+   // current names until APP_ENV is set.
+   func (c Config) CacheKeyPrefix() string {
+   	if c.Environment == "" {
+   		return project + ":"
+   	}
+   	return project + ":" + c.Environment + ":"
+   }
+   ```
+
+   Legacy keys have no `cache:` segment, so this prefix is `<project>:` and not
+   core's `<project>:cache:`. Use the same value the constants have today, or
+   the first deploy without `APP_ENV` changes every key name.
+
+2. **Build every page key from it.** Replace each constant with a function of
+   the config, for example `cfg.CacheKeyPrefix() + "home_html"`, and pass
+   `cfg.CacheKeyPrefix()` to `Cache.PurgeAll` in the purge handler.
+
+3. **SEO and blog.** Their prefixes are package constants. Give `seo.New` an
+   option (for example `WithCachePrefix(cfg.CacheKeyPrefix() + "seo:")`) and
+   make the blog's `keyPrefix()` a method that reads the same prefix. Both
+   must stay under the prefix `PurgeAll` sweeps, or a site-wide purge leaves
+   them stale. `internal/seo/seo_test.go` reads the old `cacheKeyPrefix`
+   constant (`TestCacheKeysArePrefixedPerProject`); point it at the
+   resolver's prefix, or `go vet` fails.
+
+4. **Look for Redis state with no project prefix.** Search for
+   `Redis.(Set|Incr|SetNX|HSet)` outside `internal/cache` and `internal/seo`.
+   Keys such as `scan:rate:<ip>` collide across sites and environments. Move
+   them under `<project>-state:` with `RENAMENX` at startup, as in
+   [Redis keys under the project prefix are wiped by every
+   purge](#redis-keys-under-the-project-prefix-are-wiped-by-every-purge).
+
+5. **Verify.** With `APP_ENV=qa`, load a page and check that its key starts
+   with `<project>:qa:`. Then write a canary key under that prefix,
+   `POST /cache/purge`, and check that the canary is gone and the production
+   keys are still there. The QA `:stale` copies stay on purpose: the purge
+   spares them, and they expire on their own.
 
 ## → 0.68.1 — Forms: the Mattermost wording is the site's
 
