@@ -807,3 +807,15 @@ Now a CMS without the variable answers 503 to every request, and its log says
 A `sec-key` in a thin site's `config.local.php` does not help: the core
 config stops before `config.local.php` is read. The key comes only from the
 environment.
+
+## → 0.70.1 — Commerce: the first admin's password
+
+`COMMERCE_ADMIN_PASSWORD` now reaches Medusa in every environment. Thin sites
+with Commerce: run `gosite generate`. Sites without Commerce generate the same
+files as before.
+
+- A new store: set `COMMERCE_ADMIN_PASSWORD` in Coolify before the first
+  start, log in, and change the password.
+- A store that already has its admin: nothing changes. The seed never resets
+  an existing admin, so the variable does not recover a lost password. See
+  `gosite docs medusa-admin-api` (The first admin login).

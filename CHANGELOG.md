@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.70.1
+
+### Commerce: the first admin's password reaches Medusa
+
+- **Fixed:** `COMMERCE_ADMIN_PASSWORD` never reached the Medusa container
+  (#52). The seed reads it for the first admin, but the composes passed only
+  `COMMERCE_ADMIN_EMAIL`, so the seed made a random password and printed it
+  once in a log that was gone after the container was recreated. Every
+  environment now passes it, empty by default (the seed then makes one, as
+  before). An admin that exists is never changed.
+- **Upgrade:** see MIGRATIONS (→ 0.70.1). Nothing to do for sites without
+  Commerce.
+
 ## 0.70.0
 
 ### Cockpit: no sec-key fallback

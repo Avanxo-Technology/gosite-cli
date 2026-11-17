@@ -59,6 +59,12 @@
 #                           them only on the first start with an empty volume:
 #                           changing them later leaves Medusa without its data
 #                           until the database is renamed or restored.
+#   COMMERCE_ADMIN_EMAIL, COMMERCE_ADMIN_PASSWORD  optional, the store's first
+#                           admin. Used only when the seed creates that admin;
+#                           an admin that exists is never changed. Without a
+#                           password the seed makes one and prints it once in
+#                           the Medusa log. It is a credential: change it after
+#                           the first login.
 # gosite:end
 #
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
@@ -232,6 +238,7 @@ services:
       - COOKIE_SECRET=${COOKIE_SECRET}
       - COMMERCE_REGION=__COMMERCE_REGION__
       - COMMERCE_ADMIN_EMAIL=${COMMERCE_ADMIN_EMAIL:-admin@gosite.local}
+      - COMMERCE_ADMIN_PASSWORD=${COMMERCE_ADMIN_PASSWORD:-}
       - GOSITE_PURGE_URL=http://__PROJECT__-qa-app:8080/cache/purge
       - GOSITE_PURGE_TOKEN=${COCKPIT_API_TOKEN}
       # QA uses the client's test/sandbox keys (never live keys).

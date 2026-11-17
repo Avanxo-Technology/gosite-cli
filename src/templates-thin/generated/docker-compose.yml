@@ -134,6 +134,7 @@ services:
       COOKIE_SECRET: "${COOKIE_SECRET}"
       COMMERCE_REGION: "__COMMERCE_REGION__"
       COMMERCE_ADMIN_EMAIL: "${COMMERCE_ADMIN_EMAIL:-admin@gosite.local}"
+      COMMERCE_ADMIN_PASSWORD: "${COMMERCE_ADMIN_PASSWORD:-}"
       # The seed writes the key; a catalogue change asks the site to drop its
       # cached pages through the same token the CMS uses.
       GOSITE_PURGE_URL: "http://__PROJECT__-app:8080/cache/purge"

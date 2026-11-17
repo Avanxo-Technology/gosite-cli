@@ -15,6 +15,20 @@ bulk, by a script, or by an AI agent.
 Never call `/admin/*` from the Go site: it reads the Store API with the
 publishable key, nothing else.
 
+## The first admin login
+
+The image's seed creates one admin, `COMMERCE_ADMIN_EMAIL`
+(`admin@gosite.local` by default), only when that user does not exist:
+
+- With `COMMERCE_ADMIN_PASSWORD` set (since 0.70.1), that is the password.
+- Without it, the seed makes one and prints it **once**, in the log of that
+  first start. A recreated container no longer has that log.
+
+The seed never changes an admin that exists, so setting the variable later
+does not reset a lost password. To get in, create another admin from the
+Medusa container's terminal: `medusa user -e <email> -p <password>`. Change
+any password set through a variable after the first login.
+
 ## Authentication: a Secret API Key, sent as Basic auth
 
 Create it once per store and environment in the Admin UI: **Settings → Secret
