@@ -583,6 +583,11 @@ overridable, so an upgrade is a deliberate change rather than a surprise:
 | Redis | 8-alpine | `GOSITE_REDIS_VERSION` |
 | Cockpit | core-2.14.1 | edit the compose files |
 
+The local Redis runs with `--maxmemory ${GOSITE_REDIS_MAXMEMORY}` (default
+`1gb`) and `volatile-lru`, so only keys with a TTL (the page cache) are
+evicted. Production uses the host's Redis, which gosite does not configure:
+see `gosite docs redis-page-cache-memory`.
+
 ### Cache-aside flow
 
 `GET /` reads `<project>:index_html` from Redis. The cached value is the fully

@@ -70,6 +70,11 @@ CachedRender(c *Context, page string, build func(ctx context.Context) (Page, err
 - `CachedRender` keys pages by URL under `<project>:<env>:cache:page:` (`<env>` is `APP_ENV`, omitted when empty); every purge
   clears them. A failed build is never cached, and a stale copy is served
   instead when one exists.
+- The query in that key is normalized (since 0.71.0): parameters sorted,
+  values in one encoding, tracking parameters (`utm_*`, `gclid`, `fbclid`,
+  `msclkid`, ...) dropped. A build that reads a tracking parameter therefore
+  shares its page with the URL without it. Only a URL with no query left keeps
+  the 24-hour stale copy.
 
 ### Core routes
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.71.0
+
+### Page cache: bounded query variants
+
+- **Changed: the page cache key normalizes the query** (#55, core). Parameters
+  are sorted, values use one encoding, and tracking parameters (`utm_*`,
+  `gclid`, `fbclid`, `msclkid`, ...) are dropped. `?b=2&a=1&utm_source=x` and
+  `?a=1&b=2` are now one page in the cache. A URL without a query keeps its
+  key name.
+- **Changed: only a URL with no query left keeps the 24-hour stale copy.**
+  Query variants (filters, sorting, pagination) get the 10-minute copy only.
+  In production, crawlers walking one listing's filters had left 47,680 keys
+  (5.27 GB, 99% stale copies) on a Redis shared by many sites.
+- **Changed: the local Redis (`gosite infra`) has a memory limit**:
+  `--maxmemory ${GOSITE_REDIS_MAXMEMORY:-1gb}` and `volatile-lru` instead of
+  `allkeys-lru`, so only keys with a TTL are evicted, never app state.
+- **Added:** `gosite docs redis-page-cache-memory`, for the production Redis
+  that gosite does not configure.
+- **Upgrade:** see MIGRATIONS (→ 0.71.0).
+
 ## 0.70.1
 
 ### Commerce: the first admin's password reaches Medusa

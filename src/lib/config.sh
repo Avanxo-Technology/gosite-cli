@@ -24,6 +24,9 @@
 # Shared service container names, referenced by every project as DNS hostnames.
 : "${GOSITE_REDIS_HOST:=gosite-redis}"
 : "${GOSITE_REDIS_PORT:=6379}"
+# Memory limit of the shared local Redis. With volatile-lru only keys with a
+# TTL (the page cache) are evicted; app state has none and stays.
+: "${GOSITE_REDIS_MAXMEMORY:=1gb}"
 : "${GOSITE_MONGO_HOST:=gosite-mongo}"
 : "${GOSITE_MONGO_PORT:=27017}"
 : "${GOSITE_MINIO_HOST:=gosite-minio}"
@@ -60,7 +63,7 @@
 : "${GOSITE_PORTS_FILE:=${GOSITE_HOME}/ports.tsv}"
 
 export GOSITE_NETWORK GOSITE_WORKSPACE GOSITE_HOME GOSITE_INFRA_DIR GOSITE_INFRA_PROJECT \
-       GOSITE_REDIS_HOST GOSITE_REDIS_PORT \
+       GOSITE_REDIS_HOST GOSITE_REDIS_PORT GOSITE_REDIS_MAXMEMORY \
        GOSITE_MONGO_HOST GOSITE_MONGO_PORT GOSITE_MONGO_VERSION \
        GOSITE_MINIO_HOST GOSITE_BIND_ADDRESS \
        GOSITE_PORT_MIN GOSITE_PORT_MAX GOSITE_MARKER GOSITE_REGISTRY GOSITE_PORTS_FILE \
