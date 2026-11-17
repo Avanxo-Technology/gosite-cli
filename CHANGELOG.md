@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.75.0
+
+### Forms: everything a site does goes through the addon
+
+- **Added: `PATCH /api/forms/submissions/{id}`** (Forms). Merges fields into a
+  submission's data: API key with `forms/manage`, sanitized like a new
+  submission, fields not sent are kept, no e-mail or webhook.
+- **Added: choices per field** (`formSettings.fieldOptions`) and
+  `GET /api/forms/settings/{form}`, which answers only the form's `label` and
+  `fieldOptions`.
+- **Added: reCAPTCHA v3 on submit** for a form whose `formSettings` sets
+  `recaptchaMinScore` (and `recaptchaActions`). The secret is
+  `RECAPTCHA_SECRET_KEY` on the CMS service, now in every generated compose.
+  A missing or failed token answers 403 `{"error":"recaptcha"}`; when Google
+  cannot be reached the submission is accepted and logged.
+- **Fixed: submit returns the stored entry's `_id`.** Before, the answer was
+  only `{"success":true}`, so a site could not update the submission it had
+  just created.
+- **Added: `cms.Client.Submit`, `UpdateSubmission`, `FormSettings` and
+  `cms.ErrRecaptcha`** (core).
+- **Upgrade:** see MIGRATIONS (→ 0.75.0).
+
 ## 0.74.0
 
 ### Site template functions

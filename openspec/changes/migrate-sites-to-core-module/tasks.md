@@ -16,13 +16,15 @@
 
 ## 3. Forms addon: update, field options, reCAPTCHA (gosite-cli PR)
 
-- [ ] 3.1 `Helper/Forms.php`: `updateData()` (sanitize, merge, no dispatch); `fieldOptions`, `recaptchaMinScore`, `recaptchaActions` in the `formSettings` model and in `migrateSettingsModel()`
-- [ ] 3.2 `Helper/Forms.php`: `verifyRecaptcha()` with the rules of D9 (5-second timeout, fail open on transport errors, log lines), called from `handleSubmission()` before the rate limit and from `updateData()` when a token is given
-- [ ] 3.3 `api.php`: `PATCH /forms/submissions/{id}` (`forms/manage`, 404 for an unknown ID) and `GET /forms/settings/{form}` (only `label` and `fieldOptions`)
-- [ ] 3.4 `config.core.php` (thin) and `src/templates/cockpit/config.php` (legacy): `forms.recaptchaSecret` from `RECAPTCHA_SECRET_KEY`; generated composes pass the variable to the CMS only
-- [ ] 3.5 `core/cms`: `Submit` (with optional token/action), `UpdateSubmission`, `FormSettings`, `ErrRecaptcha`; Go tests with an `httptest` server
-- [ ] 3.6 Prove it against a sandbox CMS: PATCH merges and does not notify; settings answer has no secret fields; low score and missing token answer 403; Google unreachable (blocked DNS in the container) accepts and logs
-- [ ] 3.7 Forms README, `core/CORE_API.md`, CHANGELOG
+- [x] 3.1 `Helper/Forms.php`: `updateData()` (sanitize, merge, no dispatch); `fieldOptions`, `recaptchaMinScore`, `recaptchaActions` in the `formSettings` model and in `migrateSettingsModel()`
+- [x] 3.2 `Helper/Forms.php`: `verifyRecaptcha()` with the rules of D9 (5-second timeout, fail open on transport errors, log lines), called from `handleSubmission()` before the rate limit and from `updateData()` when a token is given
+- [x] 3.3 `api.php`: `PATCH /forms/submissions/{id}` (`forms/manage`, 404 for an unknown ID) and `GET /forms/settings/{form}` (only `label` and `fieldOptions`)
+- [x] 3.4 `config.core.php` (thin) and `src/templates/cockpit/config.php` (legacy): `forms.recaptchaSecret` from `RECAPTCHA_SECRET_KEY`; generated composes pass the variable to the CMS only
+- [x] 3.5 `core/cms`: `Submit` (with optional token/action), `UpdateSubmission`, `FormSettings`, `ErrRecaptcha`; Go tests with an `httptest` server
+- [x] 3.6 Prove it against a sandbox CMS: PATCH merges and does not notify; settings answer has no secret fields; low score and missing token answer 403; Google unreachable (blocked DNS in the container) accepts and logs
+- [x] 3.7 Forms README, `core/CORE_API.md`, CHANGELOG
+
+- [x] 3.8 Fix found on the way: submit now returns the entry `_id`; before, avanxo's lead ID was always empty (no `scanlead` link, a second submission instead of an update)
 
 ## 4. Release
 

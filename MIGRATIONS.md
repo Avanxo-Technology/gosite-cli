@@ -896,3 +896,32 @@ functions passes the same map to `gositetest.CheckTheme(t, theme(),
 gositetest.WithFuncs(funcs))` in its theme test.
 
 Legacy sites: nothing changes.
+
+## → 0.75.0 — Forms: update, field choices, reCAPTCHA
+
+The Forms addon gains `PATCH /api/forms/submissions/{id}`, `fieldOptions` with
+`GET /api/forms/settings/{form}`, and reCAPTCHA v3 for forms that ask for it.
+Submit now returns the entry's `_id`. Nothing changes for a form whose
+`formSettings` does not set `recaptchaMinScore`.
+
+**Thin sites:** `gosite upgrade <site>`. The composes gain an optional
+`RECAPTCHA_SECRET_KEY` on the CMS service. The `formSettings` model gets its
+three new fields the first time the CMS loads the new addon.
+
+To verify reCAPTCHA on a form:
+1. Set `RECAPTCHA_SECRET_KEY` on the CMS in each environment (Coolify), not
+   on the app.
+2. In Content > Form settings, set `recaptchaMinScore` (for example `0.5`) and
+   `recaptchaActions` (the actions the site's pages use).
+3. Send the token from the site: `cms.Submission.Recaptcha` in Go, or the
+   `recaptcha` object in the JSON body.
+
+A site that wrote `formSubmissions` through the content API moves to
+`UpdateSubmission`.
+
+**Legacy sites:**
+- Replace `cockpit/addons/Forms` with `src/addons/Forms` of this version.
+- Add the `recaptchaSecret` line to the `forms` block of `cockpit/config.php`,
+  as in `src/templates/cockpit/config.php`.
+- Add `RECAPTCHA_SECRET_KEY` to the CMS service of each compose, only if a form
+  will use it.

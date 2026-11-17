@@ -182,8 +182,8 @@ EOF
 # The real templates, rendered without addons, must be byte-identical to the
 # compose files of the release before Commerce: the six live sites regenerate
 # with no diff. The fixtures are those files from commit 3d5e7da plus the
-# optional SMTP_* (0.55.0) and FORMS_WEBHOOK_* (0.65.0) variables on the CMS,
-# which every site gets.
+# optional SMTP_* (0.55.0), FORMS_WEBHOOK_* (0.65.0) and RECAPTCHA_SECRET_KEY
+# (0.75.0) variables on the CMS, which every site gets.
 @test "templates without addons are byte-identical to the pre-Commerce release" {
   local f
   for f in docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml; do
@@ -379,4 +379,18 @@ make_site_addon() {
   make_site_addon "${dir}" Casos
   run thin_check_site_addons "${dir}"
   [ "$status" -eq 0 ]
+}
+
+@test "RECAPTCHA_SECRET_KEY reaches the CMS service and never the app" {
+  local env svc
+  for env in qa prod; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.${env}.yml" "${F}"
+    _thin_filter_addon_blocks "${F}" Commerce
+    # The service a line belongs to is the last two-space key above it.
+    svc="$(awk '/^  [^ #]/ { s = $1 } /- RECAPTCHA_SECRET_KEY=/ { print s }' "${F}")"
+    [ "${svc}" = "__PROJECT__-${env}-cms:" ]
+  done
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.yml" "${F}"
+  svc="$(awk '/^  [^ #]/ { s = $1 } /RECAPTCHA_SECRET_KEY: / { print s }' "${F}")"
+  [ "${svc}" = "cms:" ]
 }

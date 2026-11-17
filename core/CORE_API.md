@@ -85,6 +85,24 @@ assets are served from the module at `/static/js/analytics/analytics.js`,
 `/static/js/analytics/consent.js` and `/static/css/consent.css`; everything else
 under `/static/` comes from the site's `static/` directory.
 
+### Forms
+
+`CMS()` also talks to the Forms addon (since 0.75.0). A site never writes
+`formSubmissions` through the content API.
+
+```go
+(*cms.Client).Submit(ctx, cms.Submission{Form, Data, Honeypot, Recaptcha}) (id string, err error)
+(*cms.Client).UpdateSubmission(ctx, id, fields map[string]string, rc *cms.Recaptcha) error
+(*cms.Client).FormSettings(ctx, form) (cms.FormSettings, error) // Label, FieldOptions
+cms.ErrRecaptcha // the addon refused the reCAPTCHA token; nothing was stored
+```
+
+- `Submit` returns the stored entry's ID (empty when the honeypot was filled);
+  keep it to complete the submission later with `UpdateSubmission`, which
+  merges fields and never notifies.
+- `FormSettings` answers `cms.ErrNotFound` when the CMS runs an older Forms
+  addon; treat that as "no choices".
+
 ## State
 
 ```go

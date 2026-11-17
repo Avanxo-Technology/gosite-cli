@@ -52,6 +52,10 @@
 #                           by Mattermost.
 # A form's own `webhook` / `webhookFormat` in the CMS overrides all three, and
 # `webhookFormat: none` opts that form out of the default.
+# Optional, for forms that verify reCAPTCHA v3 (read by the cms only):
+#   RECAPTCHA_SECRET_KEY    the secret key of the site's reCAPTCHA. Used only
+#                           for a form whose formSettings sets
+#                           recaptchaMinScore.
 #
 # MONGO_DB does more than name the database. cockpit/config.php uses it as the
 # key prefix for Cockpit's app memory in Redis, and that memory holds the API
@@ -148,6 +152,7 @@ services:
       - FORMS_WEBHOOK_URL=${FORMS_WEBHOOK_URL:-}
       - FORMS_WEBHOOK_FORMAT=${FORMS_WEBHOOK_FORMAT:-}
       - FORMS_WEBHOOK_SECRET=${FORMS_WEBHOOK_SECRET:-}
+      - RECAPTCHA_SECRET_KEY=${RECAPTCHA_SECRET_KEY:-}
       # CachePurge addon: the Go app's internal address and shared token so
       # Cockpit can POST to /cache/purge when content changes or Replica syncs.
       # Every service in this file is named for the project AND the

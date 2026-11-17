@@ -7,7 +7,7 @@ Every client site except three is still legacy: its Go core, addons, composes, D
 - **Thin sites can have their own Cockpit addons.** A site's addons live in `cockpit/site-addons/<Name>/`. When that folder exists, the generated `deploy/Dockerfile.cms` also copies it into the CMS image. `gosite generate` never writes in it, and refuses a site addon with the same name as a gosite addon. This reverses the core design decision "every addon lives in gosite, no `cockpit/site-addons/`".
 - **Core gains two public API additions** (`core/CORE_API.md`, minor version):
   - `gosite.WithFuncs(template.FuncMap)`: the site's template functions. A name that core already defines makes `Run` fail at startup.
-  - `(*cms.Client).Submit(ctx, form, data, honeypot)`: posts a submission to the Forms addon and returns the entry ID.
+  - `(*cms.Client).Submit(ctx, cms.Submission)`: posts a submission to the Forms addon and returns the entry ID.
 - **Everything a site does with forms goes through the Forms addon.** avanxo now writes `formSubmissions` through the generic content API, keeps a form's choices in its Home model, verifies reCAPTCHA in its own Go code, and has a local patch in the addon. The addon gains:
   - `PATCH /api/forms/submissions/{id}`: merges fields into a submission's data. It needs an API token with `forms/manage`, sanitizes like a submission, and never notifies. Core's client gains `UpdateSubmission`.
   - **Field options per form** in `formSettings` (`fieldOptions`, field name -> list of choices), read through `GET /api/forms/settings/{form}`. That endpoint returns only `label` and `fieldOptions`, never notification or secret fields. Core's client gains `FormSettings`.

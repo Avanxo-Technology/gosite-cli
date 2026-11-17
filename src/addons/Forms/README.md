@@ -87,9 +87,41 @@ addons/Forms/
 | `POST` | `/forms/api/remove/{id}` | `forms/manage` + CSRF |
 | `POST` | `/forms/api/read/{id}?read=0\|1` | `forms/manage` + CSRF |
 
-Token-authenticated equivalents: `GET /api/forms/submissions`,
-`DELETE /api/forms/submissions/{id}`, `GET /api/forms/export`. The standard
-content API (`/api/content/items/formSubmissions`) also works.
+Token-authenticated (API key), for the site and for tools:
+
+| Method | Route | Auth | |
+| --- | --- | --- | --- |
+| `GET` | `/api/forms/submissions?form=&page=&limit=` | `forms/manage` | list |
+| `PATCH` | `/api/forms/submissions/{id}` | `forms/manage` | merge fields into a submission's data (below) |
+| `DELETE` | `/api/forms/submissions/{id}` | `forms/manage` | remove |
+| `GET` | `/api/forms/settings/{form}` | any API key | the form's `label` and `fieldOptions`, nothing else |
+| `GET` | `/api/forms/export?form=` | `forms/manage` | CSV |
+
+A site changes submissions only through these endpoints, never through the
+content API: they sanitize, check `forms/manage`, and send notifications only
+once, on submit. gosite's Go core calls them through `cms.Client` (`Submit`,
+`UpdateSubmission`, `FormSettings`).
+
+### Updating a submission
+
+```http
+PATCH /api/forms/submissions/{id}
+{"data": {"status": "completo"}, "recaptcha": {"token": "…", "action": "lead"}}
+```
+
+The fields are sanitized like a new submission's and merged into the stored
+`data`; fields not sent are kept. No e-mail and no webhook is sent. `recaptcha`
+is optional: when it is given and the form sets `recaptchaMinScore`, the token
+is verified as on submit (403 `{"error":"recaptcha"}` when it fails). Answers:
+`200 {"success":true,"_id":…}`, `400` without data, `404` for an unknown ID.
+For a form completed in steps, keep the `_id` the submit returned.
+
+### Choices of a form's fields
+
+`formSettings.fieldOptions` maps a field name to its choices, for example
+`{"necesidad": ["Ventas", "Marca"]}`. The site reads them with
+`GET /api/forms/settings/{form}` and renders the select; editors change them in
+Content > Form settings. Empty choices and surrounding spaces are dropped.
 
 CSRF uses the panel's own `App.csrf` global and the `X-CSRF-TOKEN` header,
 validated against the `app.csrf` key — the same check core controllers perform.
@@ -106,9 +138,14 @@ validated against the `app.csrf` key — the same check core controllers perform
 A flat body (`{"form":"cotizar","nombre":"Ana",...}`) and a classic
 `application/x-www-form-urlencoded` POST are both accepted too.
 
-Responses: `200 {"success":true}`, `400`/`429 {"success":false,"error":"…"}`,
-or `503` with a `Retry-After` header when the rate limiter's memory backend
-(Redis) is unreachable.
+A reCAPTCHA v3 token travels as `"recaptcha": {"token": "…", "action": "…"}` in
+a JSON body, or as the fields `g-recaptcha-response` and `recaptcha_action` of a
+form post. It is never stored with the data.
+
+Responses: `200 {"success":true,"_id":"…"}` (the `_id` is absent when the
+honeypot was filled), `400`/`429 {"success":false,"error":"…"}`,
+`403 {"success":false,"error":"recaptcha"}`, or `503` with a `Retry-After`
+header when the rate limiter's memory backend (Redis) is unreachable.
 
 ## Anti-spam
 
@@ -121,6 +158,30 @@ or `503` with a `Retry-After` header when the rate limiter's memory backend
 - **Client identity** — see *Behind a reverse proxy* below: the rate-limit
   bucket key is derived with proxy awareness, so two different visitors never
   share one bucket.
+
+### reCAPTCHA v3
+
+A form verifies reCAPTCHA when its `formSettings` sets `recaptchaMinScore`
+(0–1). The secret is `forms.recaptchaSecret`, which gosite's config reads from
+`RECAPTCHA_SECRET_KEY` on the CMS service; it never lives in a Cockpit entry.
+`recaptchaActions` lists the actions the form's pages ask Google for.
+
+| Request | Answer |
+| --- | --- |
+| no token | 403 `{"error":"recaptcha"}` |
+| Google says it failed, the action is not in `recaptchaActions`, or the score is below `recaptchaMinScore` | 403 `{"error":"recaptcha"}` |
+| Google cannot be reached (5-second timeout) or answers something unreadable | accepted; the log says `recaptcha: verify unreachable` |
+| no `recaptchaSecret` configured | accepted; the log says the form asks for it |
+| a form without `recaptchaMinScore` | accepted, as before |
+
+The check runs before the rate limit counts the request. Every result is a
+`[forms] recaptcha:` log line with the score, because Google's console lags by
+hours. `forms.recaptchaVerifyUrl` replaces Google's verify URL; it exists for
+tests and is never needed in production.
+
+When a site posts to the addon from its server, every submission comes from the
+site's address: the per-IP throttle and daily cap then count all visitors
+together. Such a site keeps its own per-visitor limit.
 
 ### Fail-closed rate limiting
 
@@ -282,6 +343,8 @@ most that much.
     'allowed_origins' => ['https://www.example.com'],
     // Number of trusted reverse-proxy hops in front of the CMS (see above).
     'trustedProxies' => 1,
+    // reCAPTCHA v3 secret, for forms that set recaptchaMinScore.
+    'recaptchaSecret' => getenv('RECAPTCHA_SECRET_KEY') ?: null,
 ],
 ```
 
@@ -295,7 +358,7 @@ rm -f cockpit-storage/cache/modules.cache.php && docker compose restart cms
 curl -s -X POST http://localhost:8001/forms/api/submit \
   -H 'Content-Type: application/json' \
   -d '{"form":"cotizar","data":{"nombre":"Ana","tel":"555-0100","equipo":"Excavadora"}}'
-# -> {"success":true}
+# -> {"success":true,"_id":"…"}
 
 # throttle: repeat immediately -> HTTP 429
 # honeypot: add "_hp":"bot" -> {"success":true} but no row stored
