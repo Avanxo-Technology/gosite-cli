@@ -45,10 +45,11 @@ services:
     build:
       context: .
       dockerfile: deploy/Dockerfile.cms
-      # gosite's Cockpit addons, from the gosite installation that generated
-      # this file. Production fetches the same directory at the core version.
+      # gosite's Cockpit addons, from the gosite installation that runs this
+      # compose: gosite sets GOSITE_ADDONS_DIR, so the file names no path of
+      # one machine. Production fetches the same directory at the core version.
       additional_contexts:
-        gosite-addons: "__ADDONS_CONTEXT_DEV__"
+        gosite-addons: "${GOSITE_ADDONS_DIR:?GOSITE_ADDONS_DIR is not set. Run compose through gosite (gosite start or restart), or export GOSITE_ADDONS_DIR as the src/addons folder of your gosite installation}"
     container_name: __PROJECT__-cms
     restart: unless-stopped
     environment:

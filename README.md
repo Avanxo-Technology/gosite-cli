@@ -350,7 +350,22 @@ my-site/
 gosite create my-site             # thin by default; all the usual flags work
 gosite addons add Blog my-site    # one line in gosite.yml; nothing copied
 gosite generate my-site           # rewrite the generated files from gosite.yml
+gosite upgrade my-site            # take the site to this gosite version
 ```
+
+To move a thin site to a newer gosite, update the CLI (`gosite update`), then
+run `gosite upgrade <site>`. It first renders the new generated files in a
+temporary copy and stops, without changing the site, if `generate` would delete
+a variable the site added to a generated compose file (`--force` continues).
+Then it sets `core:` in `gosite.yml`, requires the new core in `go.mod`
+(`go get`, `go mod tidy`), runs `gosite generate`, `go build`, `go vet` and
+`go test`, builds the production app and CMS images and removes them
+(`--no-images` skips that), and prints the MIGRATIONS.md sections of the
+versions crossed. It runs no git command and deploys nothing.
+
+The local `docker-compose.yml` takes gosite's addons from `GOSITE_ADDONS_DIR`,
+which every gosite command sets. To run `docker compose` on it by hand, export
+that variable as the `src/addons` folder of your gosite installation.
 
 `gosite generate` only runs on thin sites and only overwrites files whose
 header says they are generated; your changes go in the override files next to
@@ -487,6 +502,7 @@ gosite-cli/
     └── commands/
         ├── cmd_create.sh         # project scaffolding from the template tree
         ├── cmd_addons.sh         # install/remove addons in an existing project
+        ├── cmd_upgrade.sh        # take a thin site to this gosite version
         ├── cmd_infra.sh          # shared Traefik + Redis lifecycle
         ├── cmd_dns.sh            # verify *.test resolution, print the fix
         ├── cmd_start.sh          # bring a project up with air hot reload

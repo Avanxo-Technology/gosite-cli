@@ -199,7 +199,6 @@ _thin_render() {
   tmp="$(mktemp)"
   sed \
     -e "s|__CORE_VERSION__|${version}|g" \
-    -e "s|__ADDONS_CONTEXT_DEV__|${GOSITE_ROOT}/addons|g" \
     -e "s|__ADDONS_CONTEXT_REMOTE__|https://github.com/${THIN_REPO}.git#core/v${version}:src/addons|g" \
     -e "s|__DISABLED_ADDONS__|$(thin_disabled_addons "${addons[@]+"${addons[@]}"}")|g" \
     "${file}" > "${tmp}"
@@ -320,4 +319,42 @@ thin_generate() {
   done < <(cd "${root}/generated" && find . -type f -print0)
   rm -rf "${tmpdir}"
   assert_no_placeholders "${dir}"
+}
+
+# The compose files whose variables an upgrade compares. Production and QA
+# are the ones sites edit by hand; the local one is compared too.
+THIN_COMPOSE_FILES=(docker-compose.yml docker-compose.qa.yml docker-compose.prod.yml)
+
+# thin_compose_var_names <file> -> the environment variable names a compose
+# file sets, one per line, sorted and unique. Both list (`- NAME=`) and map
+# (`NAME:`) forms count. A missing file prints nothing.
+thin_compose_var_names() {
+  [[ -f "$1" ]] || return 0
+  { grep -oE '^ +(- )?[A-Z_][A-Z0-9_]*[=:]' "$1" || true; } \
+    | sed -E 's/^ +(- )?//; s/[=:]$//' | LC_ALL=C sort -u
+}
+
+# thin_lost_compose_vars <site-dir> <rendered-dir> -> "<file>\t<name>" for
+# every variable a compose file of the site sets that the rendered file does
+# not. Names only: a changed value is not reported.
+thin_lost_compose_vars() {
+  local site="$1" rendered="$2" f name
+  for f in "${THIN_COMPOSE_FILES[@]}"; do
+    [[ -f "${site}/${f}" ]] || continue
+    while IFS= read -r name; do
+      [[ -n "${name}" ]] && printf '%s\t%s\n' "${f}" "${name}"
+    done < <(LC_ALL=C comm -23 <(thin_compose_var_names "${site}/${f}") \
+                               <(thin_compose_var_names "${rendered}/${f}"))
+  done
+  return 0
+}
+
+# thin_set_core_version <gosite.yml> <version> -> rewrites the top-level
+# `core:` line and nothing else. Fails when the file has no such line.
+thin_set_core_version() {
+  local file="$1" version="$2" tmp
+  grep -qE '^core:' "${file}" || return 1
+  tmp="$(mktemp)"
+  awk -v v="${version}" '/^core:/ { print "core: " v; next } { print }' "${file}" > "${tmp}"
+  mv "${tmp}" "${file}"
 }

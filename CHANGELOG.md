@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.72.0
+
+### gosite upgrade
+
+- **Added: `gosite upgrade [site]`** takes a thin site to the installed
+  gosite version. It renders the new generated files in a temporary copy
+  first and stops, with the site unchanged, if `generate` would delete a
+  variable the site added to a generated compose file (`--force` continues).
+  Then it sets `core:` in `gosite.yml`, runs `go get` for the core and
+  `go mod tidy`, `gosite generate`, `go build`, `go vet` and `go test`, builds
+  the production app and CMS images (the CMS with the addons of
+  `core/vX.Y.Z`, as production builds it), checks and removes them
+  (`--no-images` skips this), and prints the MIGRATIONS.md sections of the
+  versions crossed. No git, no deploy.
+- **Changed: the local `docker-compose.yml` names no path of the machine that
+  generated it.** The CMS addons build context is `${GOSITE_ADDONS_DIR}`,
+  which gosite sets for every compose command it runs. Before, `generate`
+  wrote the absolute path of the installation, so the file differed between
+  machines.
+- **Upgrade:** see MIGRATIONS (→ 0.72.0).
+
 ## 0.71.0
 
 ### Page cache: bounded query variants

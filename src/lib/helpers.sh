@@ -342,8 +342,13 @@ compose() {
 # loads its docker-compose.override.yml, which holds the local changes that
 # `gosite generate` must never overwrite. Compose only merges that file on its
 # own when no -f is given, and every call here names the main file.
+#
+# GOSITE_ADDONS_DIR is the local CMS build context for gosite's Cockpit
+# addons. The generated compose names the variable, not a path, so the file is
+# the same on every machine; this installation fills it in.
 project_compose() {
   local dir="$1"; shift
+  export GOSITE_ADDONS_DIR="${GOSITE_ROOT}/addons"
   local files=(-f "${dir}/docker-compose.yml")
   if [[ -f "${dir}/gosite.yml" && -f "${dir}/docker-compose.override.yml" ]]; then
     files+=(-f "${dir}/docker-compose.override.yml")
