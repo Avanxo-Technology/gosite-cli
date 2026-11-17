@@ -604,7 +604,9 @@ against the secure defaults and exits non-zero on findings — run it in CI or
 before a deploy. The invariants it checks (and that gosite enforces by
 default): purge endpoint fail-closed without a token, Forms rate limiting
 with correct client identity behind the proxy, CORS fail-closed, shared
-datastores bound to loopback, personal-data retention bounded.
+datastores bound to loopback, personal-data retention bounded, and no
+Cockpit `sec-key` fallback written in the config (the key comes only from
+`COCKPIT_SEC_KEY`; the CMS does not start without it).
 
 ### Accepted risks
 

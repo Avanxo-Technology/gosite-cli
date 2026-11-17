@@ -28,6 +28,34 @@ if (!function_exists('gosite_env_flag')) {
     }
 }
 
+if (!function_exists('gosite_sec_key')) {
+    // Returns COCKPIT_SEC_KEY, and stops the CMS (HTTP 503, message in the
+    // log) when it is empty or still the template placeholder. There is no
+    // fallback on purpose: a fallback written in this file is either public (the placeholder, the image's own key) or a
+    // secret committed to the site's repository. The placeholder is split so
+    // that rendering the template does not replace it.
+    function gosite_sec_key(): string
+    {
+        $key = trim((string) getenv('COCKPIT_SEC_KEY'));
+        if ($key !== '' && $key !== '__COCKPIT_SEC_KEY' . '__') {
+            return $key;
+        }
+        // The details go to the log the operator reads, not to the visitor.
+        $message = 'gosite: COCKPIT_SEC_KEY is not set. Set it in the deployment '
+            . 'environment (locally: .env). The CMS does not start without it.';
+        if (PHP_SAPI === 'cli') {
+            fwrite(STDERR, $message . PHP_EOL);
+            exit(1);
+        }
+        error_log($message);
+        http_response_code(503);
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Retry-After: 300');
+        echo "This service is temporarily unavailable.\n";
+        exit;
+    }
+}
+
 $mongoUser = (string)getenv('MONGO_USER');
 $mongoPass = (string)getenv('MONGO_PASSWORD');
 $mongoHost = getenv('MONGO_HOST') ?: 'localhost';
@@ -90,8 +118,9 @@ $config = [
         ],
 
     // The image ships a hardcoded, publicly known key. Overriding it is what
-    // stops anyone from forging a session against a deployed site.
-    'sec-key' => getenv('COCKPIT_SEC_KEY') ?: '__COCKPIT_SEC_KEY__',
+    // stops anyone from forging a session against a deployed site. The key
+    // comes only from the environment; see gosite_sec_key().
+    'sec-key' => gosite_sec_key(),
 
     'session' => [
         'name' => '__PROJECT__',

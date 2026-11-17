@@ -111,6 +111,35 @@ _audit_project() {
       "add forms.trustedProxies to ${fix_file}"
   fi
 
+  # Cockpit sec-key fallback: since 0.70.0 the key comes only from the
+  # environment. A literal after `?:` is either the public template
+  # placeholder or the real key, committed with the site. The value is never
+  # printed.
+  local key_file observed key_fix
+  for key_file in "${config}" "${dir}/cockpit/config.core.php"; do
+    [[ -f "${key_file}" ]] || continue
+    grep -qE "getenv\('COCKPIT_SEC_KEY'\)[[:space:]]*\?:[[:space:]]*'" "${key_file}" || continue
+    observed="a key written in the file"
+    grep -q "'__COCKPIT_SEC_KEY__'" "${key_file}" && observed="the public template placeholder"
+    key_fix="replace the sec-key line in ${key_file} as MIGRATIONS (→ 0.70.0) shows, then change the key"
+    [[ -f "${dir}/gosite.yml" ]] && key_fix="cd ${dir} && gosite generate, then change the key"
+    _audit_finding "${name}" "sec-key fallback" "${observed}" \
+      "a deployment without COCKPIT_SEC_KEY signs sessions with a known key" \
+      "${key_fix}"
+  done
+
+  # No sec-key in .env: the CMS does not start without one since 0.70.0.
+  local env_key=""
+  if [[ -f "${envfile}" ]]; then
+    env_key="$(grep -E '^COCKPIT_SEC_KEY=' "${envfile}" | tail -1 | cut -d= -f2- || true)"
+    env_key="${env_key//[[:space:]]/}"
+  fi
+  if [[ -f "${envfile}" ]] && [[ -z "${env_key}" || "${env_key}" == "__COCKPIT_SEC_KEY__" ]]; then
+    _audit_finding "${name}" "COCKPIT_SEC_KEY" "absent or a placeholder in .env" \
+      "the CMS does not start without its own key" \
+      "add COCKPIT_SEC_KEY=\$(openssl rand -hex 32) to ${envfile}, then: gosite restart ${name}"
+  fi
+
   # Empty purge token: the cache-purge endpoint answers unauthenticated in
   # any non-development deployment.
   if [[ -f "${envfile}" ]] && grep -qE '^COCKPIT_API_TOKEN=[[:space:]]*$' "${envfile}"; then
