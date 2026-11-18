@@ -390,3 +390,54 @@ func TestSiteFuncNamedLikeCoreFailsStartup(t *testing.T) {
 		})
 	}
 }
+
+type sitemapSite struct {
+	testSite
+	entries []SitemapEntry
+}
+
+func (s *sitemapSite) SitemapEntries(context.Context) []SitemapEntry { return s.entries }
+
+// sitemapCMS answers the webapp singleton (siteUrl) and a seoPages collection.
+func sitemapCMS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/item/webapp"):
+		w.Write([]byte(`{"siteUrl":"https://example.com"}`))
+	case strings.Contains(r.URL.Path, "/items/seoPages"):
+		w.Write([]byte(`{"data":[{"path":"/nosotros","_modified":1700000000}],"meta":{"total":1}}`))
+	default:
+		w.Write([]byte(`{}`))
+	}
+}
+
+func TestSitemapperAddsEntries(t *testing.T) {
+	site := &sitemapSite{entries: []SitemapEntry{
+		{Path: "/maquinaria/cat-320", LastMod: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)},
+		{Path: "/nosotros"}, // already in seoPages: listed once, as seoPages has it
+		{Path: "/equipos"},
+	}}
+	s, _ := newTestServerCMS(t, site, sitemapCMS)
+	body := do(t, s, http.MethodGet, "/sitemap.xml", "").Body.String()
+
+	if !strings.Contains(body, "<loc>https://example.com/maquinaria/cat-320</loc>\n    <lastmod>2026-11-01T10:00:00Z</lastmod>") {
+		t.Errorf("site entry with lastmod missing:\n%s", body)
+	}
+	if n := strings.Count(body, "<loc>https://example.com/nosotros</loc>"); n != 1 {
+		t.Errorf("/nosotros listed %d times, want 1:\n%s", n, body)
+	}
+	if !strings.Contains(body, "<loc>https://example.com/nosotros</loc>\n    <lastmod>2023-11-14T22:13:20Z</lastmod>") {
+		t.Errorf("/nosotros should keep the seoPages lastmod:\n%s", body)
+	}
+	if strings.Index(body, "/nosotros") > strings.Index(body, "/maquinaria/cat-320") {
+		t.Errorf("seoPages entries should come before the site's:\n%s", body)
+	}
+}
+
+func TestSitemapWithoutSitemapper(t *testing.T) {
+	s, _ := newTestServerCMS(t, &testSite{}, sitemapCMS)
+	body := do(t, s, http.MethodGet, "/sitemap.xml", "").Body.String()
+	if strings.Count(body, "<url>") != 2 {
+		t.Errorf("want / and /nosotros only:\n%s", body)
+	}
+}

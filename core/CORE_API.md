@@ -41,6 +41,7 @@ type App interface { Routes(r Router) }
 type Middlewarer    interface { Middleware() []Middleware }
 type TemplateDataer interface { TemplateData(c *Context, page string) map[string]any }
 type Purger         interface { OnPurge(ctx context.Context) error }
+type Sitemapper     interface { SitemapEntries(ctx context.Context) []SitemapEntry } // since 0.76.0
 ```
 
 - **Middleware** runs after core's own (recover, request log, gzip, asset
@@ -50,6 +51,11 @@ type Purger         interface { OnPurge(ctx context.Context) error }
   it must not depend on who is visiting.
 - **OnPurge** runs once after every successful purge, after core has dropped
   its cache keys.
+- **SitemapEntries** adds `SitemapEntry{Path, LastMod}` URLs to `/sitemap.xml`,
+  after the `seoPages` entries; a path already listed is not repeated. It runs
+  on every sitemap request: read what it needs and no more.
+- **TemplateData** also reaches the core blog's pages (since 0.76.0), under the
+  blog's own keys.
 
 `Context`, `HandlerFunc` and `Middleware` are aliases of Echo v5's types.
 
@@ -176,6 +182,16 @@ gositetest.ThemeProblems(theme, opts...) // the same, as a list
 gositetest.WithFuncs(funcs)              // the map the site passes to gosite.WithFuncs
 gositetest.CheckCommercePages(t, theme) // the Commerce addon's pages render
 ```
+
+## Blog addon
+
+Routes, each also with a trailing slash (same answer): `/:blog`,
+`/:blog/:slug`, `/:blog/category/:slug` (since 0.76.0, 404 for an unknown blog
+or category). Pages `blog-index` (`Blog`, `Category`, `Posts`, `Page`,
+`HasMore`, `PrevURL`, `NextURL`, `Total`, `Meta`) and `blog-article` (`Blog`,
+`Post`, `Author`, `ReadingTime` minutes, `Related` up to 3 articles of the same
+category, `SEOData`, `Meta`). Every blog index and published article is in
+`/sitemap.xml`. A theme page with the same name replaces the default one.
 
 ## Commerce addon contract
 

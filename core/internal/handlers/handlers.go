@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"context"
+	"github.com/labstack/echo/v5"
 	"log/slog"
 
 	"github.com/redis/go-redis/v9"
@@ -44,6 +45,29 @@ type Handlers struct {
 	purgeHooks       []PurgeHook
 	afterPurge       []func(ctx context.Context) error
 	sitemapProviders []SitemapProvider
+	siteData         func(c *echo.Context, page string) map[string]any
+}
+
+// SetSiteData is how the site's TemplateData reaches pages that a core
+// feature (an addon) renders itself.
+func (h *Handlers) SetSiteData(fn func(c *echo.Context, page string) map[string]any) {
+	h.siteData = fn
+}
+
+// WithSiteData returns the site's template data for page with data over it:
+// the feature's own keys win. Without site data it returns data unchanged.
+func (h *Handlers) WithSiteData(c *echo.Context, page string, data map[string]any) map[string]any {
+	if h.siteData == nil {
+		return data
+	}
+	out := map[string]any{}
+	for k, v := range h.siteData(c, page) {
+		out[k] = v
+	}
+	for k, v := range data {
+		out[k] = v
+	}
+	return out
 }
 
 func New(d Deps) *Handlers { return &Handlers{Deps: d} }

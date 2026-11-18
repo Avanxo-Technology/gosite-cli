@@ -1049,3 +1049,22 @@ the file is 0600 starts. Coolify builds from a git checkout and was not
 affected.
 
 Legacy sites: nothing changes.
+
+## → 0.76.0 — sitemap entries from the site, a fuller blog
+
+**Thin sites:** `gosite upgrade <site>`. A site with a blog gets more without
+any change:
+- category pages at `/<blog>/category/<slug>`;
+- the reading time and up to 3 related articles on each article;
+- the blog routes with a trailing slash;
+- the blog index and its articles in `/sitemap.xml`.
+
+A theme that has its own `blog-index.html` / `blog-article.html` keeps
+rendering them: they now also get `Category`, `ReadingTime` and `Related`, and
+the site's `TemplateData`, to use or ignore.
+
+A site whose pages are not all in `seoPages` (one page per CMS entry)
+implements `SitemapEntries(ctx) []gosite.SitemapEntry` on its `Site` to list
+them.
+
+Legacy sites: nothing changes.

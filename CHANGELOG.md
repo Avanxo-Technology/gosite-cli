@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.76.0
+
+### Sitemap entries from the site, and a fuller blog
+
+- **Added: `gosite.Sitemapper`** (core). A site adds `SitemapEntry{Path,
+  LastMod}` URLs to `/sitemap.xml` (a catalog with one page per CMS entry),
+  after the `seoPages` entries, each path once.
+- **Added: blog category pages**, `/:blog/category/:slug` (the index with one
+  category's articles; 404 for an unknown category).
+- **Added: reading time and related articles** on the blog article page
+  (`ReadingTime`, `Related`: up to 3 of the same category, newest first). The
+  default page shows both and links the category.
+- **Added: blog routes answer with a trailing slash**, with the same page, so
+  old WordPress links keep working.
+- **Added: the blog's index and published articles are in `/sitemap.xml`**,
+  articles with their last-modified time.
+- **Changed: blog pages get the site's `TemplateData`** (for example its
+  header and footer), under the blog's own keys.
+- **Upgrade:** see MIGRATIONS (→ 0.76.0).
+
 ## 0.75.2
 
 ### gosite.yml readable in the app image

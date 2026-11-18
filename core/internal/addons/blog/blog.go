@@ -24,13 +24,21 @@ import (
 
 	"github.com/Avanxo-Technology/gosite-cli/core/cms"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/handlers"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/seo"
 )
 
 // Cockpit models installed by the Blog addon.
 const (
-	modelBlogs = "blogs"
-	modelPosts = "blogPosts"
+	modelBlogs      = "blogs"
+	modelPosts      = "blogPosts"
+	modelCategories = "blogCategories"
 )
+
+// relatedLimit is how many articles of the same category an article lists.
+const relatedLimit = 3
+
+// sitemapPostLimit bounds the articles one blog adds to /sitemap.xml.
+const sitemapPostLimit = 1000
 
 // perPage is how many articles an index page lists.
 const perPage = 10
@@ -59,10 +67,17 @@ type Blog struct {
 func Mount(e *echo.Echo, h *handlers.Handlers) *Blog {
 	b := &Blog{Deps: h.Deps, h: h}
 
-	e.GET("/:blog", b.Index)
-	e.GET("/:blog/:slug", b.Article)
+	// Each route also answers with a trailing slash, with the same content:
+	// sites that replaced a WordPress blog keep their old links working
+	// without a redirect.
+	for _, suffix := range []string{"", "/"} {
+		e.GET("/:blog"+suffix, b.Index)
+		e.GET("/:blog/:slug"+suffix, b.Article)
+		e.GET("/:blog/category/:slug"+suffix, b.Category)
+	}
 
 	h.OnPurge(b.purge)
+	h.OnSitemap(b.sitemap)
 
 	return b
 }
@@ -118,7 +133,7 @@ func (b *Blog) Index(c *echo.Context) error {
 	}
 
 	html, cached, err := b.Cache.HTML(c.Request().Context(), b.indexKey(blogSlug, page), func() ([]byte, error) {
-		return b.renderIndex(blogDoc, blogSlug, page)
+		return b.renderIndex(c, blogDoc, blogSlug, page, nil, "")
 	})
 	if err != nil {
 		if err == errNotFound {
@@ -149,7 +164,7 @@ func (b *Blog) Article(c *echo.Context) error {
 	}
 
 	html, cached, err := b.Cache.HTML(c.Request().Context(), b.articleKey(blogSlug, slug), func() ([]byte, error) {
-		return b.renderArticle(blogDoc, blogSlug, slug)
+		return b.renderArticle(c, blogDoc, blogSlug, slug)
 	})
 	if err != nil {
 		if err == errNotFound {
@@ -166,6 +181,42 @@ func (b *Blog) Article(c *echo.Context) error {
 // cache from storing the render.
 var errNotFound = fmt.Errorf("not found")
 
+// Category serves /{blog}/category/{slug}: the blog index with only that
+// category's articles. Its cache key sits under the blog's prefix, so the
+// blog purge covers it.
+func (b *Blog) Category(c *echo.Context) error {
+	blogSlug, catSlug := c.Param("blog"), c.Param("slug")
+
+	blogDoc, err := b.lookupBlog(c.Request().Context(), blogSlug)
+	if err != nil {
+		return b.fail(c, err)
+	}
+	if blogDoc == nil {
+		return echo.ErrNotFound
+	}
+
+	key := b.blogPrefix(blogSlug) + "category:" + catSlug
+	html, cached, err := b.Cache.HTML(c.Request().Context(), key, func() ([]byte, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		cat, err := b.CMS.First(ctx, modelCategories, map[string]any{"slug": catSlug}, 0)
+		if err != nil {
+			return nil, err
+		}
+		if cat == nil {
+			return nil, errNotFound
+		}
+		return b.renderIndex(c, blogDoc, blogSlug, 1, cat, catSlug)
+	})
+	if err != nil {
+		if err == errNotFound {
+			return echo.ErrNotFound
+		}
+		return b.fail(c, err)
+	}
+	return b.page(c, html, cached)
+}
+
 // ------------------------------------------------------------------ renders
 
 // renderIndex builds one page of a blog index.
@@ -173,12 +224,18 @@ var errNotFound = fmt.Errorf("not found")
 // Like the home page it uses its own context rather than the request's: a cold
 // render is shared by every request waiting on it, so one caller disconnecting
 // must not cancel work the others are waiting for.
-func (b *Blog) renderIndex(blogDoc cms.Content, blogSlug string, page int) ([]byte, error) {
+// renderIndex renders a page of a blog's index; with a category, only that
+// category's articles, and the title names it.
+func (b *Blog) renderIndex(c *echo.Context, blogDoc cms.Content, blogSlug string, page int, category cms.Content, categorySlug string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	filter := map[string]any{"blog._id": blogDoc["_id"]}
+	if category != nil {
+		filter["category._id"] = category["_id"]
+	}
 	res, err := b.CMS.Items(ctx, modelPosts, cms.Query{
-		Filter:   map[string]any{"blog._id": blogDoc["_id"]},
+		Filter:   filter,
 		Sort:     map[string]int{"publishedAt": -1},
 		Skip:     (page - 1) * perPage,
 		Limit:    perPage,
@@ -199,30 +256,37 @@ func (b *Blog) renderIndex(blogDoc cms.Content, blogSlug string, page int) ([]by
 
 	title := str(blogDoc["title"])
 	path := "/" + blogSlug
+	if category != nil {
+		if catTitle := str(category["title"]); catTitle != "" {
+			title = catTitle + " | " + title
+		}
+		path = "/" + blogSlug + "/category/" + categorySlug
+	}
 
 	data := map[string]any{
-		"Title":   title,
-		"Path":    path,
-		"Blog":    blogDoc,
-		"Posts":   res.Items,
-		"Page":    page,
-		"HasMore": res.HasMore,
-		"PrevURL": pageURL(path, page-1),
-		"NextURL": pageURL(path, page+1),
-		"Total":   res.Total,
-		"Meta":    b.meta(title, str(blogDoc["description"]), path, nil),
-		"IsDev":   b.Config.IsDev(),
+		"Title":    title,
+		"Path":     path,
+		"Blog":     blogDoc,
+		"Category": category,
+		"Posts":    res.Items,
+		"Page":     page,
+		"HasMore":  res.HasMore,
+		"PrevURL":  pageURL(path, page-1),
+		"NextURL":  pageURL(path, page+1),
+		"Total":    res.Total,
+		"Meta":     b.meta(title, str(blogDoc["description"]), path, nil),
+		"IsDev":    b.Config.IsDev(),
 	}
 
 	var buf bytes.Buffer
-	if err := b.Renderer.Page(&buf, "blog-index", data); err != nil {
+	if err := b.Renderer.Page(&buf, "blog-index", b.h.WithSiteData(c, "blog-index", data)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
 // renderArticle builds one article page.
-func (b *Blog) renderArticle(blogDoc cms.Content, blogSlug, slug string) ([]byte, error) {
+func (b *Blog) renderArticle(c *echo.Context, blogDoc cms.Content, blogSlug, slug string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -243,18 +307,20 @@ func (b *Blog) renderArticle(blogDoc cms.Content, blogSlug, slug string) ([]byte
 	path := "/" + blogSlug + "/" + slug
 
 	data := map[string]any{
-		"Title":   title,
-		"Path":    path,
-		"Blog":    blogDoc,
-		"Post":    post,
-		"Author":  asDoc(post["author"]),
-		"SEOData": b.seoData(post),
-		"Meta":    b.meta(title, str(post["excerpt"]), path, post["cover"]),
-		"IsDev":   b.Config.IsDev(),
+		"Title":       title,
+		"Path":        path,
+		"Blog":        blogDoc,
+		"Post":        post,
+		"Author":      asDoc(post["author"]),
+		"ReadingTime": readingTime(str(post["body"])),
+		"Related":     b.related(ctx, post),
+		"SEOData":     b.seoData(post),
+		"Meta":        b.meta(title, str(post["excerpt"]), path, post["cover"]),
+		"IsDev":       b.Config.IsDev(),
 	}
 
 	var buf bytes.Buffer
-	if err := b.Renderer.Page(&buf, "blog-article", data); err != nil {
+	if err := b.Renderer.Page(&buf, "blog-article", b.h.WithSiteData(c, "blog-article", data)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -263,6 +329,95 @@ func (b *Blog) renderArticle(blogDoc cms.Content, blogSlug, slug string) ([]byte
 // ------------------------------------------------------------------ helpers
 
 // lookupBlog resolves a blog slug to its document, or nil when there is none.
+// related is up to relatedLimit articles of the post's category, newest
+// first, without the post itself. A failed read only logs: the article still
+// renders, without the list.
+func (b *Blog) related(ctx context.Context, post cms.Content) []cms.Content {
+	cat := asDoc(post["category"])
+	if cat == nil {
+		return nil
+	}
+	res, err := b.CMS.Items(ctx, modelPosts, cms.Query{
+		Filter:   map[string]any{"category._id": cat["_id"], "_id": map[string]any{"$ne": post["_id"]}},
+		Sort:     map[string]int{"publishedAt": -1},
+		Limit:    relatedLimit,
+		Populate: populateDepth,
+		Fields:   map[string]int{"title": 1, "slug": 1, "excerpt": 1, "cover": 1, "publishedAt": 1, "author": 1, "category": 1},
+	})
+	if err != nil {
+		b.Log.Warn("blog: related articles unavailable", "post", post["_id"], "err", err)
+		return nil
+	}
+	return res.Items
+}
+
+// readingTime is the minutes a body takes to read at 200 words per minute,
+// rounded up and at least 1. Only text outside HTML tags counts.
+func readingTime(body string) int {
+	words, inTag, inWord := 0, false, false
+	for _, r := range body {
+		switch {
+		case r == '<':
+			inTag = true
+			inWord = false
+		case r == '>':
+			inTag = false
+		case inTag:
+		case r == ' ' || r == '\n' || r == '\t' || r == '\r':
+			inWord = false
+		default:
+			if !inWord {
+				words++
+				inWord = true
+			}
+		}
+	}
+	minutes := (words + 199) / 200
+	if minutes < 1 {
+		minutes = 1
+	}
+	return minutes
+}
+
+// sitemap lists every blog's index and its published articles, an article
+// with its last-modified time.
+func (b *Blog) sitemap(ctx context.Context) []seo.SitemapEntry {
+	blogs, err := b.CMS.Items(ctx, modelBlogs, cms.Query{Fields: map[string]int{"slug": 1}, Limit: 100})
+	if err != nil {
+		b.Log.Warn("sitemap: blogs lookup failed", "error", err)
+		return nil
+	}
+	var entries []seo.SitemapEntry
+	for _, blogDoc := range blogs.Items {
+		slug := str(blogDoc["slug"])
+		if slug == "" {
+			continue
+		}
+		entries = append(entries, seo.SitemapEntry{Path: "/" + slug})
+		posts, err := b.CMS.Items(ctx, modelPosts, cms.Query{
+			Filter: map[string]any{"blog._id": blogDoc["_id"]},
+			Fields: map[string]int{"slug": 1, "_modified": 1},
+			Limit:  sitemapPostLimit,
+		})
+		if err != nil {
+			b.Log.Warn("sitemap: blog posts lookup failed", "blog", slug, "error", err)
+			continue
+		}
+		for _, post := range posts.Items {
+			postSlug := str(post["slug"])
+			if postSlug == "" {
+				continue
+			}
+			entry := seo.SitemapEntry{Path: "/" + slug + "/" + postSlug}
+			if modified, ok := post["_modified"].(float64); ok && modified > 0 {
+				entry.LastMod = time.Unix(int64(modified), 0).UTC()
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
 func (b *Blog) lookupBlog(ctx context.Context, slug string) (cms.Content, error) {
 	if slug == "" {
 		return nil, nil
