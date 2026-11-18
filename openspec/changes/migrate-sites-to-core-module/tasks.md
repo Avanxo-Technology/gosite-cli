@@ -56,4 +56,4 @@
 
 - [x] 7.1 MIGRATIONS.md "legacy -> thin" from what the pilot needed; ship in the next gosite release
 - [x] 7.2 No follow-up needed: `dx_options` stays (see 5.6)
-- [ ] 7.3 Update issue #49 with the pilot result and the order for the next sites
+- [x] 7.3 Update issue #49 with the pilot result and the order for the next sites
