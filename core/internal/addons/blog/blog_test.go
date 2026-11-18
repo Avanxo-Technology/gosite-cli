@@ -346,6 +346,8 @@ func categorizedPosts() []map[string]any {
 			"blog": map[string]any{"_id": "b1", "slug": "noticias"}, "category": map[string]any{"_id": "c2", "title": "Obras", "slug": "obras"}},
 		map[string]any{"_id": "s1", "title": "Suelto", "slug": "suelto", "body": "<p>sin categoría</p>",
 			"blog": map[string]any{"_id": "b1", "slug": "noticias"}},
+		map[string]any{"_id": "h1", "title": "Oculto", "slug": "oculto", "body": "<p>noindex</p>", "seoNoIndex": true,
+			"blog": map[string]any{"_id": "b1", "slug": "noticias"}},
 	)
 	return posts
 }
@@ -421,6 +423,9 @@ func TestBlogInSitemap(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("sitemap lacks %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "/noticias/oculto") {
+		t.Error("an article marked seoNoIndex is in the sitemap")
 	}
 }
 

@@ -382,10 +382,10 @@ func readingTime(body string) int {
 	return minutes
 }
 
-// sitemap lists every blog's index and its published articles, an article
-// with its last-modified time.
+// sitemap lists every blog's index and its published articles (newest first,
+// without those marked seoNoIndex), each with its last-modified time.
 func (b *Blog) sitemap(ctx context.Context) []seo.SitemapEntry {
-	blogs, err := b.CMS.Items(ctx, modelBlogs, cms.Query{Fields: map[string]int{"slug": 1}, Limit: 100})
+	blogs, err := b.CMS.Items(ctx, modelBlogs, cms.Query{Fields: map[string]int{"slug": 1, "_modified": 1}, Limit: 100})
 	if err != nil {
 		b.Log.Warn("sitemap: blogs lookup failed", "error", err)
 		return nil
@@ -396,10 +396,11 @@ func (b *Blog) sitemap(ctx context.Context) []seo.SitemapEntry {
 		if slug == "" {
 			continue
 		}
-		entries = append(entries, seo.SitemapEntry{Path: "/" + slug})
+		entries = append(entries, seo.SitemapEntry{Path: "/" + slug, LastMod: itemModified(blogDoc)})
 		posts, err := b.CMS.Items(ctx, modelPosts, cms.Query{
 			Filter: map[string]any{"blog._id": blogDoc["_id"]},
-			Fields: map[string]int{"slug": 1, "_modified": 1},
+			Sort:   map[string]int{"publishedAt": -1},
+			Fields: map[string]int{"slug": 1, "publishedAt": 1, "_modified": 1, "seoNoIndex": 1},
 			Limit:  sitemapPostLimit,
 		})
 		if err != nil {
@@ -411,11 +412,11 @@ func (b *Blog) sitemap(ctx context.Context) []seo.SitemapEntry {
 			if postSlug == "" {
 				continue
 			}
-			entry := seo.SitemapEntry{Path: "/" + slug + "/" + postSlug}
-			if modified, ok := post["_modified"].(float64); ok && modified > 0 {
-				entry.LastMod = time.Unix(int64(modified), 0).UTC()
+			// An article the editor marked noindex stays out of the sitemap.
+			if noIndex, _ := post["seoNoIndex"].(bool); noIndex {
+				continue
 			}
-			entries = append(entries, entry)
+			entries = append(entries, seo.SitemapEntry{Path: "/" + slug + "/" + postSlug, LastMod: itemModified(post)})
 		}
 	}
 	return entries
@@ -622,4 +623,15 @@ func assetPath(value any) string {
 func str(value any) string {
 	s, _ := value.(string)
 	return s
+}
+
+// itemModified is when an entry last changed for the sitemap: its publication
+// time when Cockpit gives one as a timestamp, else _modified.
+func itemModified(item cms.Content) time.Time {
+	for _, key := range []string{"publishedAt", "_modified"} {
+		if v, ok := item[key].(float64); ok && v > 0 {
+			return time.Unix(int64(v), 0).UTC()
+		}
+	}
+	return time.Time{}
 }
