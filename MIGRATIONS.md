@@ -941,3 +941,12 @@ A site that wrote `formSubmissions` through the content API moves to
   sets.
 
 Legacy sites: nothing changes.
+
+## → 0.75.2 — gosite.yml readable in the app image
+
+**Thin sites:** `gosite upgrade <site>`. The app's `deploy/Dockerfile` copies
+`gosite.yml` with mode 0644, so a production image built on a machine where
+the file is 0600 starts. Coolify builds from a git checkout and was not
+affected.
+
+Legacy sites: nothing changes.

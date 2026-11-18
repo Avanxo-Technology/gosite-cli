@@ -238,3 +238,12 @@ EOF
   [[ "${output}" != *"Unresolved placeholder"* ]]
   grep -q __REDUX_DEVTOOLS_EXTENSION_COMPOSE__ "${SITE}/static/js/vendor/lib.min.js"
 }
+
+@test "thin_set_core_version keeps the file's mode" {
+  chmod 644 "${SITE}/gosite.yml"
+  thin_set_core_version "${SITE}/gosite.yml" 9.9.9
+  grep -qx 'core: 9.9.9' "${SITE}/gosite.yml"
+  local mode
+  mode="$(stat -c '%a' "${SITE}/gosite.yml" 2>/dev/null)" || mode="$(stat -f '%Lp' "${SITE}/gosite.yml")"
+  [ "${mode}" = "644" ]
+}

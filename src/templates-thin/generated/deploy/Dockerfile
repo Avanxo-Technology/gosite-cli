@@ -33,7 +33,8 @@ WORKDIR /app
 COPY --from=builder /out/app /app/app
 COPY --from=builder /src/static /app/static
 # gosite.Run reads the enabled addons from it at startup.
-COPY --from=builder /src/gosite.yml /app/gosite.yml
+# Readable by the app user whatever mode the checkout gave the file.
+COPY --from=builder --chmod=0644 /src/gosite.yml /app/gosite.yml
 
 USER app
 ENV PORT=8080

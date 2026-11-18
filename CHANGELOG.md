@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.75.2
+
+### gosite.yml readable in the app image
+
+- **Fixed: a production app image built locally could not start**
+  ("open gosite.yml: permission denied"). gosite wrote `gosite.yml` through a
+  0600 temporary file, and the image copied it for a non-root user. The
+  image now copies it with mode 0644, and `gosite upgrade` and `gosite addons`
+  keep the file's mode. Images built from a git checkout
+  were not affected.
+- **Upgrade:** `gosite upgrade <site>`; nothing else to do.
+
 ## 0.75.1
 
 ### Thin sites: QA gate, SITE_URL, and generate on vendored scripts

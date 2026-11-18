@@ -68,5 +68,8 @@ siteyml_set_list() {
     { skipping = 0; print }
     END { if (!done) print block }
   ' "${file}" > "${tmp}"
-  mv "${tmp}" "${file}"
+  # Written in place, not moved: mktemp files are 0600, and the app image
+  # reads gosite.yml as a non-root user.
+  cat "${tmp}" > "${file}"
+  rm -f "${tmp}"
 }

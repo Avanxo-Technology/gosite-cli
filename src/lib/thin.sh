@@ -425,5 +425,8 @@ thin_set_core_version() {
   grep -qE '^core:' "${file}" || return 1
   tmp="$(mktemp)"
   awk -v v="${version}" '/^core:/ { print "core: " v; next } { print }' "${file}" > "${tmp}"
-  mv "${tmp}" "${file}"
+  # Written in place, not moved: mktemp files are 0600, and the app image
+  # reads gosite.yml as a non-root user.
+  cat "${tmp}" > "${file}"
+  rm -f "${tmp}"
 }
