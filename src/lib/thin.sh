@@ -359,6 +359,11 @@ thin_generate() {
   thin_ensure_commerce_secrets "${dir}"
 
   THIN_SKIPPED=0
+  # Every file is rendered into a temporary folder and checked there before
+  # any of them reaches the site: a render that leaves a placeholder changes
+  # nothing. Only the rendered files are checked, never the site's own files
+  # (a vendored script under static/ may contain __NAME__ tokens).
+  local generated_rels=()
   tmpdir="$(mktemp -d)"
   while IFS= read -r -d '' f; do
     rel="${f#./}"
@@ -371,12 +376,18 @@ thin_generate() {
     mkdir -p "$(dirname "${tmpdir}/${rel}")"
     cp "${root}/generated/${rel}" "${tmpdir}/${rel}"
     _thin_render "${tmpdir}/${rel}" "${dir}"
+    generated_rels+=("${rel}")
+  done < <(cd "${root}/generated" && find . -type f -print0)
+  if ! ( assert_no_placeholders "${tmpdir}" ); then
+    rm -rf "${tmpdir}"
+    fatal "Nothing was written to $(basename "${dir}")."
+  fi
+  for rel in "${generated_rels[@]+"${generated_rels[@]}"}"; do
     mkdir -p "$(dirname "${dir}/${rel}")"
     mv "${tmpdir}/${rel}" "${dir}/${rel}"
     printf '%s\n' "${rel}"
-  done < <(cd "${root}/generated" && find . -type f -print0)
+  done
   rm -rf "${tmpdir}"
-  assert_no_placeholders "${dir}"
 }
 
 # The compose files whose variables an upgrade compares. Production and QA
@@ -414,5 +425,8 @@ thin_set_core_version() {
   grep -qE '^core:' "${file}" || return 1
   tmp="$(mktemp)"
   awk -v v="${version}" '/^core:/ { print "core: " v; next } { print }' "${file}" > "${tmp}"
-  mv "${tmp}" "${file}"
+  # Written in place, not moved: mktemp files are 0600, and the app image
+  # reads gosite.yml as a non-root user.
+  cat "${tmp}" > "${file}"
+  rm -f "${tmp}"
 }

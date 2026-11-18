@@ -54,3 +54,14 @@ EOF
   [ "$(siteyml_list "${F}" extras)" = "one" ]
   [ "$(siteyml_list "${F}" addons)" = $'Blog\nForms' ]
 }
+
+@test "siteyml_set_list keeps the file's mode" {
+  local f="${BATS_TEST_TMPDIR}/mode.yml"
+  printf 'project: demo\naddons: []\n' > "${f}"
+  chmod 644 "${f}"
+  siteyml_set_list "${f}" addons Blog
+  grep -qx '  - Blog' "${f}"
+  local mode
+  mode="$(stat -c '%a' "${f}" 2>/dev/null)" || mode="$(stat -f '%Lp' "${f}")"
+  [ "${mode}" = "644" ]
+}

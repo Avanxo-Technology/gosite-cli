@@ -83,6 +83,9 @@ services:
       - REDIS_URL=${REDIS_URL}
       - COCKPIT_URL=http://__PROJECT__-prod-cms:80
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
+      # The site's public origin (https://example.com): canonical links and
+      # absolute og:image URLs of the blog. Empty leaves them relative.
+      - SITE_URL=${SITE_URL:-}
     labels:
       # Tells Coolify this service is built from the repository Dockerfile.
       - coolify.managed=true

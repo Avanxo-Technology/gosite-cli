@@ -229,3 +229,21 @@ EOF
   [ ! -e "${STUBS}/go.log" ]
   [ -z "$(ls -A "${TMPDIR}")" ]
 }
+
+@test "generate: a __NAME__ token in the site's own files does not stop it" {
+  mkdir -p "${SITE}/static/js/vendor"
+  printf 'var c = window.__REDUX_DEVTOOLS_EXTENSION_COMPOSE__ || f;\n' > "${SITE}/static/js/vendor/lib.min.js"
+  run bash "${GOSITE_ROOT}/main.sh" generate "${SITE}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" != *"Unresolved placeholder"* ]]
+  grep -q __REDUX_DEVTOOLS_EXTENSION_COMPOSE__ "${SITE}/static/js/vendor/lib.min.js"
+}
+
+@test "thin_set_core_version keeps the file's mode" {
+  chmod 644 "${SITE}/gosite.yml"
+  thin_set_core_version "${SITE}/gosite.yml" 9.9.9
+  grep -qx 'core: 9.9.9' "${SITE}/gosite.yml"
+  local mode
+  mode="$(stat -c '%a' "${SITE}/gosite.yml" 2>/dev/null)" || mode="$(stat -f '%Lp' "${SITE}/gosite.yml")"
+  [ "${mode}" = "644" ]
+}
