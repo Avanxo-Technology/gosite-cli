@@ -145,3 +145,26 @@ func TestFormSettingsOldAddonIsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSingletonErrTellsUnpublishedFromMissing(t *testing.T) {
+	cases := []struct {
+		name        string
+		body        string
+		unpublished bool
+	}{
+		{"unpublished singleton (bare 404)", "", true},
+		{"model that does not exist", `{"error":"Model <home> not found"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := formsServer(t, http.StatusNotFound, tc.body)
+			_, err := c.SingletonErr(t.Context(), "home")
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v, want it to match ErrNotFound", err)
+			}
+			if got := errors.Is(err, ErrUnpublished); got != tc.unpublished {
+				t.Errorf("errors.Is(err, ErrUnpublished) = %v, want %v", got, tc.unpublished)
+			}
+		})
+	}
+}

@@ -18,6 +18,9 @@
   articles with their last-modified time.
 - **Changed: blog pages get the site's `TemplateData`** (for example its
   header and footer), under the blog's own keys.
+- **Added: `cms.ErrUnpublished`.** `SingletonErr` returns it (it also matches
+  `cms.ErrNotFound`) for a singleton an editor unpublished: Cockpit 2.14.1
+  answers those with an empty 404, and a missing model with a JSON one.
 - **Added: `gosite.ErrNotFound`.** A `CachedRender` build that returns it (an
   unknown slug) answers 404 at once, caching nothing.
 - **Fixed: a missing blog article took 9 seconds to answer 404.** The cache

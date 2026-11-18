@@ -72,6 +72,9 @@ CachedRender(c *Context, page string, build func(ctx context.Context) (Page, err
 
 - Routes register after core's and after addons', so a site route on a path
   core serves **replaces** core's handler.
+- `cms.Client.SingletonErr` returns an error matching `cms.ErrUnpublished` (and
+  `cms.ErrNotFound`) when the singleton exists but is not published, so a site
+  can answer 404 for a page an editor took offline (since 0.76.0).
 - `CMS()` is the only way to read content. Core has no MongoDB reader and its
   tests fail if a Mongo driver is ever added to the module.
 - A `CachedRender` build that returns an error wrapping `gosite.ErrNotFound`
