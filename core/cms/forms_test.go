@@ -188,3 +188,18 @@ func TestSubmitFieldsKeepTheirJSONShape(t *testing.T) {
 		t.Errorf("data = %v; Fields must merge over Data", data)
 	}
 }
+
+func TestSingletonErrReadsAnUnpublishedState(t *testing.T) {
+	c, _ := formsServer(t, http.StatusOK, `{"_state":0,"hero":"x"}`)
+	if _, err := c.SingletonErr(t.Context(), "home"); !errors.Is(err, ErrUnpublished) {
+		t.Fatalf("err = %v, want ErrUnpublished for _state 0 (Cockpit 2.14.0)", err)
+	}
+	c, _ = formsServer(t, http.StatusOK, `{"_state":1,"hero":"x"}`)
+	if content, err := c.SingletonErr(t.Context(), "home"); err != nil || content["hero"] != "x" {
+		t.Fatalf("published: content %v, err %v", content, err)
+	}
+	c, _ = formsServer(t, http.StatusOK, `{"hero":"x"}`)
+	if _, err := c.SingletonErr(t.Context(), "home"); err != nil {
+		t.Fatalf("no _state means published: %v", err)
+	}
+}

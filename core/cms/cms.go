@@ -97,7 +97,13 @@ func (c *Client) SingletonErr(ctx context.Context, name string) (Content, error)
 	if err != nil {
 		return Content{}, err
 	}
-	return v.(Content), nil
+	content := v.(Content)
+	// Cockpit 2.14.0 still returns an unpublished singleton, with _state 0;
+	// 2.14.1 answers it with an empty 404 (fetch). Both mean offline.
+	if state, ok := content["_state"].(float64); ok && state != 1 {
+		return Content{}, fmt.Errorf("%w: /api/content/item/%s", unpublishedErr{}, name)
+	}
+	return content, nil
 }
 
 func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
