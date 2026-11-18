@@ -136,3 +136,15 @@ avanxo's `config.local.php` sets `'forms' => ['webhookColor' => '#F26A2E']`. The
 
 - Does a save of `formSettings` purge the site's pages today? Checked in the pilot (D8).
 - The `diagnostico` contact form does not use reCAPTCHA today. It stays that way unless the owner sets `recaptchaMinScore` for it.
+
+## Pilot outcome (2026-11-17)
+
+avanxo-website#43 (into `development`) on gosite 0.75.2. Changes to the decisions above, by the owner or forced by facts found during the pilot:
+
+- **D4:** no `RENAMENX`. The legacy `scanlead:*` keys were never written: the Forms addon returned no submission ID before 0.75.0, so the link was always skipped. `State` also cannot read unprefixed keys. `scan:rate` moves with no copy, as planned.
+- **D8:** `dx_options` stays page content. The `diagnostico` form shows a different list on each of 9 pages (home and desarrollo-web in their models, 7 in Go), and `fieldOptions` holds one list per form. `fieldOptions` and its endpoint stay in the addon for single-list forms; avanxo does not use them, so there is no owner data step and no fallback.
+- **Sitemap:** core builds the sitemap from `seoPages` only. avanxo's two pages that were added in code (`/planes-digitales`, `/diagnostico-empresarial`) get `seoPages` entries (owner action) instead of a core hook.
+- **Template data:** the theme keeps its flat map through a site function `flat`, and `pageKeys` makes core's startup probe pass. No core change.
+- **Versions:** 0.73.0, 0.74.0, 0.75.0 (released together), then 0.75.1 and 0.75.2 (released together). These are the four thin template fixes listed in tasks 6.3.
+- **Result:** 21 of 22 captured routes render the same body and head as the legacy build. `sitemap.xml` loses the two pages above until their entries exist.
+

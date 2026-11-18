@@ -17,6 +17,105 @@ Find a legacy project's version per file:
 cut -f3 <project>/.gosite/manifest.tsv | sort -u   # a project is usually a mix
 ```
 
+**Legacy → thin**: see "Moving a legacy site to thin" below. A thin site is
+upgraded with one command from then on.
+
+---
+
+## Moving a legacy site to thin
+
+Written from the avanxo-dev pilot (0.65.5 → 0.75.2, avanxo-website#43; design:
+`openspec/changes/migrate-sites-to-core-module/`). Work in a sandbox copy
+(`GOSITE_HOME` and `GOSITE_WORKSPACE` redirected), never in the live project,
+until the branch is ready. One site per PR, against `development`. No deploys,
+no Cockpit data changes: every data step goes into the PR as an owner action.
+
+1. **Capture the legacy build.** Start it on the current code against the
+   local CMS. Fetch every GET route of `internal/app/router*.go`, plus
+   `robots.txt`, `sitemap.xml`, `llms.txt`, the blog index and one article,
+   and a 404. Fetch each twice: the second answer is the cached one. Record
+   the status, `Content-Type`, `Cache-Control`, `X-Robots-Tag` and the body.
+   Record which Redis keys the site writes outside its cache.
+2. **Scaffold thin** in the sandbox with the same project, module, flavor,
+   storage, database and gosite addons:
+   `gosite create <site> -y --thin --tailwind --storage s3 --database mongodb --addons "Analytics Blog Forms Replica Webapp"`.
+   The addons are separated by spaces. Then set `app_port`/`cms_port` (and
+   `.gosite.env`) to the legacy ports. Do not run `go mod tidy` against a core
+   version that is not tagged yet: the module proxy caches the miss for about
+   half an hour.
+3. **Templates → `theme/`.**
+   - Copy `internal/views/{layout.html,components,pages}`.
+   - Drop the local copies of core's partials (`consent`, `analytics-head`,
+     `analytics-body`, `seo`); keep anything of the site's own that lives in
+     the same files (avanxo's `data-analytics` tracking became
+     `components/site-analytics.html`).
+   - The layout calls `gosite:head`, `gosite:body-start` and `gosite:body-end`
+     exactly once, with core's value (`.`).
+   - Legacy pages read a flat map (`.Title`, `.Description`, the handler's own
+     keys); core passes a `gosite.Page`. Rather than rewriting every template,
+     the layout hands the pages a flat map: `{{$p := flat .}}` …
+     `{{template "content" $p}}`. avanxo's `site/funcs.go` has `flat`.
+   - Core renders every page once at startup with its own probe data, which
+     knows none of the site's keys: `flat` fills a list of the site's keys
+     (`pageKeys`) with empty values, or a template like `{{range seq .X}}`
+     stops the site.
+   - Keep theme copies of core's pages (for example the blog pages) when the
+     site's Tailwind build needs their classes: Tailwind scans only the
+     repository, so without them `styles.css` loses those utilities. A theme
+     page with the same name replaces core's.
+   - Pass the site's template functions with `gosite.WithFuncs` and test the
+     theme with `gositetest.CheckTheme(t, theme(), gositetest.WithFuncs(...))`.
+4. **Go code → `site/`.** Copy the handlers that are not template copies, and
+   compare the rest with `src/templates` at the site's version, because only
+   the differences are the site's.
+   - Pages: `r.CachedRender(c, "<page>", build)`. The render function returns
+     the data map instead of rendering into a buffer; keys come from the URL,
+     so delete the hand-made cache keys.
+   - CMS reads: `r.CMS()`. `Singleton` with an error is `SingletonErr`.
+   - Forms: `cms.Client.Submit` and `UpdateSubmission`, never the content API.
+     reCAPTCHA moves to the Forms addon: the site passes the visitor's token
+     and handles `cms.ErrRecaptcha`.
+   - Redis outside the cache: `r.State()`. Old unprefixed keys cannot be read
+     through `State`; check whether they exist at all before planning a
+     rename (avanxo's never did).
+   - Core already serves robots, `llms.txt`, sitemap, favicon, health, purge,
+     uploads, the blog and basic auth. Drop the site's copies, but check
+     what the site added to them. avanxo added two pages to the sitemap; they
+     now need `seoPages` entries.
+5. **Cockpit.**
+   - The site's own addons go to `cockpit/site-addons/` (since 0.73.0); a name
+     of a gosite addon is refused.
+   - Site settings from `cockpit/config.php` go to `config.local.php`.
+   - A site with its own mail variables (`MAIL_*`) moves them to `SMTP_*` in
+     Coolify, because `gosite.yml` can add variables to the app only.
+6. **Composes.**
+   - The site's variables go under `app_env` in `gosite.yml`.
+   - Compare the variable names of every service in the legacy composes with
+     the generated ones, and account for each variable that disappears in
+     the PR.
+   - `gosite generate` must leave no diff.
+7. **Check.**
+   - `go build`, `go vet`, `go test ./...` and `php -l` on `cockpit/`.
+   - `docker compose config -q` on every compose.
+   - Run the thin build against the same local CMS (its own Redis database),
+     capture the same routes and compare. The body may differ only in blank
+     lines and indentation, the head may only gain tags, and the status and
+     headers must be the same.
+   - Build the thin CMS image: it shows the PHP version, the addons load, and
+     the site addons' `install.php` runs.
+   - Test the forms end to end against it.
+   - Run a site-wide purge (`{"scope":"all"}`) on a canary key.
+   - Let the site's own CI (the Tailwind freshness check) run on the PR.
+8. **PR.** List the owner actions:
+   - the Coolify variables that move or appear (`SMTP_*`,
+     `RECAPTCHA_SECRET_KEY` on the CMS, `SITE_URL`, `COCKPIT_SEC_KEY`);
+   - the `formSettings` and `seoPages` entries;
+   - the API key's role (`forms/manage`, `replica/manage`);
+   - clearing `storage/cache/modules.cache.php` after the deploy;
+   - the optional cleanup of the old cache keys.
+
+   Rollback is reverting the merge.
+
 ---
 
 ## How to merge a project forward
