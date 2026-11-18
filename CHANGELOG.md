@@ -18,6 +18,11 @@
   articles with their last-modified time.
 - **Changed: blog pages get the site's `TemplateData`** (for example its
   header and footer), under the blog's own keys.
+- **Added: `gosite.ErrNotFound`.** A `CachedRender` build that returns it (an
+  unknown slug) answers 404 at once, caching nothing.
+- **Fixed: a missing blog article took 9 seconds to answer 404.** The cache
+  retried the "not found" like a CMS outage. Not-found errors are no longer
+  retried, and no stale copy is served for them.
 - **Upgrade:** see MIGRATIONS (→ 0.76.0).
 
 ## 0.75.2

@@ -74,6 +74,10 @@ CachedRender(c *Context, page string, build func(ctx context.Context) (Page, err
   core serves **replaces** core's handler.
 - `CMS()` is the only way to read content. Core has no MongoDB reader and its
   tests fail if a Mongo driver is ever added to the module.
+- A `CachedRender` build that returns an error wrapping `gosite.ErrNotFound`
+  (an unknown slug) answers 404 at once: no retries, nothing cached, no stale
+  copy (since 0.76.0). Any other error is retried for up to 10 seconds, then
+  the stale copy or a 502.
 - `CachedRender` keys pages by URL under `<project>:<env>:cache:page:` (`<env>` is `APP_ENV`, omitted when empty); every purge
   clears them. A failed build is never cached, and a stale copy is served
   instead when one exists.

@@ -14,6 +14,8 @@
 - [x] 2.6 Default blog pages show reading time and related articles
 - [x] 2.7 Tests for each requirement of the `blog-addon` spec
 
+- [x] 2.8 Found on the way: a missing article (and category) answered 404 after 9 s of cache retries; not-found errors are permanent now, and `gosite.ErrNotFound` gives `CachedRender` the same 404 (gmaq's `/maquinaria/:slug`, `/proyectos/:slug`)
+
 ## 3. Release
 
 - [x] 3.1 `core/CORE_API.md`, CHANGELOG, MIGRATIONS → 0.76.0, version 0.76.0

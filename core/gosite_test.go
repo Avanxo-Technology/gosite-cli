@@ -2,6 +2,7 @@ package gosite
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
@@ -439,5 +440,35 @@ func TestSitemapWithoutSitemapper(t *testing.T) {
 	body := do(t, s, http.MethodGet, "/sitemap.xml", "").Body.String()
 	if strings.Count(body, "<url>") != 2 {
 		t.Errorf("want / and /nosotros only:\n%s", body)
+	}
+}
+
+func TestCachedRenderNotFoundIsAQuick404(t *testing.T) {
+	site := &testSite{}
+	calls := 0
+	site.routes = func(r Router) {
+		r.GET("/maquinaria/:slug", func(c *Context) error {
+			return r.CachedRender(c, "about", func(context.Context) (Page, error) {
+				calls++
+				return Page{}, fmt.Errorf("machine %q: %w", c.Param("slug"), ErrNotFound)
+			})
+		})
+	}
+	s, mr := newTestServer(t, site)
+	start := time.Now()
+	rec := do(t, s, http.MethodGet, "/maquinaria/no-existe", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", rec.Code)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("took %s: a missing page must not wait for the cache's retries", elapsed)
+	}
+	if calls != 1 {
+		t.Errorf("build ran %d times, want 1", calls)
+	}
+	for _, k := range mr.Keys() {
+		if strings.Contains(k, ":cache:page:") {
+			t.Errorf("a 404 must not cache the page, found %s", k)
+		}
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/Avanxo-Technology/gosite-cli/core/cms"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/cache"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/handlers"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/seo"
 )
@@ -179,7 +180,9 @@ func (b *Blog) Article(c *echo.Context) error {
 // errNotFound distinguishes "this article does not exist" from "the CMS is
 // broken". Only the second is worth a 502, and only the second must keep the
 // cache from storing the render.
-var errNotFound = fmt.Errorf("not found")
+// errNotFound is permanent: a missing article or category answers 404 at
+// once instead of waiting out the cache's retries.
+var errNotFound = cache.Permanent(fmt.Errorf("not found"))
 
 // Category serves /{blog}/category/{slug}: the blog index with only that
 // category's articles. Its cache key sits under the blog's prefix, so the
