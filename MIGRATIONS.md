@@ -925,3 +925,19 @@ A site that wrote `formSubmissions` through the content API moves to
   as in `src/templates/cockpit/config.php`.
 - Add `RECAPTCHA_SECRET_KEY` to the CMS service of each compose, only if a form
   will use it.
+
+## → 0.75.1 — QA password, SITE_URL
+
+**Thin sites:** `gosite upgrade <site>`. After the deploy:
+
+- **QA:** the app now reads `HTTP_BASIC_CREDENTIALS`. If QA's Coolify
+  environment sets it, QA starts asking for that password and answers with
+  `X-Robots-Tag: noindex`. Before, it was public and indexable. If QA should
+  be public, leave the variable empty.
+- **QA and production:** set `SITE_URL` (for example `https://example.com`) so
+  the blog's canonical and `og:image` URLs are absolute.
+- A site that listed `HTTP_BASIC_CREDENTIALS` or `SITE_URL` under `app_env`
+  removes it there: `generate` stops on a variable the app service already
+  sets.
+
+Legacy sites: nothing changes.

@@ -79,6 +79,13 @@ services:
       - COCKPIT_API_TOKEN=${COCKPIT_API_TOKEN}
       - STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
       - S3_PUBLIC_URL=${S3_PUBLIC_URL}
+      # "user:password": every request needs it and every answer carries
+      # X-Robots-Tag: noindex, so QA stays out of search engines. Empty
+      # leaves QA public.
+      - HTTP_BASIC_CREDENTIALS=${HTTP_BASIC_CREDENTIALS:-}
+      # The site's public origin (https://example.com): canonical links and
+      # absolute og:image URLs of the blog. Empty leaves them relative.
+      - SITE_URL=${SITE_URL:-}
     labels:
       # Tells Coolify this service is built from the repository Dockerfile.
       - coolify.managed=true

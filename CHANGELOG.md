@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.75.1
+
+### Thin sites: QA gate, SITE_URL, and generate on vendored scripts
+
+- **Fixed: the QA compose did not pass `HTTP_BASIC_CREDENTIALS` to the app.**
+  Its header documented the gate, but the app never saw the variable, so a
+  thin site's QA answered without a password and without
+  `X-Robots-Tag: noindex`, even when the variable was set.
+- **Fixed: the QA and production composes did not pass `SITE_URL` to the
+  app.** The core blog reads it for canonical links and absolute `og:image`
+  URLs; without it they stayed relative.
+- **Fixed: `gosite generate` checked the whole site for `__NAME__`
+  placeholders.** A vendored script under `static/` with such a token (for
+  example `__REDUX_DEVTOOLS_EXTENSION_COMPOSE__`) stopped every generate.
+  Only the files generate renders are checked now, and they are checked
+  before any of them reaches the site: a failed render writes nothing.
+- **Upgrade:** see MIGRATIONS (→ 0.75.1).
+
 ## 0.75.0
 
 ### Forms: everything a site does goes through the addon

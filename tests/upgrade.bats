@@ -229,3 +229,12 @@ EOF
   [ ! -e "${STUBS}/go.log" ]
   [ -z "$(ls -A "${TMPDIR}")" ]
 }
+
+@test "generate: a __NAME__ token in the site's own files does not stop it" {
+  mkdir -p "${SITE}/static/js/vendor"
+  printf 'var c = window.__REDUX_DEVTOOLS_EXTENSION_COMPOSE__ || f;\n' > "${SITE}/static/js/vendor/lib.min.js"
+  run bash "${GOSITE_ROOT}/main.sh" generate "${SITE}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" != *"Unresolved placeholder"* ]]
+  grep -q __REDUX_DEVTOOLS_EXTENSION_COMPOSE__ "${SITE}/static/js/vendor/lib.min.js"
+}

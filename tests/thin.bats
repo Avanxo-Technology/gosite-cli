@@ -394,3 +394,21 @@ make_site_addon() {
   svc="$(awk '/^  [^ #]/ { s = $1 } /RECAPTCHA_SECRET_KEY: / { print s }' "${F}")"
   [ "${svc}" = "cms:" ]
 }
+
+@test "the QA app gets HTTP_BASIC_CREDENTIALS, the gate core reads" {
+  local svc
+  cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.qa.yml" "${F}"
+  _thin_filter_addon_blocks "${F}"
+  svc="$(awk '/^  [^ #]/ { s = $1 } /- HTTP_BASIC_CREDENTIALS=/ { print s }' "${F}")"
+  [ "${svc}" = "__PROJECT__-qa-app:" ]
+}
+
+@test "the QA and production apps get SITE_URL, which the core blog reads" {
+  local env svc
+  for env in qa prod; do
+    cp "${GOSITE_ROOT}/templates-thin/generated/docker-compose.${env}.yml" "${F}"
+    _thin_filter_addon_blocks "${F}"
+    svc="$(awk '/^  [^ #]/ { s = $1 } /- SITE_URL=/ { print s }' "${F}")"
+    [ "${svc}" = "__PROJECT__-${env}-app:" ]
+  done
+}
