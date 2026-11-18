@@ -3,10 +3,19 @@ package gosite
 import (
 	"bytes"
 	"context"
+	"errors"
 	"maps"
 	"net/http"
 	"time"
+
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/cache"
+	"github.com/labstack/echo/v5"
 )
+
+// ErrNotFound is what a CachedRender build returns for content that does not
+// exist (an unknown slug): the page answers 404 at once, nothing is cached,
+// and no stale copy is served.
+var ErrNotFound = errors.New("gosite: not found")
 
 // Page is what every template a site renders through core receives. Its field
 // names are the contract with templates: {{.Title}}, {{index .Content "hero"}}.
@@ -66,11 +75,17 @@ func (s *Server) cachedRender(c *Context, name string, build func(ctx context.Co
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		p, err := build(ctx)
+		if errors.Is(err, ErrNotFound) {
+			return nil, cache.Permanent(err)
+		}
 		if err != nil {
 			return nil, err
 		}
 		return s.renderBytes(c, name, p)
 	})
+	if errors.Is(err, ErrNotFound) {
+		return echo.ErrNotFound
+	}
 	if err != nil {
 		return s.core.Handlers.Reply(c).Fail(http.StatusBadGateway, "could not load the page", err)
 	}

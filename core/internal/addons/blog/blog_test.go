@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/labstack/echo/v5"
 
@@ -26,6 +28,10 @@ func fakeCockpit(t *testing.T, posts []map[string]any) *httptest.Server {
 	blogs := []map[string]any{
 		{"_id": "b1", "title": "Noticias", "slug": "noticias", "description": "Lo último"},
 		{"_id": "b2", "title": "Casos", "slug": "casos"},
+	}
+	categories := []map[string]any{
+		{"_id": "c1", "title": "Maquinaria", "slug": "maquinaria"},
+		{"_id": "c2", "title": "Obras", "slug": "obras"},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +52,8 @@ func fakeCockpit(t *testing.T, posts []map[string]any) *httptest.Server {
 			source = blogs
 		case strings.HasSuffix(r.URL.Path, "/blogPosts"):
 			source = posts
+		case strings.HasSuffix(r.URL.Path, "/blogCategories"):
+			source = categories
 		default:
 			w.WriteHeader(404)
 			return
@@ -59,10 +67,18 @@ func fakeCockpit(t *testing.T, posts []map[string]any) *httptest.Server {
 					continue
 				}
 				got := item[k]
-				if k == "blog._id" {
-					if b, isMap := item["blog"].(map[string]any); isMap {
-						got = b["_id"]
+				if ref, field, dotted := strings.Cut(k, "."); dotted {
+					got = nil
+					if b, isMap := item[ref].(map[string]any); isMap {
+						got = b[field]
 					}
+				}
+				if op, isOp := v.(map[string]any); isOp {
+					if ne, has := op["$ne"]; has && fmt.Sprint(got) == fmt.Sprint(ne) {
+						ok = false
+						break
+					}
+					continue
 				}
 				if fmt.Sprint(got) != fmt.Sprint(v) {
 					ok = false
@@ -72,6 +88,19 @@ func fakeCockpit(t *testing.T, posts []map[string]any) *httptest.Server {
 			if ok {
 				matched = append(matched, item)
 			}
+		}
+
+		// Sort like Cockpit for the one key the blog sorts by.
+		var sortSpec map[string]int
+		json.Unmarshal([]byte(q.Get("sort")), &sortSpec)
+		if dir, ok := sortSpec["publishedAt"]; ok {
+			sort.SliceStable(matched, func(i, j int) bool {
+				a, b := fmt.Sprint(matched[i]["publishedAt"]), fmt.Sprint(matched[j]["publishedAt"])
+				if dir < 0 {
+					return a > b
+				}
+				return a < b
+			})
 		}
 
 		skip, limit := 0, len(matched)
@@ -296,5 +325,138 @@ func TestProjectPageWinsOverABlogSlug(t *testing.T) {
 	rec := get(t, e, "/noticias")
 	if !strings.Contains(rec.Body.String(), "THE PROJECT PAGE") {
 		t.Errorf("the blog shadowed the project's own page: %.80s", rec.Body.String())
+	}
+}
+
+// categorizedPosts: five articles in "maquinaria" (newest last), one in
+// "obras", one without a category.
+func categorizedPosts() []map[string]any {
+	maq := map[string]any{"_id": "c1", "title": "Maquinaria", "slug": "maquinaria"}
+	posts := []map[string]any{}
+	for i := 1; i <= 5; i++ {
+		posts = append(posts, map[string]any{
+			"_id": fmt.Sprintf("m%d", i), "title": fmt.Sprintf("Maq %d", i), "slug": fmt.Sprintf("maq-%d", i),
+			"body": "<p>" + strings.Repeat("palabra ", 450) + "</p>", "publishedAt": fmt.Sprintf("2026-08-0%d", i),
+			"_modified": float64(1790000000 + i),
+			"blog":      map[string]any{"_id": "b1", "slug": "noticias"}, "category": maq,
+		})
+	}
+	posts = append(posts,
+		map[string]any{"_id": "o1", "title": "Obra 1", "slug": "obra-1", "body": "<p>corto</p>",
+			"blog": map[string]any{"_id": "b1", "slug": "noticias"}, "category": map[string]any{"_id": "c2", "title": "Obras", "slug": "obras"}},
+		map[string]any{"_id": "s1", "title": "Suelto", "slug": "suelto", "body": "<p>sin categoría</p>",
+			"blog": map[string]any{"_id": "b1", "slug": "noticias"}},
+		map[string]any{"_id": "h1", "title": "Oculto", "slug": "oculto", "body": "<p>noindex</p>", "seoNoIndex": true,
+			"blog": map[string]any{"_id": "b1", "slug": "noticias"}},
+	)
+	return posts
+}
+
+func TestCategoryPage(t *testing.T) {
+	e := newApp(t, categorizedPosts())
+
+	rec := get(t, e, "/noticias/category/maquinaria")
+	if rec.Code != 200 {
+		t.Fatalf("category page = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Maq 1") || strings.Contains(body, "Obra 1") || strings.Contains(body, "Suelto") {
+		t.Errorf("category page must list only its articles:\n%s", body)
+	}
+	if !strings.Contains(body, "Maquinaria | Noticias") {
+		t.Error("the title does not name the category")
+	}
+	if code := get(t, e, "/noticias/category/no-existe").Code; code != 404 {
+		t.Errorf("unknown category = %d, want 404", code)
+	}
+	if code := get(t, e, "/no-existe/category/maquinaria").Code; code != 404 {
+		t.Errorf("unknown blog = %d, want 404", code)
+	}
+}
+
+func TestTrailingSlashServesTheSamePage(t *testing.T) {
+	e := newApp(t, categorizedPosts())
+	for _, path := range []string{"/noticias", "/noticias/maq-1", "/noticias/category/maquinaria"} {
+		plain, slashed := get(t, e, path), get(t, e, path+"/")
+		if plain.Code != 200 || slashed.Code != 200 || plain.Body.String() != slashed.Body.String() {
+			t.Errorf("%s = %d, %s/ = %d; want both 200 with the same body", path, plain.Code, path, slashed.Code)
+		}
+	}
+}
+
+func TestArticleReadingTimeAndRelated(t *testing.T) {
+	e := newApp(t, categorizedPosts())
+
+	body := get(t, e, "/noticias/maq-1").Body.String()
+	// 450 words at 200 per minute, rounded up.
+	if !strings.Contains(body, "3 min de lectura") {
+		t.Errorf("reading time missing:\n%s", body)
+	}
+	related := body[strings.Index(body, "Artículos relacionados"):]
+	for _, want := range []string{"Maq 5", "Maq 4", "Maq 3"} {
+		if !strings.Contains(related, want) {
+			t.Errorf("related lacks %s", want)
+		}
+	}
+	if strings.Contains(related, "Maq 2") || strings.Contains(related, ">Maq 1<") || strings.Contains(related, "Obra 1") {
+		t.Errorf("related must be the 3 newest of the same category, without the article:\n%s", related)
+	}
+	if !strings.Contains(body, `href="/noticias/category/maquinaria"`) {
+		t.Error("the category does not link to its page")
+	}
+
+	body = get(t, e, "/noticias/suelto").Body.String()
+	if strings.Contains(body, "Artículos relacionados") || !strings.Contains(body, "1 min de lectura") {
+		t.Errorf("an article without category has no related list and at least 1 minute:\n%s", body)
+	}
+}
+
+func TestBlogInSitemap(t *testing.T) {
+	e := newApp(t, categorizedPosts())
+	body := get(t, e, "/sitemap.xml").Body.String()
+	for _, want := range []string{
+		"<loc>https://example.com/noticias</loc>",
+		"<loc>https://example.com/casos</loc>",
+		"<loc>https://example.com/noticias/maq-3</loc>\n    <lastmod>2026-09-21T14:13:23Z</lastmod>",
+		"<loc>https://example.com/noticias/suelto</loc>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sitemap lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "/noticias/oculto") {
+		t.Error("an article marked seoNoIndex is in the sitemap")
+	}
+}
+
+func TestBlogPagesCarrySiteData(t *testing.T) {
+	cms := fakeCockpit(t, categorizedPosts())
+	cfg := config.Config{CockpitURL: cms.URL, CockpitToken: testToken, RedisURL: testRedisURL(t), Environment: "production", SiteURL: "https://example.com"}
+	enabled, err := addon.Resolve([]string{"Blog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theme := fstest.MapFS{
+		"layout.html":     {Data: []byte(`{{define "layout"}}{{template "content" .}}{{end}}`)},
+		"pages/home.html": {Data: []byte(`{{define "content"}}home{{end}}`)},
+		// The cache refuses pages under 1 KB, so the page carries padding
+		// (visible text: html/template drops comments).
+		"pages/blog-index.html": {Data: []byte(`{{define "content"}}[{{.Header}}|{{.Title}}]<p>` + strings.Repeat("x", 1100) + `</p>{{end}}`)},
+	}
+	a, err := app.NewApp(cfg, testLogger(), views.WithPages(enabled[0].Pages), views.WithTheme(theme))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { a.Close() })
+	a.Redis.FlushDB(t.Context())
+	a.Handlers.SetSiteData(func(_ *echo.Context, page string) map[string]any {
+		// Title collides with the blog's own key: the blog's must win.
+		return map[string]any{"Header": "site header for " + page, "Title": "site title"}
+	})
+	e := app.NewRouter(a, app.RouterOptions{Mounts: []func(*echo.Echo, *handlers.Handlers){enabled[0].Mount}})
+
+	body, _, _ := strings.Cut(get(t, e, "/noticias").Body.String(), "<p>")
+	if body != "[site header for blog-index|Noticias]" {
+		t.Errorf("body = %q, want the site's Header and the blog's Title", body)
 	}
 }

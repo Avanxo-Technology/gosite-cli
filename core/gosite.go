@@ -31,6 +31,7 @@ import (
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/addon"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/app"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/config"
+	"github.com/Avanxo-Technology/gosite-cli/core/internal/seo"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/siteconfig"
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/views"
 
@@ -73,6 +74,21 @@ type TemplateDataer interface {
 // dropped its own cache keys.
 type Purger interface {
 	OnPurge(ctx context.Context) error
+}
+
+// SitemapEntry is one URL a site adds to /sitemap.xml. LastMod, when set, is
+// written as <lastmod>.
+type SitemapEntry struct {
+	Path    string
+	LastMod time.Time
+}
+
+// Sitemapper is implemented by a site whose pages are not all in seoPages,
+// such as a catalog with one page per CMS entry. Its entries are listed
+// after the seoPages entries; a path already listed is not repeated. It runs
+// on every /sitemap.xml request, so it should read what it needs and no more.
+type Sitemapper interface {
+	SitemapEntries(ctx context.Context) []SitemapEntry
 }
 
 // Core route names accepted by WithoutRoutes.
@@ -237,8 +253,19 @@ func New(site App, opts ...Option) (*Server, error) {
 	if p, ok := site.(Purger); ok {
 		core.Handlers.AfterPurge(p.OnPurge)
 	}
+	if sm, ok := site.(Sitemapper); ok {
+		core.Handlers.OnSitemap(func(ctx context.Context) []seo.SitemapEntry {
+			entries := sm.SitemapEntries(ctx)
+			out := make([]seo.SitemapEntry, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, seo.SitemapEntry{Path: e.Path, LastMod: e.LastMod})
+			}
+			return out
+		})
+	}
 	if d, ok := site.(TemplateDataer); ok {
 		s.templateData = d
+		core.Handlers.SetSiteData(d.TemplateData)
 	}
 
 	r := &router{state: newState(core.Redis, cfg.StateKeyPrefix()), cms: core.Handlers.CMS, server: s}

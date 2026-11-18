@@ -3,12 +3,15 @@
 package cms
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Avanxo-Technology/gosite-cli/core/internal/config"
@@ -71,6 +74,19 @@ func (c *Client) Singleton(ctx context.Context, name string) Content {
 // serving 502 instead of its own placeholder text.
 var ErrNotFound = errors.New("cockpit: not found")
 
+// ErrUnpublished means the item exists in Cockpit but is not published: an
+// editor took the page offline. It also matches ErrNotFound, so a caller that
+// treats "not there" as empty keeps working.
+var ErrUnpublished = errors.New("cockpit: unpublished")
+
+type unpublishedErr struct{}
+
+func (unpublishedErr) Error() string { return ErrUnpublished.Error() }
+
+func (unpublishedErr) Is(target error) bool {
+	return target == ErrUnpublished || target == ErrNotFound
+}
+
 // SingletonErr is Singleton for callers that need to tell those cases apart.
 // Singleton itself keeps swallowing the error, so existing callers are
 // unaffected.
@@ -81,7 +97,13 @@ func (c *Client) SingletonErr(ctx context.Context, name string) (Content, error)
 	if err != nil {
 		return Content{}, err
 	}
-	return v.(Content), nil
+	content := v.(Content)
+	// Cockpit 2.14.0 still returns an unpublished singleton, with _state 0;
+	// 2.14.1 answers it with an empty 404 (fetch). Both mean offline.
+	if state, ok := content["_state"].(float64); ok && state != 1 {
+		return Content{}, fmt.Errorf("%w: /api/content/item/%s", unpublishedErr{}, name)
+	}
+	return content, nil
 }
 
 func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
@@ -99,6 +121,14 @@ func (c *Client) fetch(ctx context.Context, path string) (Content, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusNotFound {
+		// Cockpit 2.14.1 answers an unpublished singleton with a bare 404 and
+		// no body; a model that does not exist answers 404 with a JSON error.
+		// Only the first means "there, but offline".
+		var body bytes.Buffer
+		io.CopyN(&body, res.Body, 512)
+		if strings.TrimSpace(body.String()) == "" {
+			return nil, fmt.Errorf("%w: %s", unpublishedErr{}, path)
+		}
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, path)
 	}
 

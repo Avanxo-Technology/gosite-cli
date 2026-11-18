@@ -18,7 +18,8 @@
 		<div class="mt-2 flex gap-3 text-sm text-slate-500">
 			{{with .Post.publishedAt}}<time>{{.}}</time>{{end}}
 			{{with .Author}}{{with .name}}<span>{{.}}</span>{{end}}{{end}}
-			{{with .Post.category}}{{with .title}}<span class="rounded bg-slate-100 px-2">{{.}}</span>{{end}}{{end}}
+			{{with .Post.category}}{{with .title}}{{if $.Post.category.slug}}<a class="rounded bg-slate-100 px-2 hover:underline" href="/{{$.Blog.slug}}/category/{{$.Post.category.slug}}">{{.}}</a>{{else}}<span class="rounded bg-slate-100 px-2">{{.}}</span>{{end}}{{end}}{{end}}
+			{{with .ReadingTime}}<span>{{.}} min de lectura</span>{{end}}
 		</div>
 	</header>
 
@@ -40,4 +41,18 @@
 	</footer>
 	{{end}}
 </article>
+
+{{with .Related}}
+<aside class="mt-12 border-t border-slate-200 pt-6">
+	<h2 class="text-xl font-bold tracking-tight">Artículos relacionados</h2>
+	<ul class="mt-2 space-y-8">
+		{{range .}}
+		<li>
+			<a class="font-medium hover:underline" href="/{{$.Blog.slug}}/{{.slug}}">{{.title}}</a>
+			{{with .excerpt}}<p class="mt-1 text-sm text-slate-600">{{.}}</p>{{end}}
+		</li>
+		{{end}}
+	</ul>
+</aside>
+{{end}}
 {{end}}

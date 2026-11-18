@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.76.0
+
+### Sitemap entries from the site, and a fuller blog
+
+- **Added: `gosite.Sitemapper`** (core). A site adds `SitemapEntry{Path,
+  LastMod}` URLs to `/sitemap.xml` (a catalog with one page per CMS entry),
+  after the `seoPages` entries, each path once.
+- **Added: blog category pages**, `/:blog/category/:slug` (the index with one
+  category's articles; 404 for an unknown category).
+- **Added: reading time and related articles** on the blog article page
+  (`ReadingTime`, `Related`: up to 3 of the same category, newest first). The
+  default page shows both and links the category.
+- **Added: blog routes answer with a trailing slash**, with the same page, so
+  old WordPress links keep working.
+- **Added: the blog's index and published articles are in `/sitemap.xml`**,
+  articles with their last-modified time.
+- **Changed: blog pages get the site's `TemplateData`** (for example its
+  header and footer), under the blog's own keys.
+- **Added: `cms.ErrUnpublished`.** `SingletonErr` returns it (it also matches
+  `cms.ErrNotFound`) for a singleton an editor unpublished: Cockpit 2.14.1
+  answers those with an empty 404, and a missing model with a JSON one.
+- **Added: `cms.Submission.Fields`**, extra form data of any JSON value (an
+  object, a number), merged over `Data`.
+- **Added: `gosite.ErrNotFound`.** A `CachedRender` build that returns it (an
+  unknown slug) answers 404 at once, caching nothing.
+- **Fixed: a missing blog article took 9 seconds to answer 404.** The cache
+  retried the "not found" like a CMS outage. Not-found errors are no longer
+  retried, and no stale copy is served for them.
+- **Upgrade:** see MIGRATIONS (→ 0.76.0).
+
 ## 0.75.2
 
 ### gosite.yml readable in the app image

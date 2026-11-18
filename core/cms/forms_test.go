@@ -145,3 +145,61 @@ func TestFormSettingsOldAddonIsNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSingletonErrTellsUnpublishedFromMissing(t *testing.T) {
+	cases := []struct {
+		name        string
+		body        string
+		unpublished bool
+	}{
+		{"unpublished singleton (bare 404)", "", true},
+		{"model that does not exist", `{"error":"Model <home> not found"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := formsServer(t, http.StatusNotFound, tc.body)
+			_, err := c.SingletonErr(t.Context(), "home")
+			if !errors.Is(err, ErrNotFound) {
+				t.Fatalf("err = %v, want it to match ErrNotFound", err)
+			}
+			if got := errors.Is(err, ErrUnpublished); got != tc.unpublished {
+				t.Errorf("errors.Is(err, ErrUnpublished) = %v, want %v", got, tc.unpublished)
+			}
+		})
+	}
+}
+
+func TestSubmitFieldsKeepTheirJSONShape(t *testing.T) {
+	c, calls := formsServer(t, http.StatusOK, `{"success":true,"_id":"x"}`)
+	_, err := c.Submit(t.Context(), Submission{
+		Form:   "calculadora",
+		Data:   map[string]string{"nombre": "Ana", "equipo": "cat-320"},
+		Fields: map[string]any{"calculator_data": map[string]any{"horas": 8, "tarifa": 120.5}, "equipo": "cat-950"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := (*calls)[0].body["data"].(map[string]any)
+	calc, isObject := data["calculator_data"].(map[string]any)
+	if !isObject || calc["horas"] != float64(8) {
+		t.Errorf("calculator_data = %#v, want the object", data["calculator_data"])
+	}
+	if data["nombre"] != "Ana" || data["equipo"] != "cat-950" {
+		t.Errorf("data = %v; Fields must merge over Data", data)
+	}
+}
+
+func TestSingletonErrReadsAnUnpublishedState(t *testing.T) {
+	c, _ := formsServer(t, http.StatusOK, `{"_state":0,"hero":"x"}`)
+	if _, err := c.SingletonErr(t.Context(), "home"); !errors.Is(err, ErrUnpublished) {
+		t.Fatalf("err = %v, want ErrUnpublished for _state 0 (Cockpit 2.14.0)", err)
+	}
+	c, _ = formsServer(t, http.StatusOK, `{"_state":1,"hero":"x"}`)
+	if content, err := c.SingletonErr(t.Context(), "home"); err != nil || content["hero"] != "x" {
+		t.Fatalf("published: content %v, err %v", content, err)
+	}
+	c, _ = formsServer(t, http.StatusOK, `{"hero":"x"}`)
+	if _, err := c.SingletonErr(t.Context(), "home"); err != nil {
+		t.Fatalf("no _state means published: %v", err)
+	}
+}

@@ -2,6 +2,7 @@ package gosite
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
@@ -388,5 +389,86 @@ func TestSiteFuncNamedLikeCoreFailsStartup(t *testing.T) {
 				t.Fatalf("err = %v, want an error naming %q", err, tc.want)
 			}
 		})
+	}
+}
+
+type sitemapSite struct {
+	testSite
+	entries []SitemapEntry
+}
+
+func (s *sitemapSite) SitemapEntries(context.Context) []SitemapEntry { return s.entries }
+
+// sitemapCMS answers the webapp singleton (siteUrl) and a seoPages collection.
+func sitemapCMS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/item/webapp"):
+		w.Write([]byte(`{"siteUrl":"https://example.com"}`))
+	case strings.Contains(r.URL.Path, "/items/seoPages"):
+		w.Write([]byte(`{"data":[{"path":"/nosotros","_modified":1700000000}],"meta":{"total":1}}`))
+	default:
+		w.Write([]byte(`{}`))
+	}
+}
+
+func TestSitemapperAddsEntries(t *testing.T) {
+	site := &sitemapSite{entries: []SitemapEntry{
+		{Path: "/maquinaria/cat-320", LastMod: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)},
+		{Path: "/nosotros"}, // already in seoPages: listed once, as seoPages has it
+		{Path: "/equipos"},
+	}}
+	s, _ := newTestServerCMS(t, site, sitemapCMS)
+	body := do(t, s, http.MethodGet, "/sitemap.xml", "").Body.String()
+
+	if !strings.Contains(body, "<loc>https://example.com/maquinaria/cat-320</loc>\n    <lastmod>2026-11-01T10:00:00Z</lastmod>") {
+		t.Errorf("site entry with lastmod missing:\n%s", body)
+	}
+	if n := strings.Count(body, "<loc>https://example.com/nosotros</loc>"); n != 1 {
+		t.Errorf("/nosotros listed %d times, want 1:\n%s", n, body)
+	}
+	if !strings.Contains(body, "<loc>https://example.com/nosotros</loc>\n    <lastmod>2023-11-14T22:13:20Z</lastmod>") {
+		t.Errorf("/nosotros should keep the seoPages lastmod:\n%s", body)
+	}
+	if strings.Index(body, "/nosotros") > strings.Index(body, "/maquinaria/cat-320") {
+		t.Errorf("seoPages entries should come before the site's:\n%s", body)
+	}
+}
+
+func TestSitemapWithoutSitemapper(t *testing.T) {
+	s, _ := newTestServerCMS(t, &testSite{}, sitemapCMS)
+	body := do(t, s, http.MethodGet, "/sitemap.xml", "").Body.String()
+	if strings.Count(body, "<url>") != 2 {
+		t.Errorf("want / and /nosotros only:\n%s", body)
+	}
+}
+
+func TestCachedRenderNotFoundIsAQuick404(t *testing.T) {
+	site := &testSite{}
+	calls := 0
+	site.routes = func(r Router) {
+		r.GET("/maquinaria/:slug", func(c *Context) error {
+			return r.CachedRender(c, "about", func(context.Context) (Page, error) {
+				calls++
+				return Page{}, fmt.Errorf("machine %q: %w", c.Param("slug"), ErrNotFound)
+			})
+		})
+	}
+	s, mr := newTestServer(t, site)
+	start := time.Now()
+	rec := do(t, s, http.MethodGet, "/maquinaria/no-existe", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", rec.Code)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("took %s: a missing page must not wait for the cache's retries", elapsed)
+	}
+	if calls != 1 {
+		t.Errorf("build ran %d times, want 1", calls)
+	}
+	for _, k := range mr.Keys() {
+		if strings.Contains(k, ":cache:page:") {
+			t.Errorf("a 404 must not cache the page, found %s", k)
+		}
 	}
 }

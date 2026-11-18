@@ -29,8 +29,11 @@ type Recaptcha struct {
 // of the form's hidden _hp field: a non-empty one makes the addon drop the
 // submission while it answers as if it had stored it.
 type Submission struct {
-	Form      string
-	Data      map[string]string
+	Form string
+	Data map[string]string
+	// Fields are extra data fields of any JSON value (an object, a number),
+	// merged over Data. The Forms addon keeps nested objects two levels deep.
+	Fields    map[string]any
 	Honeypot  string
 	Recaptcha *Recaptcha
 }
@@ -52,7 +55,14 @@ type formsReply struct {
 // form's notifications. It returns the stored entry's ID, which is empty when
 // the honeypot was filled. A reCAPTCHA refusal is ErrRecaptcha.
 func (c *Client) Submit(ctx context.Context, s Submission) (string, error) {
-	body := map[string]any{"form": s.Form, "data": s.Data, "_hp": s.Honeypot}
+	data := make(map[string]any, len(s.Data)+len(s.Fields))
+	for k, v := range s.Data {
+		data[k] = v
+	}
+	for k, v := range s.Fields {
+		data[k] = v
+	}
+	body := map[string]any{"form": s.Form, "data": data, "_hp": s.Honeypot}
 	if s.Recaptcha != nil {
 		body["recaptcha"] = s.Recaptcha
 	}

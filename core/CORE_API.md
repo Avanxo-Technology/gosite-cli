@@ -41,6 +41,7 @@ type App interface { Routes(r Router) }
 type Middlewarer    interface { Middleware() []Middleware }
 type TemplateDataer interface { TemplateData(c *Context, page string) map[string]any }
 type Purger         interface { OnPurge(ctx context.Context) error }
+type Sitemapper     interface { SitemapEntries(ctx context.Context) []SitemapEntry } // since 0.76.0
 ```
 
 - **Middleware** runs after core's own (recover, request log, gzip, asset
@@ -50,6 +51,11 @@ type Purger         interface { OnPurge(ctx context.Context) error }
   it must not depend on who is visiting.
 - **OnPurge** runs once after every successful purge, after core has dropped
   its cache keys.
+- **SitemapEntries** adds `SitemapEntry{Path, LastMod}` URLs to `/sitemap.xml`,
+  after the `seoPages` entries; a path already listed is not repeated. It runs
+  on every sitemap request: read what it needs and no more.
+- **TemplateData** also reaches the core blog's pages (since 0.76.0), under the
+  blog's own keys.
 
 `Context`, `HandlerFunc` and `Middleware` are aliases of Echo v5's types.
 
@@ -66,8 +72,15 @@ CachedRender(c *Context, page string, build func(ctx context.Context) (Page, err
 
 - Routes register after core's and after addons', so a site route on a path
   core serves **replaces** core's handler.
+- `cms.Client.SingletonErr` returns an error matching `cms.ErrUnpublished` (and
+  `cms.ErrNotFound`) when the singleton exists but is not published, so a site
+  can answer 404 for a page an editor took offline (since 0.76.0).
 - `CMS()` is the only way to read content. Core has no MongoDB reader and its
   tests fail if a Mongo driver is ever added to the module.
+- A `CachedRender` build that returns an error wrapping `gosite.ErrNotFound`
+  (an unknown slug) answers 404 at once: no retries, nothing cached, no stale
+  copy (since 0.76.0). Any other error is retried for up to 10 seconds, then
+  the stale copy or a 502.
 - `CachedRender` keys pages by URL under `<project>:<env>:cache:page:` (`<env>` is `APP_ENV`, omitted when empty); every purge
   clears them. A failed build is never cached, and a stale copy is served
   instead when one exists.
@@ -91,7 +104,7 @@ under `/static/` comes from the site's `static/` directory.
 `formSubmissions` through the content API.
 
 ```go
-(*cms.Client).Submit(ctx, cms.Submission{Form, Data, Honeypot, Recaptcha}) (id string, err error)
+(*cms.Client).Submit(ctx, cms.Submission{Form, Data, Fields, Honeypot, Recaptcha}) (id string, err error) // Fields (since 0.76.0): any JSON value, merged over Data
 (*cms.Client).UpdateSubmission(ctx, id, fields map[string]string, rc *cms.Recaptcha) error
 (*cms.Client).FormSettings(ctx, form) (cms.FormSettings, error) // Label, FieldOptions
 cms.ErrRecaptcha // the addon refused the reCAPTCHA token; nothing was stored
@@ -176,6 +189,16 @@ gositetest.ThemeProblems(theme, opts...) // the same, as a list
 gositetest.WithFuncs(funcs)              // the map the site passes to gosite.WithFuncs
 gositetest.CheckCommercePages(t, theme) // the Commerce addon's pages render
 ```
+
+## Blog addon
+
+Routes, each also with a trailing slash (same answer): `/:blog`,
+`/:blog/:slug`, `/:blog/category/:slug` (since 0.76.0, 404 for an unknown blog
+or category). Pages `blog-index` (`Blog`, `Category`, `Posts`, `Page`,
+`HasMore`, `PrevURL`, `NextURL`, `Total`, `Meta`) and `blog-article` (`Blog`,
+`Post`, `Author`, `ReadingTime` minutes, `Related` up to 3 articles of the same
+category, `SEOData`, `Meta`). Every blog index and published article is in
+`/sitemap.xml`. A theme page with the same name replaces the default one.
 
 ## Commerce addon contract
 

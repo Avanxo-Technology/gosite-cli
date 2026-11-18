@@ -31,6 +31,21 @@ const renderRetryDelay = 1 * time.Second
 // told the truth; holding a request open longer helps nobody.
 const renderMaxWait = 10 * time.Second
 
+// Permanent marks a render error that retrying cannot fix, such as content
+// that does not exist: the cache returns it at once and does not fall back to
+// the stale copy, which would keep serving something that is gone.
+func Permanent(err error) error { return permanentErr{err} }
+
+type permanentErr struct{ error }
+
+func (e permanentErr) Unwrap() error { return e.error }
+
+// IsPermanent reports whether err, or an error it wraps, came from Permanent.
+func IsPermanent(err error) bool {
+	var p permanentErr
+	return errors.As(err, &p)
+}
+
 // minRenderSize is the smallest a rendered page can plausibly be. A page with
 // its layout, navigation and footer is comfortably over a kilobyte, so anything
 // shorter is a render that "succeeded" against empty CMS content - a broken
@@ -140,6 +155,10 @@ func (c *Cache) html(ctx context.Context, key string, render func() ([]byte, err
 			}
 
 			lastErr = err
+
+			if IsPermanent(err) {
+				return nil, err
+			}
 
 			if time.Now().Add(renderRetryDelay).After(deadline) {
 				break

@@ -1,6 +1,10 @@
 package cache
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
 
 // A purge must not remove the stale copies. They are what a failed re-render
 // falls back on, and a purge is precisely when that happens: the CMS may still
@@ -33,5 +37,18 @@ func TestGroupPurgeKeepsStaleCopies(t *testing.T) {
 func TestStaleKeyMatchesSuffix(t *testing.T) {
 	if purges(staleKey("site:home_html"), false) {
 		t.Error("a key built by staleKey must be recognised as stale by the purge filter")
+	}
+}
+
+func TestPermanentSurvivesWrapping(t *testing.T) {
+	base := errors.New("not found")
+	if !IsPermanent(fmt.Errorf("article: %w", Permanent(base))) {
+		t.Error("a wrapped permanent error is not recognised")
+	}
+	if !errors.Is(Permanent(base), base) {
+		t.Error("Permanent hides the error it wraps")
+	}
+	if IsPermanent(base) {
+		t.Error("an ordinary error is reported permanent")
 	}
 }
