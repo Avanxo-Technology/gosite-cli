@@ -168,3 +168,23 @@ func TestSingletonErrTellsUnpublishedFromMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestSubmitFieldsKeepTheirJSONShape(t *testing.T) {
+	c, calls := formsServer(t, http.StatusOK, `{"success":true,"_id":"x"}`)
+	_, err := c.Submit(t.Context(), Submission{
+		Form:   "calculadora",
+		Data:   map[string]string{"nombre": "Ana", "equipo": "cat-320"},
+		Fields: map[string]any{"calculator_data": map[string]any{"horas": 8, "tarifa": 120.5}, "equipo": "cat-950"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := (*calls)[0].body["data"].(map[string]any)
+	calc, isObject := data["calculator_data"].(map[string]any)
+	if !isObject || calc["horas"] != float64(8) {
+		t.Errorf("calculator_data = %#v, want the object", data["calculator_data"])
+	}
+	if data["nombre"] != "Ana" || data["equipo"] != "cat-950" {
+		t.Errorf("data = %v; Fields must merge over Data", data)
+	}
+}

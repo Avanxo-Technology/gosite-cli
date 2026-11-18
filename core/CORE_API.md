@@ -104,7 +104,7 @@ under `/static/` comes from the site's `static/` directory.
 `formSubmissions` through the content API.
 
 ```go
-(*cms.Client).Submit(ctx, cms.Submission{Form, Data, Honeypot, Recaptcha}) (id string, err error)
+(*cms.Client).Submit(ctx, cms.Submission{Form, Data, Fields, Honeypot, Recaptcha}) (id string, err error) // Fields (since 0.76.0): any JSON value, merged over Data
 (*cms.Client).UpdateSubmission(ctx, id, fields map[string]string, rc *cms.Recaptcha) error
 (*cms.Client).FormSettings(ctx, form) (cms.FormSettings, error) // Label, FieldOptions
 cms.ErrRecaptcha // the addon refused the reCAPTCHA token; nothing was stored
